@@ -182,8 +182,33 @@ public class MenuItem
     public bool IsSweet { get; set; } = false;
     public string AddOns { get; set; } = "[]";
     public string CustomizationOptions { get; set; } = "[]";
+    public string Allergens { get; set; } = "[]";
+    public string? Ingredients { get; set; }
+    public string Portions { get; set; } = "[]"; // e.g. [{"name":"Half","price":140},{"name":"Full","price":240}]
+    public string DietaryTags { get; set; } = "[]"; // e.g. ["Vegan","Gluten-Free"]
+    public bool IsSpecial { get; set; } = false;
+    public int PrepTimeMinutes { get; set; } = 15;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+[Table("dining_sessions")]
+public class DiningSession
+{
+    [Key]
+    public Guid SessionId { get; set; } = Guid.NewGuid();
+    [Required]
+    public Guid RestaurantId { get; set; }
+    [Required]
+    public Guid TableId { get; set; }
+    [ForeignKey(nameof(TableId))]
+    public TableEntity? Table { get; set; }
+    [Required, MaxLength(50)]
+    public string SessionCode { get; set; } = string.Empty;
+    [Required, MaxLength(50)]
+    public string Status { get; set; } = "ACTIVE"; // ACTIVE, CLOSED
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? ClosedAt { get; set; }
 }
 
 [Table("orders")]
@@ -201,6 +226,9 @@ public class Order
     public Guid? TableId { get; set; }
     [ForeignKey(nameof(TableId))]
     public TableEntity? Table { get; set; }
+    public Guid? SessionId { get; set; }
+    [ForeignKey(nameof(SessionId))]
+    public DiningSession? Session { get; set; }
     [Required, MaxLength(50)]
     public string Source { get; set; } = OrderSources.DineInQr;
     [Required, MaxLength(50)]
@@ -215,6 +243,8 @@ public class Order
     public decimal DeliveryFee { get; set; }
     [Column(TypeName = "numeric(10,2)")]
     public decimal Total { get; set; }
+    public int EstimatedPrepTimeMinutes { get; set; } = 15;
+    public DateTime? EstimatedReadyAt { get; set; }
     public string? DeliveryAddress { get; set; }
     public string? CustomerName { get; set; }
     public string? CustomerPhone { get; set; }
@@ -336,6 +366,8 @@ public class HelpRequest
     public string? AssignedWaiterName { get; set; }
     [Required]
     public string Message { get; set; } = string.Empty;
+    [MaxLength(50)]
+    public string RequestType { get; set; } = "CUSTOM";
     [Required, MaxLength(50)]
     public string Status { get; set; } = "PENDING"; // PENDING, ASSIGNED, RESOLVED
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

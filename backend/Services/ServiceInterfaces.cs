@@ -38,6 +38,8 @@ public interface ITableService
     Task<TableDto?> GetTableByIdAsync(Guid tableId);
     Task<QrValidationResponse> ValidateQrAsync(string qrIdentifier);
     Task<bool> UpdateTableStatusAsync(Guid tableId, UpdateTableStatusRequest request);
+    Task<DiningSessionDto?> GetOrCreateActiveSessionAsync(Guid tableId);
+    Task<bool> CloseSessionAsync(Guid tableId);
 }
 
 public interface IHelpRequestService

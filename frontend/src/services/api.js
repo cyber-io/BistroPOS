@@ -107,6 +107,9 @@ function normalizeOrder(order) {
   return {
     ...order,
     customerName: order.customerName || (order.tableNumber ? tableTitle(order) : 'Guest'),
+    estimatedPrepTimeMinutes: order.estimatedPrepTimeMinutes ?? null,
+    estimatedReadyAt: order.estimatedReadyAt ?? null,
+    sessionId: order.sessionId ?? null,
     items: (order.items || []).map(item => ({
       ...item,
       name: item.name || item.itemName,
@@ -258,6 +261,8 @@ export const api = {
     if (/^\d+$/.test(String(tableId))) return (await api.getTables()).find(table => table.tableNumber === Number(tableId)) || null;
     return request(`/tables/${encodeURIComponent(tableId)}`);
   },
+  getTableSession: tableId => request(`/tables/${encodeURIComponent(tableId)}/session`),
+  closeTableSession: tableId => request(`/tables/${encodeURIComponent(tableId)}/session/close`, { method: 'POST' }),
   updateTableStatus: (tableId, status, customerName = null, assignedWaiterId = null) => request(`/tables/${tableId}/status`, { method: 'PUT', body: { status, customerName, assignedWaiterId } }).then(result => {
     broadcastEvent('TABLE_STATUS_UPDATED', { tableId, status, customerName });
     return result;
@@ -270,7 +275,13 @@ export const api = {
     vegNonveg: item.vegNonveg || item.vegNonVeg,
     image: item.image || '/images/bistro-hero-plate.png',
     addOns: parseJson(item.addOnsJson ?? item.addOns, []),
-    customizationOptions: parseJson(item.customizationOptionsJson ?? item.customizationOptions, [])
+    customizationOptions: parseJson(item.customizationOptionsJson ?? item.customizationOptions, []),
+    allergens: parseJson(item.allergensJson ?? item.allergens, []),
+    ingredients: item.ingredients || '',
+    portions: parseJson(item.portionsJson ?? item.portions, []),
+    dietaryTags: parseJson(item.dietaryTagsJson ?? item.dietaryTags, []),
+    isSpecial: Boolean(item.isSpecial),
+    prepTimeMinutes: Number(item.prepTimeMinutes || 15)
   })),
   updateItemAvailability: (menuItemId, availability) => request(`/menu/items/${menuItemId}/availability`, { method: 'PATCH', body: { availability } }).then(result => {
     broadcastEvent('FOOD_AVAILABILITY_CHANGED', { menuItemId, availability });
@@ -329,6 +340,7 @@ export const api = {
         restaurantId,
         customerId: null,
         tableId: details.tableId || null,
+        sessionId: details.sessionId || null,
         source: details.source,
         customerName: details.customerName || null,
         customerPhone: details.customerPhone || null,
@@ -339,7 +351,11 @@ export const api = {
         items: items.map(item => ({
           menuItemId: item.menuItemId,
           quantity: Number(item.quantity),
-          customizationJson: JSON.stringify({ ...(item.customization || {}), ...(item.addOns?.length ? { addOns: item.addOns.map(addOn => addOn.name) } : {}) }),
+          customizationJson: JSON.stringify({
+            ...(item.customization || {}),
+            ...(item.portion ? { portion: item.portion } : {}),
+            ...(item.addOns?.length ? { addOns: item.addOns.map(addOn => addOn.name) } : {})
+          }),
           specialInstruction: item.specialInstruction || ''
         }))
       }
@@ -405,10 +421,10 @@ export const api = {
     const results = await Promise.allSettled(stored(HELP_KEY).map(({ requestId, accessToken }) => request(`/help/${requestId}${query({ accessToken })}`)));
     return results.filter(result => result.status === 'fulfilled').map(result => result.value);
   },
-  createHelpRequest: async (tableNumber, message) => {
+  createHelpRequest: async (tableNumber, message, requestType = 'CUSTOM') => {
     const table = await api.getTableById(tableNumber);
     if (!table) throw new Error('This table could not be found. Please scan its QR code again.');
-    const result = await request('/help', { method: 'POST', body: { restaurantId, tableId: table.tableId, message, customerId: null } });
+    const result = await request('/help', { method: 'POST', body: { restaurantId, tableId: table.tableId, message, requestType, customerId: null } });
     if (result.accessToken) save(HELP_KEY, [{ requestId: result.requestId, accessToken: result.accessToken }, ...stored(HELP_KEY)].slice(0, 20));
     broadcastEvent('CUSTOMER_HELP_REQUEST', result);
     return result;

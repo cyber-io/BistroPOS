@@ -46,21 +46,22 @@
   position: relative;
   display: inline-flex;
   align-items: center;
-  width: 260px;
+  width: 240px;
   max-width: 100%;
 }
 
 .pos-plan-area-field .pos-select {
   width: 100%;
-  height: 40px;
-  min-height: 40px;
-  line-height: 38px;
-  padding: 0 36px 0 14px;
-  font-size: 13px;
-  font-weight: 500;
+  height: 38px;
+  min-height: 38px;
+  line-height: normal;
+  padding: 0 36px 0 14px !important;
+  font-size: 12px;
+  font-weight: 600;
   border: 1px solid var(--plan-border, var(--p-border));
-  border-radius: 9px;
+  border-radius: 8px;
   background: var(--p-card);
+  background-image: none !important;
   color: var(--p-text);
   appearance: none;
   -webkit-appearance: none;
@@ -68,6 +69,8 @@
   cursor: pointer;
   box-sizing: border-box;
   outline: none;
+  display: inline-flex;
+  align-items: center;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
@@ -82,15 +85,18 @@
 
 .pos-select-arrow {
   position: absolute;
-  right: 13px;
+  right: 12px;
   top: 50%;
   transform: translateY(-50%);
   pointer-events: none;
   color: var(--plan-muted, var(--p-muted));
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .pos-plan-area-count {
-  height: 40px;
+  height: 38px;
   display: inline-flex;
   align-items: center;
   color: var(--plan-muted);

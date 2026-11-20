@@ -211,11 +211,11 @@ export default function KitchenDashboard() {
         </footer>
       </article>)}
     </div>}
-    {rejectOrder && <Modal title={`Reject ${rejectOrder.orderNumber}`} onClose={() => { if (!busy) setRejectOrder(null); }}><div className="pos-modal-body"><p style={{ color: 'var(--p-muted)', fontSize: 11, lineHeight: 1.8, marginBottom: 18 }}>Let the customer know why their order cannot be prepared.</p><label className="pos-field">Reason<select value={reason} onChange={event => setReason(event.target.value)}><option>Ingredients out of stock</option><option>Kitchen at maximum capacity</option><option>Special request cannot be fulfilled</option><option>Kitchen closing shortly</option></select></label><button className="pos-button danger full" style={{ marginTop: 20 }} disabled={Boolean(busy)} onClick={() => transition(rejectOrder, 'CANCELLED', reason)}>{busy ? 'Saving…' : 'Confirm rejection'}</button></div></Modal>}
+    {rejectOrder && <Modal title={`Reject ${rejectOrder.orderNumber}`} onClose={() => { if (!busy) setRejectOrder(null); }}><div className="pos-modal-body"><p style={{ color: 'var(--p-muted)', fontSize: 11, lineHeight: 1.8, marginBottom: 18 }}>Let the customer know why their order cannot be prepared.</p><label className="pos-field"><span>Reason</span><select className="pos-select" style={{ width: '100%' }} value={reason} onChange={event => setReason(event.target.value)}><option>Ingredients out of stock</option><option>Kitchen at maximum capacity</option><option>Special request cannot be fulfilled</option><option>Kitchen closing shortly</option></select></label><button className="pos-button danger full" style={{ marginTop: 20 }} disabled={Boolean(busy)} onClick={() => transition(rejectOrder, 'CANCELLED', reason)}>{busy ? 'Saving…' : 'Confirm rejection'}</button></div></Modal>}
     {stockModal && (
       <Modal title="Report Stock Shortage" onClose={() => { if (!stockSubmitting) setStockModal(false); }}>
-        <form onSubmit={handleReportShortage} style={{ margin: 0 }}>
-          <div className="pos-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '20px 22px' }}>
+        <form onSubmit={handleReportShortage} style={{ margin: 0, width: '100%', boxSizing: 'border-box' }}>
+          <div className="pos-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <p style={{ color: 'var(--p-muted)', fontSize: 11, margin: 0, lineHeight: 1.6 }}>
               Report an unavailable dish or depleted ingredient to notify staff and update live menus.
             </p>
@@ -247,7 +247,6 @@ export default function KitchenDashboard() {
                 <span>Select menu dish *</span>
                 <select
                   className="pos-select"
-                  style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }}
                   value={selectedMenuItemId}
                   onChange={e => setSelectedMenuItemId(e.target.value)}
                   required
@@ -265,7 +264,6 @@ export default function KitchenDashboard() {
                 <span>Ingredient / Supply name *</span>
                 <input
                   className="pos-input"
-                  style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }}
                   value={customItemName}
                   onChange={e => setCustomItemName(e.target.value)}
                   placeholder="e.g. Cooking oil, Mozzarella cheese, Burger buns, Paneer"
@@ -274,12 +272,11 @@ export default function KitchenDashboard() {
               </div>
             )}
 
-            <div className="pos-form-grid" style={{ gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14 }}>
-              <div className="pos-field" style={{ minWidth: 0 }}>
+            <div className="pos-form-grid">
+              <div className="pos-field">
                 <span>Shortage status</span>
                 <select
                   className="pos-select"
-                  style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }}
                   value={shortageReason}
                   onChange={e => setShortageReason(e.target.value)}
                 >
@@ -290,11 +287,10 @@ export default function KitchenDashboard() {
                 </select>
               </div>
 
-              <div className="pos-field" style={{ minWidth: 0 }}>
+              <div className="pos-field">
                 <span>Urgency level</span>
                 <select
                   className="pos-select"
-                  style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }}
                   value={urgency}
                   onChange={e => setUrgency(e.target.value)}
                 >
