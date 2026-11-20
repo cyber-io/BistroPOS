@@ -1,0 +1,288 @@
+.pos-floor-plans {
+  --plan-border: #dfe4ef;
+  --plan-floor: #fcfdff;
+  --plan-table: #f6f7fc;
+  --plan-ink: #30394b;
+  --plan-muted: #63728d;
+  --plan-chair: #e4e7ef;
+  --plan-chair-back: #cdd3e1;
+  --plan-sofa: #becfc7;
+  --plan-sofa-cushion: #e6efea;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.pos-dark .pos-floor-plans {
+  --plan-border: #363d4e;
+  --plan-floor: #1b1e26;
+  --plan-table: #242936;
+  --plan-ink: #e5e9f2;
+  --plan-muted: #a4aec3;
+  --plan-chair: #41495b;
+  --plan-chair-back: #5a657c;
+  --plan-sofa: #526e63;
+  --plan-sofa-cushion: #344c43;
+}
+
+.pos-plan-area-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pos-plan-area-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.pos-plan-area-field .pos-select { width: 260px; max-width: 100%; height: 43px; min-height: 43px; font-size: 13px; }
+.pos-plan-area-count { padding-bottom: 13px; color: var(--plan-muted); font-size: 10px; white-space: nowrap; }
+
+.pos-table-status-toolbar { flex-wrap: wrap; gap: 12px 16px; margin-bottom: 18px; }
+.pos-table-status-controls { min-width: 0; }
+.pos-table-status-label { display: block; margin-bottom: 7px; color: var(--p-muted); font-size: 9px; }
+.pos-layout-reset { display: flex; margin: 14px auto 0; }
+
+.pos-dining-plan {
+  padding: 18px 20px 16px;
+  border: 1px solid var(--plan-border);
+  border-radius: 14px;
+  background: var(--p-card);
+  color: var(--plan-ink);
+}
+
+.pos-dining-plan-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 6px 16px;
+}
+
+.pos-dining-plan-header h2 {
+  margin: 0 0 6px;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -.4px;
+  line-height: 1.3;
+}
+
+.pos-dining-plan-header p {
+  margin: 0;
+  font-size: 11px;
+  color: var(--plan-muted);
+}
+
+.pos-dining-plan-header > span {
+  padding-top: 5px;
+  font-size: 10px;
+  color: var(--plan-muted);
+  white-space: nowrap;
+}
+
+.pos-dining-plan-floor {
+  padding: 8px 8px 12px;
+  border: 1px solid var(--plan-border);
+  border-radius: 10px;
+  background: var(--plan-floor);
+}
+
+.pos-plan-table-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px 8px;
+}
+
+.pos-dining-plan-family .pos-plan-table-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.pos-plan-table {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  padding: 0 0 6px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--plan-ink);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.pos-plan-table-stage {
+  position: relative;
+  display: block;
+  width: 100%;
+  max-width: 190px;
+  aspect-ratio: 280 / 230;
+  transition: transform .18s ease;
+}
+
+.pos-plan-table-stage svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.pos-plan-chair {
+  fill: var(--plan-chair);
+  stroke: var(--plan-border);
+  stroke-width: 1;
+}
+
+.pos-plan-chair-back { fill: var(--plan-chair-back); }
+.pos-plan-sofa { fill: var(--plan-sofa); }
+.pos-plan-sofa-cushion { fill: var(--plan-sofa-cushion); }
+
+.pos-plan-tabletop {
+  fill: var(--plan-table);
+  stroke: var(--plan-border);
+  stroke-width: 1.5;
+  transition: fill .18s ease, stroke .18s ease;
+}
+
+.pos-plan-table-details {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  line-height: 1.25;
+}
+
+.pos-plan-table-details strong {
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -.4px;
+}
+
+.pos-plan-capacity {
+  color: var(--plan-muted);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.pos-plan-caption {
+  color: var(--plan-muted);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.5;
+  padding: 2px 6px 0;
+}
+
+.pos-plan-table .pos-table-status {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-size: 7px;
+  font-weight: 650;
+  background: var(--p-card);
+  color: inherit;
+}
+
+.pos-plan-booking { color: var(--p-blue) !important; }
+.pos-plan-table-details > small { font-size: 9px; font-weight: 650; }
+.pos-plan-table.status-occupied { color: #8d5c06; }
+.pos-plan-table.status-occupied .pos-plan-tabletop { fill: #fff3d8; stroke: #e5bc6d; }
+.pos-plan-table.status-reserved { color: #fff; }
+.pos-plan-table.status-reserved .pos-plan-tabletop { fill: #303c50; stroke: #303c50; }
+.pos-plan-table.status-reserved .pos-plan-capacity { color: #dce2ec; }
+.pos-plan-table.status-reserved .pos-table-status { background: #ffffff1f; }
+.pos-plan-table.status-waiting_for_cleaning { color: #79649c; }
+.pos-plan-table.status-waiting_for_cleaning .pos-plan-tabletop { fill: #f3eef9; stroke: #b7a6cc; stroke-dasharray: 4 3; }
+.pos-plan-table.status-cleaning { color: #207493; }
+.pos-plan-table.status-cleaning .pos-plan-tabletop { fill: #eaf5fa; stroke: #8ebfd0; }
+.pos-plan-table.status-out_of_service { color: #ab5968; }
+.pos-plan-table.status-out_of_service .pos-plan-tabletop { fill: #fceff2; stroke: #d5a2ad; stroke-dasharray: 4 3; }
+
+.pos-dark .pos-plan-table.status-occupied { color: #f5cf85; }
+.pos-dark .pos-plan-table.status-occupied .pos-plan-tabletop { fill: #493a23; stroke: #a17c3e; }
+.pos-dark .pos-plan-table.status-reserved { color: #fff; }
+.pos-dark .pos-plan-table.status-reserved .pos-plan-tabletop { fill: #36485e; stroke: #71839a; }
+.pos-dark .pos-plan-table.status-waiting_for_cleaning { color: #c9b8e6; }
+.pos-dark .pos-plan-table.status-waiting_for_cleaning .pos-plan-tabletop { fill: #322c40; stroke: #86739f; }
+.pos-dark .pos-plan-table.status-cleaning { color: #a1d6ea; }
+.pos-dark .pos-plan-table.status-cleaning .pos-plan-tabletop { fill: #223b46; stroke: #608c9d; }
+.pos-dark .pos-plan-table.status-out_of_service { color: #efb0bd; }
+.pos-dark .pos-plan-table.status-out_of_service .pos-plan-tabletop { fill: #442b33; stroke: #a46c79; }
+
+.pos-plan-table:hover .pos-plan-table-stage { transform: translateY(-3px); }
+.pos-plan-table:hover .pos-plan-tabletop { stroke: var(--p-blue); stroke-width: 2; }
+.pos-plan-table:focus-visible { outline-offset: 0; }
+
+.pos-dining-plan-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 6px 0;
+  color: var(--plan-muted);
+  font-size: 9px;
+}
+
+.pos-dining-plan-footer > span { text-transform: uppercase; font-size: 8px; font-weight: 650; }
+.pos-dining-plan-footer > div { display: flex; gap: 14px; }
+.pos-plan-empty { border: 1px solid var(--plan-border); border-radius: 16px; background: var(--p-card); }
+
+@media (max-width: 1100px) {
+  .pos-dining-plan { padding: 18px 16px 16px; }
+  .pos-plan-table-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .pos-dining-plan-header h2 { font-size: 18px; }
+}
+
+@media (max-width: 700px) {
+  .pos-table-status-toolbar { align-items: stretch; gap: 10px; }
+  .pos-table-status-controls { width: 100%; }
+  .pos-table-status-toolbar .pos-tabs { gap: 4px; }
+  .pos-table-status-toolbar .pos-tab { min-height: 34px; }
+  .pos-table-status-toolbar .pos-floor-header { width: 100%; }
+  .pos-plan-area-field { flex: 1; }
+  .pos-plan-area-field .pos-select { width: 100%; }
+  .pos-plan-area-count { font-size: 9px; }
+  .pos-dining-plan { padding: 16px 12px 12px; border-radius: 12px; }
+  .pos-dining-plan-header { flex-direction: column; gap: 7px; padding: 0 4px 14px; }
+  .pos-dining-plan-header h2 { font-size: 17px; }
+  .pos-dining-plan-header p { font-size: 10px; }
+  .pos-dining-plan-header > span { padding: 0; font-size: 10px; }
+  .pos-dining-plan-floor { padding: 6px 4px 10px; }
+  .pos-plan-table-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 4px; }
+  .pos-dining-plan-family .pos-plan-table-grid { grid-template-columns: 1fr; }
+  .pos-plan-table-stage { max-width: 160px; }
+  .pos-dining-plan-family .pos-plan-table-stage { max-width: 190px; }
+  .pos-plan-table-details { gap: 1px; }
+  .pos-plan-table-details strong { font-size: 13px; }
+  .pos-plan-capacity { font-size: 8.5px; }
+  .pos-plan-caption { font-size: 9px; }
+  .pos-plan-table .pos-table-status { font-size: 6px; padding: 1px 3px; }
+  .pos-plan-table-details > small { font-size: 7.5px; }
+  .pos-dining-plan-footer { padding: 12px 4px 0; font-size: 8px; }
+  .pos-dining-plan-footer > div { gap: 10px; }
+}
+
+@media (max-width: 380px) {
+  .pos-plan-table-grid { grid-template-columns: 1fr; }
+  .pos-plan-table-stage { max-width: 190px; }
+  .pos-plan-table-details strong { font-size: 15px; }
+  .pos-plan-capacity { font-size: 9px; }
+  .pos-plan-table .pos-table-status { font-size: 7px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pos-plan-table-stage, .pos-plan-tabletop { transition: none; }
+}

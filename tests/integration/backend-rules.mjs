@@ -1,0 +1,33 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+fs.mkdirSync('tmp/verification',{recursive:true});
+const base='http://127.0.0.1:5050/api';
+const restaurantId='a0000000-0000-0000-0000-000000000001';
+const menuItemId='e0000000-0000-0000-0000-000000000001';
+async function req(path,body,token,expected=200,method='POST'){
+ const response=await fetch(base+path,{method,headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})},...(body?{body:JSON.stringify(body)}:{})});
+ const raw=await response.text(); const data=raw?JSON.parse(raw):{};assert.equal(response.status,expected,JSON.stringify(data));return data;
+}
+const staff=await req('/auth/demo-login',{role:'RECEPTIONIST'});
+const baseOrder={restaurantId,source:'TAKEAWAY',customerName:'Backend rule verification',items:[{menuItemId,quantity:1,customizationJson:'{}'}]};
+await req('/orders',{...baseOrder,items:[{menuItemId,quantity:0}]},null,400);
+const late=await req('/orders',{...baseOrder,idempotencyKey:crypto.randomUUID()},null,201);
+const records={orders:[late.orderId],payments:[]};fs.writeFileSync('tmp/verification/backend-rule-records.json',JSON.stringify(records,null,2));
+console.log('Waiting 61 seconds to verify the cancellation deadline…');
+await new Promise(resolve=>setTimeout(resolve,61000));
+const cancelled=await req(`/orders/${late.orderId}/cancel?accessToken=${late.accessToken}`,{reason:'Expired cancellation verification'},null,400);
+assert.match(cancelled.message,/Cancellation limit exceeded/);
+const key=crypto.randomUUID();const body={...baseOrder,idempotencyKey:key,items:[{menuItemId,quantity:1,customizationJson:JSON.stringify({Crust:'Cheese Burst (+₹60)',addOns:['Extra Mozzarella']})}]};
+const order=await req('/orders',body,null,201);records.orders.push(order.orderId);fs.writeFileSync("tmp/verification/backend-rule-records.json",JSON.stringify(records,null,2));assert.equal(order.subtotal,509);assert.equal(order.total,534.45);
+const duplicate=await req('/orders',body,null,201);assert.equal(duplicate.orderId,order.orderId);
+await req('/orders',{...body,items:[{...body.items[0],quantity:2}]},null,409);
+const paymentKey=crypto.randomUUID();const payBody={restaurantId,orderId:order.orderId,amount:order.total,method:'CASH',idempotencyKey:paymentKey};
+const payment=await req('/payments/record',payBody,staff.token);records.payments.push(payment.paymentId);fs.writeFileSync("tmp/verification/backend-rule-records.json",JSON.stringify(records,null,2));
+const duplicatePay=await req('/payments/record',payBody,staff.token);assert.equal(duplicatePay.paymentId,payment.paymentId);
+await req('/payments/record',{...payBody,idempotencyKey:crypto.randomUUID()},staff.token,400);
+await req(`/orders/${order.orderId}/cancel?accessToken=${order.accessToken}`,{reason:'Paid order cancellation verification'},null,400);
+await req(`/orders/${order.orderId}`,null,null,403,'GET');
+await req('/orders',null,null,401,'GET');
+await req('/tables?restaurantId=11111111-1111-1111-1111-111111111111',null,staff.token,403,'GET');
+fs.writeFileSync('tmp/verification/backend-rule-records.json',JSON.stringify(records,null,2));
+console.log('PASS: server quantity validation, >60s cancellation, catalog add-ons/options pricing, order idempotency, payment idempotency, duplicate collection, paid cancellation, anonymous order access, tenant isolation');

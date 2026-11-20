@@ -1,0 +1,15 @@
+node_modules/
+**/node_modules/
+frontend/dist/
+release/
+backend/bin/
+backend/obj/
+tmp/
+.env
+.env.*
+!.env.example
+.DS_Store
+*.user
+Library/
+backend/.local/
+backend/.nuget/

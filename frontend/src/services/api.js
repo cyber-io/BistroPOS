@@ -1,0 +1,431 @@
+import { tableTitle } from './tablePresentation';
+
+// All business operations go through the .NET API. Failed requests never become
+// local success records: the database remains the authority for orders and bookings.
+const API_BASE = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
+const DEFAULT_RESTAURANT_ID = import.meta.env.VITE_RESTAURANT_ID || 'a0000000-0000-0000-0000-000000000001';
+const TOKEN_KEY = 'rs_api_session';
+const RESOURCE_KEY = 'rs_customer_order_access';
+const HELP_KEY = 'rs_customer_help_access';
+let restaurantId = DEFAULT_RESTAURANT_ID;
+let restaurantCache = null;
+const listeners = new Set();
+let pollTimer;
+let pollBusy = false;
+let pollingGeneration = 0;
+const snapshots = new Map();
+const pendingOrderKeys = new Map();
+const PURGED_ORDERS = new Set(['ORD-0D10DC7FC6', 'ORD-66A6B8C8CB']);
+
+function stored(key, fallback = []) {
+  try {
+    const data = JSON.parse(localStorage.getItem(key) || 'null') || fallback;
+    if (key === RESOURCE_KEY && Array.isArray(data)) {
+      return data.filter(e => !PURGED_ORDERS.has(e.orderNumber) && !PURGED_ORDERS.has(e.orderId));
+    }
+    return data;
+  }
+  catch { return fallback; }
+}
+function save(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage may be disabled */ }
+}
+export function getAuthToken() {
+  try { return sessionStorage.getItem(TOKEN_KEY) || ''; } catch { return ''; }
+}
+export function setAuthToken(token) {
+  try {
+    if (token) sessionStorage.setItem(TOKEN_KEY, token);
+    else sessionStorage.removeItem(TOKEN_KEY);
+    // Remove the old insecure session representation.
+    localStorage.removeItem('rs_current_user');
+    localStorage.removeItem('rs_auth_token');
+  } catch { /* session remains in React state when storage is unavailable */ }
+  restaurantId = DEFAULT_RESTAURANT_ID;
+  if (token) {
+    try {
+      const payload = token.split('.')[1];
+      const claims = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+      restaurantId = claims.restaurant_id || DEFAULT_RESTAURANT_ID;
+    } catch { /* the server validates the token before any protected operation */ }
+  }
+  snapshots.clear();
+  pollingGeneration += 1;
+}
+function jwtRole() {
+  try {
+    const payload = getAuthToken().split('.')[1];
+    const claims = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+    return claims.role || claims['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'] || 'CUSTOMER';
+  } catch { return 'GUEST'; }
+}
+function isStaff() { return ['SUPER_ADMIN', 'RECEPTIONIST', 'KITCHEN', 'WAITER'].includes(jwtRole()); }
+function parseJson(value, fallback) {
+  if (typeof value !== 'string') return value ?? fallback;
+  try { return JSON.parse(value); } catch { return fallback; }
+}
+function query(params = {}) {
+  const values = Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== '');
+  return values.length ? `?${new URLSearchParams(values).toString()}` : '';
+}
+async function request(path, { method = 'GET', body, accessToken, signal } = {}) {
+  const token = getAuthToken();
+  let response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers: {
+        Accept: 'application/json',
+        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(accessToken ? { 'X-Resource-Token': accessToken } : {})
+      },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      signal: signal || AbortSignal.timeout(15000)
+    });
+  } catch (error) {
+    if (error.name === 'AbortError') throw error;
+    throw new Error('Unable to reach the restaurant server. Please check your connection and try again.');
+  }
+  const text = await response.text();
+  let data;
+  try { data = text ? JSON.parse(text) : null; } catch { data = null; }
+  if (!response.ok) {
+    if (response.status === 401 && token) {
+      setAuthToken(null);
+      window.dispatchEvent(new Event('rs_session_expired'));
+    }
+    const validation = data?.errors ? Object.values(data.errors).flat().join(' ') : '';
+    const error = new Error(data?.detail || data?.Detail || data?.message || data?.Message || data?.title || data?.Title || validation || (response.status === 403 ? 'Your account does not have permission to perform this action.' : response.status === 404 ? 'This record could not be found.' : response.status === 401 ? 'Please sign in to continue.' : 'The request could not be completed. Please try again.'));
+    error.status = response.status;
+    throw error;
+  }
+  return data;
+}
+function normalizeOrder(order) {
+  if (!order) return null;
+  return {
+    ...order,
+    customerName: order.customerName || (order.tableNumber ? tableTitle(order) : 'Guest'),
+    items: (order.items || []).map(item => ({
+      ...item,
+      name: item.name || item.itemName,
+      price: Number(item.price ?? item.priceSnapshot ?? 0),
+      quantity: Number(item.quantity),
+      lineTotal: Number(item.lineTotal),
+      customization: parseJson(item.customizationJson ?? item.customization, {})
+    }))
+  };
+}
+function rememberOrder(order) {
+  if (order?.orderId && order.accessToken) {
+    save(RESOURCE_KEY, [{ orderId: order.orderId, orderNumber: order.orderNumber, accessToken: order.accessToken }, ...stored(RESOURCE_KEY).filter(entry => entry.orderId !== order.orderId)].slice(0, 30));
+  }
+  return normalizeOrder(order);
+}
+function orderAccess(orderId) { return stored(RESOURCE_KEY).find(entry => entry.orderId === orderId)?.accessToken; }
+function helpAccess(requestId) { return stored(HELP_KEY).find(entry => entry.requestId === requestId)?.accessToken; }
+function normalizeTime(value) {
+  if (!value) return value;
+  const match = String(value).trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?$/i);
+  if (!match) return value;
+  let hour = Number(match[1]);
+  if (match[3]) hour = hour % 12 + (match[3].toUpperCase() === 'PM' ? 12 : 0);
+  return `${String(hour).padStart(2, '0')}:${match[2]}:00`;
+}
+function normalizeReservation(reservation) {
+  if (!reservation) return null;
+  let formatted = '';
+  try {
+    const timeStr = String(reservation.reservationTime || '').trim();
+    if (timeStr) {
+      const match = timeStr.match(/^(\d{1,2}):(\d{2})/);
+      if (match) {
+        let h = Number(match[1]);
+        const m = match[2];
+        const ampm = h >= 12 ? 'PM' : 'AM';
+        h = h % 12 || 12;
+        formatted = `${h}:${m} ${ampm}`;
+      }
+    }
+  } catch {}
+  return { ...reservation, reservationTimeFormatted: formatted || reservation.reservationTime };
+}
+export function uniqueKey() { return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`; }
+
+const realtimeChannel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('restaurant_pos_realtime') : null;
+
+if (realtimeChannel) {
+  realtimeChannel.onmessage = event => {
+    const { type, payload } = event?.data || {};
+    if (type) {
+      listeners.forEach(callback => {
+        try { callback(type, payload); } catch { /* isolate subscriber errors */ }
+      });
+    }
+  };
+}
+
+export function broadcastEvent(type, payload, postToChannel = true) {
+  listeners.forEach(callback => { try { callback(type, payload); } catch { /* isolate subscriber errors */ } });
+  if (postToChannel && realtimeChannel) {
+    try {
+      realtimeChannel.postMessage({ type, payload });
+    } catch { /* isolate broadcast channel errors */ }
+  }
+}
+function diffRecords(key, records, idField, onNew, onChange, generation) {
+  if (generation !== pollingGeneration || !Array.isArray(records)) return;
+  const previous = snapshots.get(key);
+  const next = new Map(records.map(record => [record[idField], record]));
+  snapshots.set(key, next);
+  if (!previous) return;
+  for (const [id, record] of next) {
+    const old = previous.get(id);
+    if (!old) onNew?.(record);
+    else if (JSON.stringify(old) !== JSON.stringify(record)) onChange?.(record, old);
+  }
+}
+async function pollUpdates() {
+  if (pollBusy || !listeners.size) return;
+  pollBusy = true;
+  const generation = pollingGeneration;
+  try {
+    const jobs = [
+      api.getMenuItems().then(items => diffRecords('menu', items, 'menuItemId', null, (item, old) => {
+        if (item.availability !== old.availability) broadcastEvent('FOOD_AVAILABILITY_CHANGED', { menuItemId: item.menuItemId, availability: item.availability });
+      }, generation)),
+      api.getOrders().then(orders => diffRecords('orders', orders, 'orderId', order => broadcastEvent('NEW_ORDER', order), (order, old) => {
+        if (order.status !== old.status) {
+          const payload = { orderId: order.orderId, orderNumber: order.orderNumber, tableId: order.tableId, tableNumber: order.tableNumber, newStatus: order.status, order };
+          broadcastEvent('ORDER_STATUS_CHANGED', payload);
+          if (order.source === 'DINE_IN_QR' && order.status === 'READY') broadcastEvent('TABLE_ORDER_READY', payload);
+        }
+      }, generation)),
+      api.getTables().then(tables => diffRecords('tables', tables, 'tableId', null, (table, old) => {
+        if (table.status !== old.status || table.currentCustomerName !== old.currentCustomerName) {
+          broadcastEvent('TABLE_STATUS_UPDATED', { tableId: table.tableId, tableNumber: table.tableNumber, status: table.status, customerName: table.currentCustomerName, table });
+        }
+      }, generation))
+    ];
+    if (['SUPER_ADMIN', 'RECEPTIONIST', 'WAITER'].includes(jwtRole()) || (!isStaff() && stored(HELP_KEY).length)) jobs.push(api.getHelpRequests().then(requests => diffRecords('help', requests, 'requestId', help => broadcastEvent('CUSTOMER_HELP_REQUEST', help), (help, old) => {
+      if (help.status !== old.status) broadcastEvent(help.status === 'ASSIGNED' ? 'WAITER_HELP_ACCEPTED' : 'HELP_REQUEST_RESOLVED', { ...help, waiterName: help.assignedWaiterName });
+    }, generation)));
+    if (isStaff()) {
+      jobs.push(api.getReservations().then(reservations => diffRecords('reservations', reservations, 'reservationId', reservation => broadcastEvent('NEW_TABLE_RESERVATION', reservation), reservation => broadcastEvent('RESERVATION_STATUS_CHANGED', reservation), generation)));
+      jobs.push(api.getIssues().then(issues => diffRecords('issues', issues, 'issueId', issue => broadcastEvent('CUSTOMER_ORDER_NOT_RECEIVED', { ...issue, message: issue.description }), null, generation)));
+    }
+    await Promise.allSettled(jobs);
+  } finally { pollBusy = false; }
+}
+export function subscribeRealtimeEvents(callback) {
+  listeners.add(callback);
+  if (!pollTimer) {
+    pollUpdates();
+    pollTimer = setInterval(pollUpdates, 3000);
+  }
+  return () => {
+    listeners.delete(callback);
+    if (!listeners.size) { clearInterval(pollTimer); pollTimer = null; }
+  };
+}
+
+export const api = {
+  health: () => request('/health'),
+  login: body => request('/auth/login', { method: 'POST', body }),
+  demoLogin: role => request('/auth/demo-login', { method: 'POST', body: { role } }),
+  me: async () => {
+    const user = await request('/auth/me');
+    if (user.restaurantId) restaurantId = user.restaurantId;
+    return user;
+  },
+  updateProfile: body => request('/auth/profile', { method: 'PATCH', body }),
+  register: ({ name, email, phone, password }) => request('/auth/register', { method: 'POST', body: { name, email, phone, password, restaurantId, role: 'CUSTOMER' } }),
+
+  getRestaurant: async () => {
+    const data = await request(`/restaurants/${restaurantId}`);
+    restaurantId = data.restaurantId;
+    restaurantCache = {
+      ...data,
+      logo: data.logo || '/favicon.svg',
+      openingHours: parseJson(data.openingHours, {}),
+      settings: parseJson(data.settings, {})
+    };
+    return restaurantCache;
+  },
+  getTables: () => request(`/tables${query({ restaurantId })}`),
+  getTableById: async tableId => {
+    if (/^\d+$/.test(String(tableId))) return (await api.getTables()).find(table => table.tableNumber === Number(tableId)) || null;
+    return request(`/tables/${encodeURIComponent(tableId)}`);
+  },
+  updateTableStatus: (tableId, status, customerName = null, assignedWaiterId = null) => request(`/tables/${tableId}/status`, { method: 'PUT', body: { status, customerName, assignedWaiterId } }).then(result => {
+    broadcastEvent('TABLE_STATUS_UPDATED', { tableId, status, customerName });
+    return result;
+  }),
+  validateQr: qrCode => request(`/qr/validate/${encodeURIComponent(qrCode)}`),
+  getCategories: async () => (await request(`/menu/categories${query({ restaurantId })}`)).map(category => ({ ...category, icon: ({ Pizza: '🍕', Burger: '🍔', Chinese: '🥢', Indian: '🍛', 'South Indian': '🥞', 'North Indian': '🥘', Desserts: '🍨', Beverages: '☕' })[category.name] || '🍽️' })),
+  getMenuItems: async () => (await request(`/menu/items${query({ restaurantId })}`)).map(item => ({
+    ...item,
+    price: Number(item.price),
+    vegNonveg: item.vegNonveg || item.vegNonVeg,
+    image: item.image || '/images/bistro-hero-plate.png',
+    addOns: parseJson(item.addOnsJson ?? item.addOns, []),
+    customizationOptions: parseJson(item.customizationOptionsJson ?? item.customizationOptions, [])
+  })),
+  updateItemAvailability: (menuItemId, availability) => request(`/menu/items/${menuItemId}/availability`, { method: 'PATCH', body: { availability } }).then(result => {
+    broadcastEvent('FOOD_AVAILABILITY_CHANGED', { menuItemId, availability });
+    return result;
+  }),
+
+  getOrders: async (filters = {}) => {
+    let orders = [];
+    if (isStaff()) orders = (await request(`/orders${query({ restaurantId, ...filters })}`)).map(normalizeOrder);
+    else {
+      const records = stored(RESOURCE_KEY);
+      const results = await Promise.allSettled(records.map(({ orderId }) => api.getOrderById(orderId)));
+      orders = results.filter(result => result.status === 'fulfilled').map(result => result.value).filter(Boolean);
+    }
+    return orders.filter(o => !PURGED_ORDERS.has(o.orderNumber) && !PURGED_ORDERS.has(o.orderId));
+  },
+  getCustomerOrders: async () => {
+    try {
+      const serverOrders = await request(`/orders${query({ restaurantId })}`);
+      const normalizedServer = (Array.isArray(serverOrders) ? serverOrders : []).map(normalizeOrder);
+      const records = stored(RESOURCE_KEY);
+      const results = await Promise.allSettled(records.map(({ orderId }) => api.getOrderById(orderId)));
+      const localOrders = results.filter(r => r.status === 'fulfilled').map(r => r.value).filter(Boolean);
+      const map = new Map();
+      [...normalizedServer, ...localOrders].forEach(o => {
+        if (o && o.orderId && !PURGED_ORDERS.has(o.orderNumber) && !PURGED_ORDERS.has(o.orderId)) {
+          map.set(o.orderId, o);
+        }
+      });
+      return Array.from(map.values()).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    } catch {
+      const records = stored(RESOURCE_KEY);
+      const results = await Promise.allSettled(records.map(({ orderId }) => api.getOrderById(orderId)));
+      return results.filter(r => r.status === 'fulfilled').map(r => r.value).filter(Boolean);
+    }
+  },
+  getOrderById: async orderId => {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId)) {
+      const known = stored(RESOURCE_KEY).find(entry => entry.orderNumber?.toLowerCase() === orderId.toLowerCase());
+      if (known) orderId = known.orderId;
+      else if (isStaff()) return (await api.getOrders({ search: orderId })).find(order => order.orderNumber.toLowerCase() === orderId.toLowerCase()) || null;
+      else throw new Error('Use the order reference from your confirmation on the device where you placed this order.');
+    }
+    const accessToken = orderAccess(orderId);
+    return normalizeOrder(await request(`/orders/${encodeURIComponent(orderId)}${query({ accessToken })}`, { accessToken }));
+  },
+  createOrder: async orderData => {
+    const { items, ...details } = orderData;
+    const submission = JSON.stringify(orderData);
+    const idempotencyKey = details.idempotencyKey || pendingOrderKeys.get(submission) || uniqueKey();
+    pendingOrderKeys.set(submission, idempotencyKey);
+    let order;
+    try { order = await request('/orders', {
+      method: 'POST',
+      body: {
+        restaurantId,
+        customerId: null,
+        tableId: details.tableId || null,
+        source: details.source,
+        customerName: details.customerName || null,
+        customerPhone: details.customerPhone || null,
+        specialInstructions: details.specialInstructions || '',
+        deliveryAddressJson: details.deliveryAddress ? JSON.stringify({ ...details.deliveryAddress, customerName: details.customerName, customerPhone: details.customerPhone }) : null,
+        takeawayPickupTime: details.takeawayPickupTime ? new Date(details.takeawayPickupTime).toISOString() : null,
+        idempotencyKey,
+        items: items.map(item => ({
+          menuItemId: item.menuItemId,
+          quantity: Number(item.quantity),
+          customizationJson: JSON.stringify({ ...(item.customization || {}), ...(item.addOns?.length ? { addOns: item.addOns.map(addOn => addOn.name) } : {}) }),
+          specialInstruction: item.specialInstruction || ''
+        }))
+      }
+    });
+    } catch (error) {
+      if (error.status >= 400 && error.status < 500) pendingOrderKeys.delete(submission);
+      throw error;
+    }
+    pendingOrderKeys.delete(submission);
+    const result = rememberOrder(order);
+    broadcastEvent('NEW_ORDER', result);
+    return result;
+  },
+  updateOrderStatus: async (orderId, newStatus, reason = null) => {
+    if (newStatus === 'CONFIRMATION_TIMEOUT' && !isStaff()) {
+      return request(`/orders/${orderId}/confirmation-timeout${query({ accessToken: orderAccess(orderId) })}`, { method: 'POST', accessToken: orderAccess(orderId) });
+    }
+    const result = await request(`/orders/${orderId}/status`, { method: 'PATCH', body: { newStatus, reason } });
+    pollUpdates();
+    return result;
+  },
+  cancelOrder: async (orderId, reason = 'Customer cancelled') => {
+    const result = await request(`/orders/${orderId}/cancel${query({ accessToken: orderAccess(orderId) })}`, { method: 'POST', body: { reason }, accessToken: orderAccess(orderId) });
+    pollUpdates();
+    return result;
+  },
+  deleteOrder: async orderIdOrNumber => {
+    PURGED_ORDERS.add(orderIdOrNumber);
+    const result = await request(`/orders/${encodeURIComponent(orderIdOrNumber)}`, { method: 'DELETE' });
+    const known = stored(RESOURCE_KEY);
+    save(RESOURCE_KEY, known.filter(e => e.orderId !== orderIdOrNumber && e.orderNumber !== orderIdOrNumber));
+    pollUpdates();
+    return result;
+  },
+  confirmCustomerReceipt: async (orderId, confirmed) => {
+    const result = await request(`/orders/${orderId}/confirm-receipt${query({ confirmed, accessToken: orderAccess(orderId) })}`, { method: 'POST', accessToken: orderAccess(orderId) });
+    pollUpdates();
+    return result;
+  },
+
+  getReservations: async (filters = {}) => (await request(`/reservations${query({ restaurantId, ...filters })}`)).map(normalizeReservation),
+  checkAvailability: (date, guestCount) => request(`/reservations/availability${query({ restaurantId, date, guestCount })}`),
+  createReservation: async details => {
+    const result = normalizeReservation(await request('/reservations', { method: 'POST', body: {
+      ...details,
+      restaurantId,
+      customerId: null,
+      guestCount: Number(details.guestCount),
+      reservationTime: normalizeTime(details.reservationTime)
+    } }));
+    broadcastEvent('NEW_TABLE_RESERVATION', result);
+    return result;
+  },
+  updateReservationStatus: async (reservationId, newStatus, tableId) => {
+    const result = await request(`/reservations/${reservationId}/status${query({ newStatus, tableId })}`, { method: 'PATCH' });
+    broadcastEvent('RESERVATION_STATUS_CHANGED', { reservationId, newStatus });
+    return result;
+  },
+  rescheduleReservation: (reservationId, { newDate, newTime, guestCount }) => request(`/reservations/${reservationId}/reschedule`, { method: 'PATCH', body: { newDate, newTime: normalizeTime(newTime), guestCount } }),
+
+  getHelpRequests: async () => {
+    if (isStaff()) return request(`/help${query({ restaurantId })}`);
+    const results = await Promise.allSettled(stored(HELP_KEY).map(({ requestId, accessToken }) => request(`/help/${requestId}${query({ accessToken })}`)));
+    return results.filter(result => result.status === 'fulfilled').map(result => result.value);
+  },
+  createHelpRequest: async (tableNumber, message) => {
+    const table = await api.getTableById(tableNumber);
+    if (!table) throw new Error('This table could not be found. Please scan its QR code again.');
+    const result = await request('/help', { method: 'POST', body: { restaurantId, tableId: table.tableId, message, customerId: null } });
+    if (result.accessToken) save(HELP_KEY, [{ requestId: result.requestId, accessToken: result.accessToken }, ...stored(HELP_KEY)].slice(0, 20));
+    broadcastEvent('CUSTOMER_HELP_REQUEST', result);
+    return result;
+  },
+  acceptHelpRequest: async (requestId, waiterName) => {
+    const user = await api.me();
+    return request(`/help/${requestId}/assign`, { method: 'POST', body: { waiterId: user.userId, waiterName: user.name } });
+  },
+  resolveHelpRequest: requestId => request(`/help/${requestId}/resolve`, { method: 'POST' }),
+  getIssues: () => request(`/issues${query({ restaurantId })}`),
+  resolveIssue: (issueId, resolution, escalate = false) => request(`/issues/${issueId}/resolve`, { method: 'PATCH', body: typeof resolution === 'object' ? resolution : { resolution, escalate } }),
+  getUsers: (role) => request(`/users${query({ restaurantId, role })}`),
+  createStaffUser: details => request(`/users${query({ restaurantId })}`, { method: 'POST', body: details }),
+  deleteStaffUser: userId => request(`/users/${userId}`, { method: 'DELETE' }),
+  updateRestaurantSettings: (restaurantIdToUpdate, payload) => request(`/restaurants/${restaurantIdToUpdate || restaurantId}/settings`, { method: 'PATCH', body: payload }),
+  initiatePayment: details => request(`/payments/initiate${query({ accessToken: orderAccess(details.orderId) })}`, { method: 'POST', accessToken: orderAccess(details.orderId), body: { restaurantId: details.restaurantId || restaurantId, method: details.method || 'UPI', ...details, idempotencyKey: details.idempotencyKey || uniqueKey() } }),
+  recordPayment: details => request('/payments/record', { method: 'POST', body: { restaurantId: details.restaurantId || restaurantId, method: details.method || 'CASH', ...details, idempotencyKey: details.idempotencyKey || uniqueKey() } }),
+  recordCashPayment: details => api.recordPayment({ ...details, method: 'CASH' }),
+  getPayments: () => request(`/payments${query({ restaurantId })}`)
+};

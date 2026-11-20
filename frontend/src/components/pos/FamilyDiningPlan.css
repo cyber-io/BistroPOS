@@ -1,0 +1,28 @@
+.pos-family-layout-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 16px 12px;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 8px 0;
+}
+
+.pos-family-layout-table { min-width: 0; margin: 0; text-align: center; }
+.pos-family-table-stage { position: relative; display: block; width: 100%; max-width: 400px; aspect-ratio: 680 / 300; transition: transform .18s ease; }
+.pos-family-table-stage svg { display: block; width: 100%; height: 100%; }
+.pos-family-layout-table .pos-family-table-details { top: 53.333%; width: 70.588%; }
+.pos-family-layout-table:hover .pos-family-table-stage { transform: translateY(-3px); }
+
+@media (max-width: 700px) {
+  .pos-family-layout-grid { gap: 12px; padding: 6px 0; }
+  .pos-family-table-stage { max-width: 340px; }
+}
+
+@media (max-width: 380px) {
+  .pos-family-layout-table .pos-family-table-details { gap: 1px; }
+  .pos-family-layout-table .pos-family-table-details strong { font-size: 13px; }
+  .pos-family-layout-table .pos-plan-capacity { font-size: 8px; }
+  .pos-family-layout-table .pos-family-table-details > small { font-size: 7px; }
+}
+
+@media (prefers-reduced-motion: reduce) { .pos-family-table-stage { transition: none; } }

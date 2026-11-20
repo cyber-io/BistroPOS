@@ -1,0 +1,11 @@
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+const processes=[];
+const launch=(cmd,args,cwd,extra={})=>{const child=spawn(cmd,args,{cwd,stdio:'inherit',env:{...process.env,...extra},shell:process.platform==='win32'});processes.push(child);child.on('error',error=>{console.error(error.message);stop();});return child;};
+const stop=()=>{for(const child of processes)child.kill('SIGTERM');};
+process.on('SIGINT',()=>{stop();process.exit(0);});process.on('SIGTERM',()=>{stop();process.exit(0);});
+launch('dotnet',['run','--no-launch-profile','--urls','http://127.0.0.1:5050'],path.join(root,'backend'),{ASPNETCORE_ENVIRONMENT:'Development'});
+launch('npm',['run','dev','--','--host','127.0.0.1'],path.join(root,'frontend'));
+console.log('\nBistro & Bloom: website http://127.0.0.1:5173 · POS http://127.0.0.1:5173/pos\n');

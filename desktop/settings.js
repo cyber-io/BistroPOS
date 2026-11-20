@@ -1,0 +1,4 @@
+const input=document.querySelector('#url');const status=document.querySelector('#status');const test=document.querySelector('#test');const save=document.querySelector('#save');
+window.restaurantDesktop.getSettings().then(settings=>{input.value=settings.apiUrl;});
+async function run(button,action){button.disabled=true;status.textContent='Connecting…';try{await action(input.value.trim());status.style.color='#209e7b';status.textContent=button===save?'Saved. The POS is reconnecting.':'Connection successful. Restaurant API is ready.';}catch(error){status.style.color='#d05e69';status.textContent=error.message.replace(/^Error invoking remote method '[^']+': Error: /,'');}finally{button.disabled=false;}}
+test.addEventListener('click',()=>run(test,window.restaurantDesktop.testServer));save.addEventListener('click',()=>run(save,window.restaurantDesktop.saveSettings));
