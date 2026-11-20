@@ -182,14 +182,14 @@ export default function WaiterDashboard() {
 
     {error && <div className="pos-info-box" role="alert" style={{ color: '#ce626a', marginBottom: 20 }}><AlertCircle size={16} /><span>{error}</span><button className="pos-button small" style={{ marginLeft: 'auto' }} onClick={() => load()}>Try again</button></div>}
 
-    {loading ? <Spinner /> : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,350px),1fr))', gap: 20, alignItems: 'start' }}>
+    {loading ? <Spinner /> : <div className="pos-panels" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,350px),1fr))', gap: 20, alignItems: 'stretch' }}>
       {/* Ready plates */}
-      <section className="pos-panel">
+      <section className="pos-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 460 }}>
         <header className="pos-panel-header">
           <h2><Bell size={15} />Ready on the pass</h2>
           <span className="pos-count">{orders.length} dine-in orders</span>
         </header>
-        <div className="pos-panel-content">
+        <div className="pos-panel-content" style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: orders.length ? 'flex-start' : 'center' }}>
           {!orders.length ? (
             <Empty icon={HandPlatter} title={error ? 'Orders could not be loaded' : 'The pass is clear'}>
               {error ? 'Retry when your connection is restored.' : 'Ready dine-in orders will appear here.'}
@@ -228,7 +228,7 @@ export default function WaiterDashboard() {
       </section>
 
       {/* Guest assistance & Table cleaning */}
-      <section className="pos-panel">
+      <section className="pos-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 460 }}>
         <header className="pos-panel-header">
           <h2><HelpCircle size={15} />Floor assistance &amp; Cleaning</h2>
           <span className="pos-count">{pending.length} waiting</span>
@@ -247,7 +247,7 @@ export default function WaiterDashboard() {
             ))}
           </div>
         </div>
-        <div className="pos-panel-content">
+        <div className="pos-panel-content" style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: visibleRequests.length ? 'flex-start' : 'center' }}>
           {!visibleRequests.length ? (
             <Empty icon={UserCheck} title={error ? 'Calls could not be loaded' : filter === 'MINE' ? 'No calls assigned to you' : 'Every table is looked after'}>
               {error ? 'Retry when your connection is restored.' : filter === 'MINE' ? 'Accept a table cleaning or help request when a guest needs assistance.' : 'New table requests and cleaning alerts will appear here.'}

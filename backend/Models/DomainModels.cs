@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using System.Text.Json;
 
 namespace RestaurantSystem.Api.Models;
 
@@ -89,6 +90,112 @@ public class Restaurant
 
     public ICollection<TableEntity> Tables { get; set; } = new List<TableEntity>();
     public ICollection<MenuCategory> Categories { get; set; } = new List<MenuCategory>();
+
+    [NotMapped]
+    public string? WifiSsid
+    {
+        get => GetSettingString("wifi_ssid", "Bistro-HighSpeed-Guest");
+        set => SetSetting("wifi_ssid", value);
+    }
+
+    [NotMapped]
+    public string? WifiPassword
+    {
+        get => GetSettingString("wifi_password", "Bistro@2026");
+        set => SetSetting("wifi_password", value);
+    }
+
+    [NotMapped]
+    public bool WifiEnabled
+    {
+        get => GetSettingBool("wifi_enabled", true);
+        set => SetSetting("wifi_enabled", value);
+    }
+
+    [NotMapped]
+    public string? GoogleReviewUrl
+    {
+        get => GetSettingString("google_review_url", "https://maps.google.com");
+        set => SetSetting("google_review_url", value);
+    }
+
+    [NotMapped]
+    public string? SubscriptionTier
+    {
+        get => GetSettingString("subscription_tier", "PRO");
+        set => SetSetting("subscription_tier", value);
+    }
+
+    private string? GetSettingString(string key, string? defaultValue)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(Settings) || Settings == "{}") return defaultValue;
+            using var doc = JsonDocument.Parse(Settings);
+            if (doc.RootElement.TryGetProperty(key, out var el))
+            {
+                if (el.ValueKind == JsonValueKind.String)
+                    return el.GetString() ?? defaultValue;
+                return el.ToString();
+            }
+            return defaultValue;
+        }
+        catch
+        {
+            return defaultValue;
+        }
+    }
+
+    private bool GetSettingBool(string key, bool defaultValue)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(Settings) || Settings == "{}") return defaultValue;
+            using var doc = JsonDocument.Parse(Settings);
+            if (doc.RootElement.TryGetProperty(key, out var el))
+            {
+                if (el.ValueKind == JsonValueKind.True) return true;
+                if (el.ValueKind == JsonValueKind.False) return false;
+            }
+            return defaultValue;
+        }
+        catch
+        {
+            return defaultValue;
+        }
+    }
+
+    private void SetSetting(string key, object? value)
+    {
+        try
+        {
+            var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(Settings) && Settings.Trim().StartsWith("{"))
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(Settings);
+                    foreach (var prop in doc.RootElement.EnumerateObject())
+                    {
+                        if (prop.Value.ValueKind == JsonValueKind.String)
+                            dict[prop.Name] = prop.Value.GetString();
+                        else if (prop.Value.ValueKind == JsonValueKind.True)
+                            dict[prop.Name] = true;
+                        else if (prop.Value.ValueKind == JsonValueKind.False)
+                            dict[prop.Name] = false;
+                        else if (prop.Value.ValueKind == JsonValueKind.Number && prop.Value.TryGetDecimal(out var d))
+                            dict[prop.Name] = d;
+                        else
+                            dict[prop.Name] = prop.Value.GetRawText();
+                    }
+                }
+                catch { }
+            }
+            dict[key] = value;
+            Settings = JsonSerializer.Serialize(dict);
+        }
+        catch { }
+    }
 }
 
 [Table("users")]
@@ -135,6 +242,12 @@ public class TableEntity
     public Guid? AssignedWaiterId { get; set; }
     [ForeignKey(nameof(AssignedWaiterId))]
     public User? AssignedWaiter { get; set; }
+    public int PositionX { get; set; } = 0;
+    public int PositionY { get; set; } = 0;
+    [MaxLength(50)]
+    public string Shape { get; set; } = "SQUARE";
+    [MaxLength(50)]
+    public string DiningArea { get; set; } = "everyday";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
@@ -333,6 +446,11 @@ public class Payment
     public Reservation? Reservation { get; set; }
     [Column(TypeName = "numeric(10,2)")]
     public decimal Amount { get; set; }
+    [Column(TypeName = "numeric(10,2)")]
+    public decimal TipAmount { get; set; } = 0;
+    public int SplitCount { get; set; } = 1;
+    [MaxLength(50)]
+    public string SplitType { get; set; } = "FULL";
     [MaxLength(10)]
     public string Currency { get; set; } = "INR";
     [Required, MaxLength(50)]
@@ -447,5 +565,76 @@ public class AuditLog
     public string Resource { get; set; } = string.Empty;
     public string? Metadata { get; set; }
     public string? IpAddress { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+[Table("inventory_items")]
+public class InventoryItem
+{
+    [Key]
+    public Guid ItemId { get; set; } = Guid.NewGuid();
+    [Required]
+    public Guid RestaurantId { get; set; }
+    [ForeignKey(nameof(RestaurantId))]
+    public Restaurant? Restaurant { get; set; }
+    [Required, MaxLength(150)]
+    public string Name { get; set; } = string.Empty;
+    [MaxLength(100)]
+    public string Category { get; set; } = "GENERAL";
+    [Required, MaxLength(50)]
+    public string Unit { get; set; } = "kg";
+    public decimal CurrentStock { get; set; } = 0;
+    public decimal MinThreshold { get; set; } = 5;
+    public decimal CostPerUnit { get; set; } = 0;
+    [MaxLength(50)]
+    public string Status { get; set; } = "IN_STOCK"; // IN_STOCK, LOW_STOCK, OUT_OF_STOCK
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+[Table("customer_loyalty")]
+public class CustomerLoyalty
+{
+    [Key]
+    public Guid LoyaltyId { get; set; } = Guid.NewGuid();
+    [Required]
+    public Guid RestaurantId { get; set; }
+    [ForeignKey(nameof(RestaurantId))]
+    public Restaurant? Restaurant { get; set; }
+    [Required, MaxLength(20)]
+    public string CustomerPhone { get; set; } = string.Empty;
+    [MaxLength(100)]
+    public string? CustomerName { get; set; }
+    [MaxLength(100)]
+    public string? CustomerEmail { get; set; }
+    public int PointsBalance { get; set; } = 0;
+    public int LifetimePoints { get; set; } = 0;
+    [MaxLength(20)]
+    public string Tier { get; set; } = "BRONZE"; // BRONZE, SILVER, GOLD, PLATINUM
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+[Table("customer_feedbacks")]
+public class CustomerFeedback
+{
+    [Key]
+    public Guid FeedbackId { get; set; } = Guid.NewGuid();
+    [Required]
+    public Guid RestaurantId { get; set; }
+    [ForeignKey(nameof(RestaurantId))]
+    public Restaurant? Restaurant { get; set; }
+    public Guid? OrderId { get; set; }
+    [ForeignKey(nameof(OrderId))]
+    public Order? Order { get; set; }
+    [MaxLength(100)]
+    public string? CustomerName { get; set; }
+    [MaxLength(20)]
+    public string? CustomerPhone { get; set; }
+    public int Rating { get; set; } = 5;
+    public int FoodRating { get; set; } = 5;
+    public int ServiceRating { get; set; } = 5;
+    public int AmbianceRating { get; set; } = 5;
+    public string? Comment { get; set; }
+    public bool GoogleReviewClicked { get; set; } = false;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }

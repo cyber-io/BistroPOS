@@ -23,6 +23,9 @@ public class RestaurantDbContext : DbContext
     public DbSet<CustomerIssue> CustomerIssues => Set<CustomerIssue>();
     public DbSet<NotificationEntity> Notifications => Set<NotificationEntity>();
     public DbSet<DeliveryAddressEntity> DeliveryAddresses => Set<DeliveryAddressEntity>();
+    public DbSet<InventoryItem> InventoryItems => Set<InventoryItem>();
+    public DbSet<CustomerLoyalty> CustomerLoyalties => Set<CustomerLoyalty>();
+    public DbSet<CustomerFeedback> CustomerFeedbacks => Set<CustomerFeedback>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -40,6 +43,11 @@ public class RestaurantDbContext : DbContext
         modelBuilder.Entity<MenuItem>().Property(m => m.VegNonVeg).HasColumnName("veg_nonveg");
         modelBuilder.Entity<Restaurant>().Property(r => r.OpeningHours).HasColumnType("jsonb");
         modelBuilder.Entity<Restaurant>().Property(r => r.Settings).HasColumnType("jsonb");
+        modelBuilder.Entity<Restaurant>().Ignore(r => r.WifiSsid);
+        modelBuilder.Entity<Restaurant>().Ignore(r => r.WifiPassword);
+        modelBuilder.Entity<Restaurant>().Ignore(r => r.WifiEnabled);
+        modelBuilder.Entity<Restaurant>().Ignore(r => r.GoogleReviewUrl);
+        modelBuilder.Entity<Restaurant>().Ignore(r => r.SubscriptionTier);
         modelBuilder.Entity<MenuItem>().Property(m => m.AddOns).HasColumnType("jsonb");
         modelBuilder.Entity<MenuItem>().Property(m => m.CustomizationOptions).HasColumnType("jsonb");
         modelBuilder.Entity<MenuItem>().Property(m => m.Allergens).HasColumnType("jsonb");

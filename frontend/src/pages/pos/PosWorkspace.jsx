@@ -223,10 +223,8 @@ const getSavedFilter = (sec) => {
 
 const saveFilter = (sec, value) => {
   try {
-    if (value && value !== 'ALL') {
+    if (value) {
       localStorage.setItem(`bistro_pos_filter_${sec}`, value);
-    } else {
-      localStorage.removeItem(`bistro_pos_filter_${sec}`);
     }
   } catch {
     // ignore
@@ -855,10 +853,8 @@ export default function PosWorkspace() {
                         <p>{h.message}</p>
                         <footer>
                           <span>{h.assignedWaiterName ? `Assigned to ${h.assignedWaiterName}` : `Requested at ${time(h.createdAt)}`}</span>
-                          {h.status === 'PENDING' ? (
+                          {h.status === 'PENDING' && (
                             <button className="pos-button small primary" disabled={busy} onClick={() => run(() => api.acceptHelpRequest(h.requestId, currentUser.name), 'Assistance assigned')}>Accept request</button>
-                          ) : (
-                            <button className="pos-button small" disabled={busy} onClick={() => run(() => api.resolveHelpRequest(h.requestId), 'Help request resolved')}>Mark resolved</button>
                           )}
                         </footer>
                       </article>
@@ -1494,8 +1490,22 @@ function TableDialog({ restaurant, table, orders, reservations, onClose, busy, r
                   <Printer /> Print QR
                 </button>
               </div>
-              <a className="pos-text-link" style={{ marginTop: 12, display: 'inline-block' }} href={qrUrl} target="_blank" rel="noreferrer">
-                Open table menu <ArrowUpRight size={11} />
+              <a
+                className="pos-text-link"
+                style={{
+                  marginTop: 12,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 4,
+                  whiteSpace: 'nowrap'
+                }}
+                href={qrUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <span>Open table menu</span>
+                <ArrowUpRight size={12} style={{ flexShrink: 0 }} />
               </a>
               {isLocalHost && (
                 <p style={{ fontSize: 10, color: 'var(--p-muted)', marginTop: 8 }}>

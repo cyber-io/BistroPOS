@@ -311,5 +311,4 @@ public static class UserProvisioning
             await db.SaveChangesAsync();
         }
     }
-    }
 }

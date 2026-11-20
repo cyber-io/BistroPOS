@@ -226,6 +226,18 @@ public class OrderService : IOrderService
             new { order.OrderId, order.OrderNumber, order.Source, TableNumber = tableNum }
         );
 
+        if (request.TableId.HasValue)
+        {
+            await _notifications.NotifyTableAsync(
+                request.RestaurantId,
+                request.TableId.Value,
+                "NEW_ORDER",
+                $"New Table Order #{order.OrderNumber}",
+                $"A new order #{order.OrderNumber} was placed for this table.",
+                new { order.OrderId, order.OrderNumber, order.Source, TableId = request.TableId.Value, TableNumber = tableNum }
+            );
+        }
+
         await _audit.LogAsync(
             order.RestaurantId,
             order.CustomerId,
@@ -353,6 +365,18 @@ public class OrderService : IOrderService
         await _db.SaveChangesAsync();
         await transaction.CommitAsync();
 
+        if (order.TableId.HasValue)
+        {
+            await _notifications.NotifyTableAsync(
+                order.RestaurantId,
+                order.TableId.Value,
+                "ORDER_STATUS_CHANGED",
+                $"Table Order Status: {newStatus}",
+                $"Order #{order.OrderNumber} status changed to {newStatus}.",
+                new { order.OrderId, order.OrderNumber, TableId = order.TableId.Value, Status = newStatus }
+            );
+        }
+
         await _audit.LogAsync(
             order.RestaurantId,
             null,
@@ -397,6 +421,18 @@ public class OrderService : IOrderService
 
         await _db.SaveChangesAsync();
         await transaction.CommitAsync();
+
+        if (order.TableId.HasValue)
+        {
+            await _notifications.NotifyTableAsync(
+                order.RestaurantId,
+                order.TableId.Value,
+                "ORDER_STATUS_CHANGED",
+                "Table Order Status: CANCELLED",
+                $"Order #{order.OrderNumber} status changed to CANCELLED.",
+                new { order.OrderId, order.OrderNumber, TableId = order.TableId.Value, Status = OrderStatuses.Cancelled }
+            );
+        }
 
         await _notifications.NotifyRoleAsync(
             order.RestaurantId,
@@ -505,6 +541,18 @@ public class OrderService : IOrderService
 
         await _db.SaveChangesAsync();
         await transaction.CommitAsync();
+
+        if (order.TableId.HasValue)
+        {
+            await _notifications.NotifyTableAsync(
+                order.RestaurantId,
+                order.TableId.Value,
+                "ORDER_STATUS_CHANGED",
+                "Table Order Status: DELIVERED",
+                $"Order #{order.OrderNumber} status changed to DELIVERED.",
+                new { order.OrderId, order.OrderNumber, TableId = order.TableId.Value, Status = OrderStatuses.Delivered }
+            );
+        }
         return true;
     }
 

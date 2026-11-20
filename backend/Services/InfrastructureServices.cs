@@ -148,6 +148,9 @@ public class PaymentService(RestaurantDbContext db, IAuditLogService audit, INot
             RestaurantId = restaurantId, 
             OrderId = order.OrderId, 
             Amount = reqAmount,
+            TipAmount = request.TipAmount,
+            SplitCount = request.SplitCount > 0 ? request.SplitCount : 1,
+            SplitType = string.IsNullOrWhiteSpace(request.SplitType) ? "FULL" : request.SplitType,
             Method = normalizedMethod, 
             Status = collected ? PaymentStatuses.Paid : PaymentStatuses.Pending,
             IdempotencyKey = request.IdempotencyKey, 
@@ -273,5 +276,5 @@ public class PaymentService(RestaurantDbContext db, IAuditLogService audit, INot
     }
     public Task<bool> VerifyPaymentAsync(VerifyPaymentRequest request) => throw new InvalidOperationException("A verified online payment gateway has not been configured.");
     public Task<bool> ProcessWebhookAsync(WebhookPayloadDto payload) => throw new InvalidOperationException("A verified online payment gateway has not been configured.");
-    public static PaymentDto Map(Payment p) => new(p.PaymentId,p.RestaurantId,p.OrderId,p.Amount,p.Currency,p.Method,p.Status,p.TransactionId,p.CreatedAt);
+    public static PaymentDto Map(Payment p) => new(p.PaymentId,p.RestaurantId,p.OrderId,p.Amount,p.Currency,p.Method,p.Status,p.TransactionId,p.CreatedAt,p.TipAmount,p.SplitCount,p.SplitType);
 }

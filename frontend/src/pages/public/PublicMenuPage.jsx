@@ -4,21 +4,26 @@ import { api, subscribeRealtimeEvents } from '../../services/api';
 import { useCart } from '../../context/CartContext';
 import { useNotification } from '../../context/NotificationContext';
 import ItemCustomizationModal from '../../components/common/ItemCustomizationModal';
-import { Search, Flame, Candy, Utensils, ShoppingBag, Plus } from 'lucide-react';
+import AiRecommendationsRail from '../../components/common/AiRecommendationsRail';
+import { translations, getCategoryTranslation } from '../../services/menuTranslations';
+import { Search, Flame, Candy, Utensils, ShoppingBag, Plus, Globe, Sparkles } from 'lucide-react';
 
 export default function PublicMenuPage({ onOpenCart }) {
   const [searchParams] = useSearchParams();
   const [categories, setCategories] = useState([]);
   const [menuItems, setMenuItems] = useState([]);
   const [activeCategory, setActiveCategory] = useState(searchParams.get('category') || 'ALL');
-  const [vegFilter, setVegFilter] = useState('ALL'); // ALL, VEG, NON_VEG
+  const [dietaryFilter, setDietaryFilter] = useState('ALL'); // ALL, VEG, NON_VEG, VEGAN, GLUTEN_FREE, SPECIAL
+  const [spiceFilter, setSpiceFilter] = useState('ALL'); // ALL, MILD, MEDIUM, HOT, EXTRA_HOT
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedItemForModal, setSelectedItemForModal] = useState(null);
+  const [lang, setLang] = useState('en');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
 
-  const { addItem, itemCount, orderSource, setOrderSource } = useCart();
+  const t = translations[lang] || translations.en;
+  const { addItem, items, itemCount, orderSource, setOrderSource } = useCart();
   const { addToast } = useNotification();
 
   useEffect(() => {
@@ -46,10 +51,22 @@ export default function PublicMenuPage({ onOpenCart }) {
 
   const filteredItems = menuItems.filter(item => {
     const matchesCat = activeCategory === 'ALL' || item.categoryId === activeCategory;
-    const matchesVeg = vegFilter === 'ALL' || item.vegNonveg === vegFilter;
-    const matchesSearch = !searchQuery || item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          (item.description || '').toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesCat && matchesVeg && matchesSearch;
+    const matchesDietary =
+      dietaryFilter === 'ALL' ||
+      (dietaryFilter === 'VEG' && item.vegNonveg === 'VEG') ||
+      (dietaryFilter === 'NON_VEG' && item.vegNonveg === 'NON_VEG') ||
+      (dietaryFilter === 'VEGAN' && (item.dietaryTags || []).some(t => /vegan/i.test(t))) ||
+      (dietaryFilter === 'GLUTEN_FREE' && (item.dietaryTags || []).some(t => /gluten/i.test(t))) ||
+      (dietaryFilter === 'SPECIAL' && Boolean(item.isSpecial));
+    const matchesSpice =
+      spiceFilter === 'ALL' ||
+      (item.spiceLevel || '').toUpperCase().replace(/\s+/g, '_') === spiceFilter;
+    const matchesSearch = !searchQuery ||
+      item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (item.description || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (item.ingredients || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (item.allergens || []).some(a => a.toLowerCase().includes(searchQuery.toLowerCase()));
+    return matchesCat && matchesDietary && matchesSpice && matchesSearch;
   });
 
   return (
@@ -67,57 +84,79 @@ export default function PublicMenuPage({ onOpenCart }) {
         </p>
       </div>
 
-      <div className="flex flex-wrap justify-center gap-2">
+      <div className="flex flex-wrap justify-center items-center gap-2">
         <a href="/delivery" className="rounded-full border border-[#E8D1CE] bg-white px-4 py-2 text-xs text-[#75666B] hover:border-[#11164B]">Delivery to your door</a>
         <a href="/takeaway" className="rounded-full border border-[#E8D1CE] bg-white px-4 py-2 text-xs text-[#75666B] hover:border-[#11164B]">Collect at the bistro</a>
+        {/* Language Switcher (Feature 12) */}
+        <button
+          onClick={() => setLang(l => l === 'en' ? 'hi' : 'en')}
+          className="flex items-center gap-1.5 rounded-full border border-[#E8D1CE] bg-white px-3.5 py-2 text-xs font-bold text-[#11164B] hover:bg-[#FAF1F0] transition-colors"
+          title="Toggle Language / भाषा बदलें"
+        >
+          <Globe size={13} className="text-[#11164B]" />
+          <span>{lang === 'en' ? 'हिन्दी' : 'English'}</span>
+        </button>
         <button onClick={onOpenCart} className="btn-3d-crimson rounded-full px-4 py-2 text-xs font-semibold text-white">View basket ({itemCount})</button>
       </div>
       {loading && <p role="status" className="py-8 text-center text-sm text-[#75666B]">Loading today’s menu…</p>}
       {error && <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-center text-sm text-amber-900">{error}<button onClick={() => setRetry(n=>n+1)} className="ml-3 underline">Try again</button></div>}
       {!loading && !error && !filteredItems.length && <p className="rounded-xl border border-[#E8D1CE] bg-white py-10 text-center text-sm text-[#75666B]">No dishes match your selection. Try another category or search.</p>}
 
+      {/* AI Recommendations Rail (Feature 9) */}
+      <AiRecommendationsRail menuItems={menuItems} cartItems={items} lang={lang} />
+
       {/* Filter and Search Bar */}
       <div className="bg-white p-4 sm:p-5 rounded-2xl border border-[#E8D1CE] shadow-xs space-y-4">
-        <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
+        <div className="flex flex-col md:flex-row gap-3 items-center justify-between">
           <div className="relative flex-1 w-full">
             <Search className="w-4 h-4 absolute left-3.5 top-3 text-[#A48A8D]" />
             <input
               type="text"
               aria-label="Search menu"
-              placeholder="Search by dish name, ingredients..."
+              placeholder={t.searchPlaceholder}
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               className="w-full text-xs pl-9 pr-4 py-2.5 rounded-xl border border-[#E8D1CE] focus:border-[#11164B] focus:ring-1 focus:ring-[#11164B] outline-none transition-colors"
             />
           </div>
 
-          <div className="flex items-center space-x-1.5 bg-[#FAF1F0] p-1 rounded-xl w-full sm:w-auto justify-center border border-[#E8D1CE]">
-            <button
-              onClick={() => setVegFilter('ALL')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                vegFilter === 'ALL' ? 'bg-[#11164B] text-[#FAF1F0] shadow-xs' : 'text-[#75666B] hover:text-[#11164B]'
-              }`}
+          <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+            {/* Dietary Filter Pills */}
+            <div className="flex items-center space-x-1 bg-[#FAF1F0] p-1 rounded-xl border border-[#E8D1CE] overflow-x-auto">
+              {[
+                ['ALL', 'All'],
+                ['VEG', 'Veg Only'],
+                ['NON_VEG', 'Non-Veg'],
+                ['VEGAN', 'Vegan 🌱'],
+                ['GLUTEN_FREE', 'Gluten-Free 🌾'],
+                ['SPECIAL', '⭐ Specials']
+              ].map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setDietaryFilter(key)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
+                    dietaryFilter === key ? 'bg-[#11164B] text-[#FAF1F0] shadow-xs' : 'text-[#75666B] hover:text-[#11164B]'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Spice Filter Select */}
+            <select
+              value={spiceFilter}
+              onChange={e => setSpiceFilter(e.target.value)}
+              className="pos-select text-xs py-1.5 px-3 rounded-xl border border-[#E8D1CE] bg-white text-[#75666B] font-semibold outline-none"
+              aria-label="Filter by spice level"
             >
-              All
-            </button>
-            <button
-              onClick={() => setVegFilter('VEG')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center space-x-1 transition-all ${
-                vegFilter === 'VEG' ? 'bg-emerald-700 text-white shadow-xs' : 'text-emerald-800 hover:text-emerald-950'
-              }`}
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-              <span>Veg Only</span>
-            </button>
-            <button
-              onClick={() => setVegFilter('NON_VEG')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center space-x-1 transition-all ${
-                vegFilter === 'NON_VEG' ? 'bg-rose-700 text-white shadow-xs' : 'text-rose-800 hover:text-rose-950'
-              }`}
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
-              <span>Non-Veg</span>
-            </button>
+              <option value="ALL">All Spice Levels</option>
+              <option value="MILD">🌶️ Mild</option>
+              <option value="MEDIUM">🌶️🌶️ Medium</option>
+              <option value="HOT">🌶️🌶️🌶️ Hot</option>
+              <option value="EXTRA_HOT">🔥 Extra Hot</option>
+            </select>
           </div>
         </div>
 
@@ -167,7 +206,7 @@ export default function PublicMenuPage({ onOpenCart }) {
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   loading="lazy"
                 />
-                <div className="absolute top-2.5 left-2.5 flex items-center space-x-1.5">
+                <div className="absolute top-2.5 left-2.5 flex items-center space-x-1.5 flex-wrap gap-1">
                   <span className={`w-4 h-4 rounded-sm border bg-white/95 flex items-center justify-center ${
                     item.vegNonveg === 'VEG' ? 'border-emerald-600' : 'border-rose-600'
                   }`}>
@@ -178,6 +217,11 @@ export default function PublicMenuPage({ onOpenCart }) {
                   <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#11164B]/80 text-[#FAF1F0] backdrop-blur-xs">
                     {item.categoryName}
                   </span>
+                  {item.isSpecial && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500 text-white shadow-xs">
+                      ⭐ Chef Special
+                    </span>
+                  )}
                 </div>
                 {!item.availability && (
                   <div className="absolute inset-0 bg-[#11164B]/70 flex items-center justify-center text-[#FAF1F0] font-medium text-xs">
@@ -193,21 +237,44 @@ export default function PublicMenuPage({ onOpenCart }) {
                 <p className="text-xs text-[#75666B] line-clamp-2 mt-1 leading-relaxed">
                   {item.description}
                 </p>
-                <div className="flex items-center space-x-2 mt-2">
+                <div className="flex flex-wrap items-center gap-1.5 mt-2">
                   {item.isSweet && (
                     <span className="text-[10px] text-pink-700 bg-pink-50 border border-pink-200 px-2 py-0.5 rounded font-medium">Sweet</span>
                   )}
-                  {item.spiceLevel !== 'NONE' && (
-                    <span className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded font-medium">{item.spiceLevel}</span>
+                  {item.spiceLevel && item.spiceLevel !== 'NONE' && (
+                    <span className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded font-medium">
+                      {item.spiceLevel === 'MILD' && '🌶️ Mild'}
+                      {item.spiceLevel === 'MEDIUM' && '🌶️🌶️ Medium'}
+                      {item.spiceLevel === 'HOT' && '🌶️🌶️🌶️ Hot'}
+                      {(item.spiceLevel === 'EXTRA_HOT' || item.spiceLevel === 'EXTRA HOT') && '🔥 Extra Hot'}
+                      {!['MILD', 'MEDIUM', 'HOT', 'EXTRA_HOT', 'EXTRA HOT'].includes(item.spiceLevel) && item.spiceLevel}
+                    </span>
                   )}
+                  {(item.dietaryTags || []).map((tag, i) => (
+                    <span key={i} className="text-[10px] text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded font-medium">
+                      {tag}
+                    </span>
+                  ))}
                 </div>
+                {item.allergens && item.allergens.length > 0 && (
+                  <p className="text-[10px] text-amber-800 bg-amber-50/70 border border-amber-200/60 px-2 py-0.5 rounded mt-2 font-medium">
+                    ⚠️ Allergens: {item.allergens.join(', ')}
+                  </p>
+                )}
               </div>
             </div>
 
             <div className="flex items-center justify-between pt-3 mt-3 border-t border-[#E8D1CE]">
               <div>
                 <span className="text-[10px] uppercase font-bold tracking-wider text-[#75666B]">Price</span>
-                <p className="text-base font-bold text-[#11164B]">₹{item.price}</p>
+                {item.portions && item.portions.length > 0 ? (
+                  <div>
+                    <p className="text-base font-bold text-[#11164B]">from ₹{item.portions[0].price}</p>
+                    <p className="text-[10px] text-[#75666B]">{item.portions.map(p => `${p.name}: ₹${p.price}`).join(' • ')}</p>
+                  </div>
+                ) : (
+                  <p className="text-base font-bold text-[#11164B]">₹{item.price}</p>
+                )}
               </div>
 
               {item.availability ? (
@@ -231,9 +298,9 @@ export default function PublicMenuPage({ onOpenCart }) {
         isOpen={Boolean(selectedItemForModal)}
         onClose={() => setSelectedItemForModal(null)}
         item={selectedItemForModal}
-        onAddToCart={(item, qty, cust, addons, note) => {
-          addItem(item, qty, cust, addons, note);
-          addToast(`Added ${item.name} to cart.`, 'success');
+        onAddToCart={(item, qty, cust, addons, note, portion) => {
+          addItem(item, qty, cust, addons, note, portion);
+          addToast(`Added ${item.name}${portion ? ` (${portion.name})` : ''} to cart.`, 'success');
         }}
       />
     </div>

@@ -180,14 +180,63 @@ public record TableDto(
     string QrIdentifier,
     string? CurrentCustomerName,
     Guid? AssignedWaiterId,
-    string? AssignedWaiterName
+    string? AssignedWaiterName,
+    int PositionX = 0,
+    int PositionY = 0,
+    string Shape = "SQUARE",
+    string DiningArea = "everyday"
 )
 {
     // Capture display metadata before a public response removes its private QR identifier.
-    public string DiningArea { get; init; } = DiningLayoutCatalog.Area(Capacity, QrIdentifier);
+    public string AreaName { get; init; } = DiningLayoutCatalog.Area(Capacity, QrIdentifier);
     public string DisplayName { get; init; } = DiningLayoutCatalog.DisplayName(TableNumber, QrIdentifier);
     public string SeatingStyle { get; init; } = DiningLayoutCatalog.SeatingStyle(Capacity, QrIdentifier);
 }
+
+public record UpdateTablePositionDto(
+    int PositionX,
+    int PositionY,
+    string? Shape = "SQUARE",
+    string? DiningArea = "everyday"
+);
+
+public record InventoryItemDto(
+    Guid ItemId,
+    Guid RestaurantId,
+    string Name,
+    string Category,
+    string Unit,
+    decimal CurrentStock,
+    decimal MinThreshold,
+    decimal CostPerUnit,
+    string Status,
+    DateTime UpdatedAt
+);
+
+public record CreateInventoryItemDto(
+    Guid RestaurantId,
+    [Required] string Name,
+    string? Category,
+    [Required] string Unit,
+    decimal CurrentStock,
+    decimal MinThreshold,
+    decimal CostPerUnit
+);
+
+public record UpdateStockDto(
+    decimal QuantityChange,
+    string? Reason
+);
+
+public record ReportShortageDto(
+    Guid RestaurantId,
+    string ItemType, // 'DISH' | 'INGREDIENT'
+    Guid? MenuItemId,
+    string? IngredientName,
+    string ShortageStatus, // 'OUT_OF_STOCK' | 'LOW_STOCK'
+    string UrgencyLevel, // 'HIGH' | 'CRITICAL'
+    bool MarkDishSoldOut
+);
 
 public record UpdateTableStatusRequest(
     [Required] string Status,
@@ -258,7 +307,10 @@ public record InitiatePaymentRequest(
     Guid? ReservationId,
     decimal Amount,
     string Method,
-    string? IdempotencyKey
+    string? IdempotencyKey,
+    decimal TipAmount = 0,
+    int SplitCount = 1,
+    string SplitType = "FULL"
 );
 
 public record VerifyPaymentRequest(
@@ -277,7 +329,10 @@ public record PaymentDto(
     string Method,
     string Status,
     string? TransactionId,
-    DateTime CreatedAt
+    DateTime CreatedAt,
+    decimal TipAmount = 0,
+    int SplitCount = 1,
+    string SplitType = "FULL"
 );
 
 public record WebhookPayloadDto(
@@ -347,4 +402,64 @@ public record CreateStaffDto(
     string? Phone,
     string? Role,
     string? Password
+);
+
+// --- LOYALTY, FEEDBACK & SAAS DTOS ---
+public record CustomerLoyaltyDto(
+    Guid LoyaltyId,
+    Guid RestaurantId,
+    string CustomerPhone,
+    string? CustomerName,
+    string? CustomerEmail,
+    int PointsBalance,
+    int LifetimePoints,
+    string Tier
+);
+
+public record EarnLoyaltyPointsDto(
+    Guid RestaurantId,
+    [Required] string CustomerPhone,
+    string? CustomerName,
+    decimal OrderAmount
+);
+
+public record RedeemLoyaltyPointsDto(
+    Guid RestaurantId,
+    [Required] string CustomerPhone,
+    int PointsToRedeem
+);
+
+public record CustomerFeedbackDto(
+    Guid FeedbackId,
+    Guid RestaurantId,
+    Guid? OrderId,
+    string? CustomerName,
+    string? CustomerPhone,
+    int Rating,
+    int FoodRating,
+    int ServiceRating,
+    int AmbianceRating,
+    string? Comment,
+    bool GoogleReviewClicked,
+    DateTime CreatedAt
+);
+
+public record CreateFeedbackDto(
+    Guid RestaurantId,
+    Guid? OrderId,
+    string? CustomerName,
+    string? CustomerPhone,
+    int Rating,
+    int? FoodRating,
+    int? ServiceRating,
+    int? AmbianceRating,
+    string? Comment,
+    bool? GoogleReviewClicked
+);
+
+public record UpdateRestaurantWifiDto(
+    string? WifiSsid,
+    string? WifiPassword,
+    bool? WifiEnabled,
+    string? GoogleReviewUrl
 );

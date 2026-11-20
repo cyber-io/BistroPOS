@@ -13,14 +13,47 @@ const tabs = [
   ['SERVICE', 'In service', ['PENDING_CONFIRMATION', 'CONFIRMATION_TIMEOUT', 'OUT_FOR_DELIVERY']],
   ['DELIVERED', 'Completed', ['DELIVERED', 'PICKED_UP']], ['CANCELLED', 'Cancelled', ['CANCELLED']]
 ];
+function getItemStation(item) {
+  const name = (item.name || item.itemName || '').toLowerCase();
+  const cat = (item.categoryName || '').toLowerCase();
+  if (cat.includes('beverage') || /coffee|mojito|shake|tea|drink|juice|soda/i.test(name)) return 'BEVERAGES';
+  if (cat.includes('dessert') || /ice cream|brownie|jamun|cake|dessert/i.test(name)) return 'DESSERTS';
+  if (/grill|tikka|bbq|tandoor|roast|kebab/i.test(name)) return 'GRILL';
+  return 'MAIN';
+}
+
 export default function KitchenDashboard() {
   const { addToast } = useNotification();
   const [orders, setOrders] = useState([]);
   const [menu, setMenu] = useState([]);
+  const [inventory, setInventory] = useState([]);
+  const [stationFilter, setStationFilterState] = useState(() => {
+    try {
+      const saved = localStorage.getItem('bistro_kitchen_station');
+      if (saved && ['ALL', 'MAIN', 'GRILL', 'BEVERAGES', 'DESSERTS'].includes(saved)) {
+        return saved;
+      }
+    } catch {
+      // ignore
+    }
+    return 'ALL';
+  });
+
+  const setStationFilter = useCallback((st) => {
+    setStationFilterState(prev => {
+      const val = typeof st === 'function' ? st(prev) : st;
+      try {
+        localStorage.setItem('bistro_kitchen_station', val);
+      } catch {
+        // ignore
+      }
+      return val;
+    });
+  }, []);
   const [tab, setTabState] = useState(() => {
     try {
       const saved = localStorage.getItem('bistro_kitchen_tab');
-      if (saved && (tabs.some(([k]) => k === saved) || saved === 'AVAILABILITY')) {
+      if (saved && (tabs.some(([k]) => k === saved) || saved === 'AVAILABILITY' || saved === 'INVENTORY')) {
         return saved;
       }
     } catch {
@@ -89,11 +122,29 @@ export default function KitchenDashboard() {
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const [nextOrders, items] = await Promise.all([api.getOrders(), api.getMenuItems()]);
-      setOrders(nextOrders); setMenu(items); setError('');
+      const [nextOrders, items, inv] = await Promise.all([
+        api.getOrders(),
+        api.getMenuItems(),
+        api.getInventory().catch(() => [])
+      ]);
+      setOrders(nextOrders); setMenu(items); setInventory(inv); setError('');
     } catch (err) { setError(err.message || 'Unable to load kitchen orders. Please try again.'); }
     finally { if (!silent) setLoading(false); }
   }, []);
+
+  const handleAdjustStock = async (item, delta) => {
+    if (busy) return;
+    setBusy(item.itemId);
+    try {
+      await api.updateInventoryStock(item.itemId, delta, 'Quick adjustment from kitchen panel');
+      setInventory(prev => prev.map(i => i.itemId === item.itemId ? { ...i, currentStock: Math.max(0, Number(i.currentStock) + delta) } : i));
+      addToast(`Updated stock for ${item.name}`, 'success');
+    } catch (err) {
+      addToast(err.message || 'Failed to update stock', 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
   useEffect(() => {
     load();
     const unsubscribe = subscribeRealtimeEvents((type, payload) => {
@@ -128,7 +179,10 @@ export default function KitchenDashboard() {
     finally { setBusy(null); }
   };
   const term = search.trim().toLowerCase();
-  const matches = order => (source === 'ALL' || order.source === source) && (!term || [order.orderNumber, order.tableNumber ? `${tableTitle(order)} table ${order.tableNumber}` : '', order.customerName, ...order.items.map(item => item.name)].join(' ').toLowerCase().includes(term));
+  const matches = order =>
+    (source === 'ALL' || order.source === source) &&
+    (stationFilter === 'ALL' || order.items.some(i => getItemStation(i) === stationFilter)) &&
+    (!term || [order.orderNumber, order.tableNumber ? `${tableTitle(order)} table ${order.tableNumber}` : '', order.customerName, ...order.items.map(item => item.name)].join(' ').toLowerCase().includes(term));
   const filtered = orders.filter(matches);
   const statuses = tabs.find(([key]) => key === tab)?.[2] || [];
   const tickets = filtered.filter(order => statuses.includes(order.status));
@@ -148,6 +202,7 @@ export default function KitchenDashboard() {
         </button>
       </div>
     </div>
+
     <div className="pos-toolbar" style={{ gap: 12, marginBottom: 19 }}>
       <div className="pos-segment" style={{ flexWrap: 'wrap' }}>
         {tabs.map(([key, title, states]) => {
@@ -168,6 +223,14 @@ export default function KitchenDashboard() {
             </button>
           );
         })()}
+        <button className={tab === 'INVENTORY' ? 'active' : ''} onClick={() => setTab('INVENTORY')}>
+          Raw inventory
+          {inventory.filter(i => i.status !== 'IN_STOCK').length > 0 && (
+            <span className="pos-count" style={{ marginLeft: 7, background: '#ce626a', color: '#fff' }}>
+              {inventory.filter(i => i.status !== 'IN_STOCK').length}
+            </span>
+          )}
+        </button>
       </div>
       <div className="pos-toolbar-actions" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <div className="pos-search" style={{ minWidth: 260 }}>
@@ -177,39 +240,209 @@ export default function KitchenDashboard() {
             aria-label="Search kitchen tickets or dishes"
             value={search}
             onChange={event => setSearch(event.target.value)}
-            placeholder={tab === 'AVAILABILITY' ? 'Search dishes…' : 'Search order, table or dish…'}
+            placeholder={tab === 'AVAILABILITY' ? 'Search dishes…' : tab === 'INVENTORY' ? 'Search raw supplies…' : 'Search order, table or dish…'}
           />
         </div>
-        {tab !== 'AVAILABILITY' && (
-          <select
-            aria-label="Order source"
-            value={source}
-            onChange={event => setSource(event.target.value)}
-            className="pos-select"
-            style={{ height: 37, minHeight: 37, minWidth: 125 }}
-          >
-            <option value="ALL">All sources</option>
-            <option value="DINE_IN_QR">Dine in</option>
-            <option value="DELIVERY">Delivery</option>
-            <option value="TAKEAWAY">Takeaway</option>
-          </select>
+        {tab !== 'AVAILABILITY' && tab !== 'INVENTORY' && (
+          <>
+            <select
+              aria-label="Kitchen station"
+              value={stationFilter}
+              onChange={event => setStationFilter(event.target.value)}
+              className="pos-select"
+              style={{ height: 37, minHeight: 37, minWidth: 125 }}
+            >
+              <option value="ALL">All stations</option>
+              <option value="MAIN">Main Kitchen</option>
+              <option value="GRILL">Grill Station</option>
+              <option value="BEVERAGES">Beverages</option>
+              <option value="DESSERTS">Desserts</option>
+            </select>
+            <select
+              aria-label="Order source"
+              value={source}
+              onChange={event => setSource(event.target.value)}
+              className="pos-select"
+              style={{ height: 37, minHeight: 37, minWidth: 125 }}
+            >
+              <option value="ALL">All sources</option>
+              <option value="DINE_IN_QR">Dine in</option>
+              <option value="DELIVERY">Delivery</option>
+              <option value="TAKEAWAY">Takeaway</option>
+            </select>
+          </>
         )}
       </div>
     </div>
     {error && <div className="pos-info-box" role="alert" style={{ color: '#ce626a', marginBottom: 18 }}><AlertCircle size={16} /><span>{error}</span><button className="pos-button small" style={{ marginLeft: 'auto' }} onClick={() => load()}>Try again</button></div>}
-    {loading ? <Spinner /> : tab === 'AVAILABILITY' ? <div className="pos-panel"><div className="pos-panel-header"><h2>Menu availability</h2><div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><button className="pos-button small" onClick={() => setStockModal(true)}><Package size={13} /> Report Stock Shortage</button><span className="pos-count">{menu.filter(item => !item.availability).length} sold out</span></div></div>{!visibleMenu.length ? <Empty icon={ChefHat} title="No dishes found">Try a different dish name.</Empty> : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(270px,1fr))' }}>{visibleMenu.map(item => <div className="pos-stock-item" key={item.menuItemId} style={{ padding: 16 }}><img src={item.image} alt="" /><div style={{ minWidth: 0 }}><b>{item.name}</b><small>{item.categoryName}</small></div><button className={`pos-button small ${item.availability ? '' : 'danger'}`} disabled={Boolean(busy)} aria-label={`${item.availability ? 'Mark sold out' : 'Mark available'}: ${item.name}`} onClick={() => toggle(item)} style={{ marginLeft: 'auto' }}>{item.availability ? <Check size={13} /> : <Ban size={13} />}{busy === item.menuItemId ? 'Saving…' : item.availability ? 'Available' : 'Sold out'}</button></div>)}</div>}</div> : !tickets.length ? <div className="pos-panel"><Empty icon={ChefHat} title={error ? 'Orders could not be loaded' : 'The pass is clear'}>{error ? 'Retry when your connection is restored.' : search || source !== 'ALL' ? 'No orders match these filters.' : `No ${tabs.find(([key]) => key === tab)?.[1].toLowerCase()} orders right now.`}</Empty></div> : <div className="pos-orders-grid">
-      {tickets.map(order => <article className="pos-panel" key={order.orderId} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <header className="pos-panel-header" style={{ alignItems: 'flex-start' }}><div><strong style={{ fontSize: 12 }}>{order.orderNumber}</strong><p style={{ color: 'var(--p-muted)', fontSize: 9, marginTop: 7 }}>{order.source === 'DINE_IN_QR' ? tableTitle(order) : label(order.source)} · {time(order.createdAt)}</p></div><Badge status={order.status} /></header>
-        <div style={{ padding: 15, flex: 1, display: 'flex', flexDirection: 'column' }}><div style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--p-muted)', fontSize: 9, marginBottom: 13 }}><Clock size={12} />{Math.max(0, Math.floor((Date.now() - new Date(order.createdAt).getTime()) / 60000))} min ago{order.customerName && !order.customerName.startsWith('Table ') && <span style={{ marginLeft: 'auto' }}>{order.customerName}</span>}</div>
-          <div style={{ flex: 1 }}>
-            {order.items.map((item, index) => <div key={item.orderItemId || index} className="pos-line-item" style={{ padding: '10px 0', alignItems: 'flex-start' }}><div><b>{item.name}</b>{item.customization && Object.keys(item.customization).length > 0 && <small>{Object.entries(item.customization).map(([key, value]) => `${label(key)}: ${Array.isArray(value) ? value.join(', ') : value}`).join(' · ')}</small>}{item.specialInstruction && <small style={{ color: '#d59b37' }}>Note: {item.specialInstruction}</small>}</div><b style={{ color: 'var(--p-blue)' }}>×{item.quantity}</b></div>)}
-            {order.specialInstructions && <div className="pos-info-box" style={{ color: '#b58b3e' }}>{order.specialInstructions}</div>}{(order.rejectionReason || order.cancellationReason) && <div className="pos-info-box" style={{ color: '#ce626a' }}>{order.rejectionReason || order.cancellationReason}</div>}
+    {loading ? <Spinner /> : tab === 'INVENTORY' ? (
+      <div className="pos-panel">
+        <div className="pos-panel-header">
+          <div>
+            <h2>Raw Ingredient Inventory</h2>
+            <p style={{ color: 'var(--p-muted)', fontSize: 11 }}>Track and restock pantry supplies, produce, dairy, and spices.</p>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button className="pos-button small" onClick={() => setStockModal(true)}>
+              <Package size={13} /> Report Shortage
+            </button>
+            <span className="pos-count">{inventory.length} ingredients</span>
           </div>
         </div>
-        <footer style={{ borderTop: '1px solid var(--p-border)', padding: 12, marginTop: 'auto' }}>
-          {order.status === 'NEW' || order.status === 'ACCEPTED' ? <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 8 }}><button className="pos-button danger small" disabled={Boolean(busy)} onClick={() => { setRejectOrder(order); setReason('Ingredients out of stock'); }}>Reject</button><button className="pos-button primary small" disabled={Boolean(busy)} onClick={() => transition(order, 'PREPARING')}><Check size={13} style={{ display: 'inline', marginRight: 4 }} />{busy === order.orderId ? 'Accepting…' : 'Accept order'}</button></div> : order.status === 'PREPARING' ? <button className="pos-button primary full" disabled={Boolean(busy)} onClick={() => transition(order, order.source === 'TAKEAWAY' ? 'READY_FOR_PICKUP' : 'READY')}><Bell size={14} />{busy === order.orderId ? 'Saving…' : 'Mark ready'}</button> : <p style={{ textAlign: 'center', color: 'var(--p-muted)', fontSize: 9 }}>{order.status === 'READY_FOR_PICKUP' ? 'Waiting for customer collection' : order.status === 'READY' ? order.source === 'DINE_IN_QR' ? 'Waiting for floor staff' : 'Waiting for delivery dispatch' : order.status === 'CONFIRMATION_TIMEOUT' ? 'Front desk is checking delivery' : label(order.status)} · {money(order.total)}</p>}
-        </footer>
-      </article>)}
+
+        <div style={{ padding: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
+            {inventory.filter(i => !term || `${i.name} ${i.category}`.toLowerCase().includes(term)).map(item => {
+              const isLow = Number(item.currentStock) <= Number(item.minThreshold);
+              const isOut = Number(item.currentStock) <= 0;
+              return (
+                <div key={item.itemId} className="pos-panel" style={{ padding: 14, borderColor: isOut ? '#fca5a5' : isLow ? '#fde047' : undefined }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                    <div>
+                      <strong style={{ fontSize: 13, display: 'block' }}>{item.name}</strong>
+                      <small style={{ color: 'var(--p-muted)', fontSize: 10, textTransform: 'uppercase', fontWeight: 700 }}>{item.category}</small>
+                    </div>
+                    <span style={{
+                      fontSize: 10,
+                      fontWeight: 800,
+                      padding: '2px 7px',
+                      borderRadius: 6,
+                      background: isOut ? '#fee2e2' : isLow ? '#fef9c3' : '#dcfce7',
+                      color: isOut ? '#b91c1c' : isLow ? '#854d0e' : '#15803d'
+                    }}>
+                      {isOut ? 'OUT OF STOCK' : isLow ? 'LOW STOCK' : 'IN STOCK'}
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <div>
+                      <span style={{ fontSize: 20, fontWeight: 900 }}>{Number(item.currentStock).toFixed(1)}</span>
+                      <span style={{ fontSize: 11, color: 'var(--p-muted)', marginLeft: 4 }}>{item.unit}</span>
+                    </div>
+                    <span style={{ fontSize: 10, color: 'var(--p-muted)' }}>Min: {item.minThreshold} {item.unit}</span>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <button
+                      className="pos-button small"
+                      style={{ flex: 1 }}
+                      disabled={Boolean(busy) || Number(item.currentStock) <= 0}
+                      onClick={() => handleAdjustStock(item, -1)}
+                    >
+                      -1 {item.unit}
+                    </button>
+                    <button
+                      className="pos-button small"
+                      style={{ flex: 1 }}
+                      disabled={Boolean(busy)}
+                      onClick={() => handleAdjustStock(item, 1)}
+                    >
+                      +1 {item.unit}
+                    </button>
+                    <button
+                      className="pos-button small primary"
+                      style={{ flex: 1 }}
+                      disabled={Boolean(busy)}
+                      onClick={() => handleAdjustStock(item, 5)}
+                    >
+                      +5 {item.unit}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    ) : tab === 'AVAILABILITY' ? <div className="pos-panel"><div className="pos-panel-header"><h2>Menu availability</h2><div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><button className="pos-button small" onClick={() => setStockModal(true)}><Package size={13} /> Report Stock Shortage</button><span className="pos-count">{menu.filter(item => !item.availability).length} sold out</span></div></div>{!visibleMenu.length ? <Empty icon={ChefHat} title="No dishes found">Try a different dish name.</Empty> : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(270px,1fr))' }}>{visibleMenu.map(item => <div className="pos-stock-item" key={item.menuItemId} style={{ padding: 16 }}><img src={item.image} alt="" /><div style={{ minWidth: 0 }}><b>{item.name}</b><small>{item.categoryName}</small></div><button className={`pos-button small ${item.availability ? '' : 'danger'}`} disabled={Boolean(busy)} aria-label={`${item.availability ? 'Mark sold out' : 'Mark available'}: ${item.name}`} onClick={() => toggle(item)} style={{ marginLeft: 'auto' }}>{item.availability ? <Check size={13} /> : <Ban size={13} />}{busy === item.menuItemId ? 'Saving…' : item.availability ? 'Available' : 'Sold out'}</button></div>)}</div>}</div> : !tickets.length ? <div className="pos-panel"><Empty icon={ChefHat} title={error ? 'Orders could not be loaded' : 'The pass is clear'}>{error ? 'Retry when your connection is restored.' : search || source !== 'ALL' || stationFilter !== 'ALL' ? 'No orders match these filters.' : `No ${tabs.find(([key]) => key === tab)?.[1].toLowerCase()} orders right now.`}</Empty></div> : <div className="pos-orders-grid">
+      {tickets.map(order => {
+        const elapsed = Math.max(0, Math.floor((Date.now() - new Date(order.createdAt).getTime()) / 60000));
+        const target = order.estimatedPrepTimeMinutes || 15;
+        const isDelayed = elapsed > target && ['NEW', 'ACCEPTED', 'PREPARING'].includes(order.status);
+        const isPriority = (order.source === 'DINE_IN_QR' && elapsed >= 15) || elapsed >= 20;
+
+        return <article className="pos-panel" key={order.orderId} style={{
+          display: 'flex',
+          flexDirection: 'column',
+          height: '100%',
+          borderColor: isDelayed ? '#eab308' : isPriority ? '#f97316' : undefined,
+          boxShadow: isDelayed ? '0 0 0 1px #eab308' : undefined
+        }}>
+          <header className="pos-panel-header" style={{ alignItems: 'flex-start' }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <strong style={{ fontSize: 12 }}>{order.orderNumber}</strong>
+                {isPriority && (
+                  <span style={{ fontSize: 9, fontWeight: 800, background: '#fff7ed', color: '#ea580c', border: '1px solid #fdba74', padding: '1px 5px', borderRadius: 4 }}>
+                    🔥 HIGH PRIORITY
+                  </span>
+                )}
+              </div>
+              <p style={{ color: 'var(--p-muted)', fontSize: 9, marginTop: 7 }}>{order.source === 'DINE_IN_QR' ? tableTitle(order) : label(order.source)} · {time(order.createdAt)}</p>
+            </div>
+            <Badge status={order.status} />
+          </header>
+          <div style={{ padding: 15, flex: 1, display: 'flex', flexDirection: 'column' }}>
+            {/* Timers & Delayed Alert (Feature 3) */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: 10,
+              padding: '4px 8px',
+              borderRadius: 6,
+              background: isDelayed ? '#fefce8' : 'var(--p-bg-subtle, #f8fafc)',
+              border: isDelayed ? '1px solid #fef08a' : '1px solid var(--p-border)',
+              fontSize: 10
+            }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontWeight: isDelayed ? 700 : 500, color: isDelayed ? '#a16207' : 'var(--p-muted)' }}>
+                <Clock size={12} className={['NEW', 'ACCEPTED', 'PREPARING'].includes(order.status) ? 'pos-spin' : ''} />
+                {elapsed}m elapsed / {target}m target
+              </span>
+              {isDelayed && (
+                <span style={{ fontWeight: 800, color: '#ca8a04' }}>
+                  ⚠️ DELAYED
+                </span>
+              )}
+              {order.customerName && !order.customerName.startsWith('Table ') && (
+                <span style={{ color: 'var(--p-muted)' }}>{order.customerName}</span>
+              )}
+            </div>
+
+            <div style={{ flex: 1 }}>
+              {order.items.map((item, index) => {
+                const station = getItemStation(item);
+                return (
+                  <div key={item.orderItemId || index} className="pos-line-item" style={{ padding: '10px 0', alignItems: 'flex-start' }}>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <b>{item.name}</b>
+                        <span style={{
+                          fontSize: 9,
+                          fontWeight: 700,
+                          padding: '1px 4px',
+                          borderRadius: 4,
+                          background: station === 'GRILL' ? '#ffedd5' : station === 'BEVERAGES' ? '#e0f2fe' : station === 'DESSERTS' ? '#fce7f3' : '#f1f5f9',
+                          color: station === 'GRILL' ? '#c2410c' : station === 'BEVERAGES' ? '#0369a1' : station === 'DESSERTS' ? '#be185d' : '#475569'
+                        }}>
+                          {station}
+                        </span>
+                      </div>
+                      {item.customization && Object.keys(item.customization).length > 0 && <small>{Object.entries(item.customization).map(([key, value]) => `${label(key)}: ${Array.isArray(value) ? value.join(', ') : value}`).join(' · ')}</small>}
+                      {item.specialInstruction && <small style={{ color: '#d59b37' }}>Note: {item.specialInstruction}</small>}
+                    </div>
+                    <b style={{ color: 'var(--p-blue)' }}>×{item.quantity}</b>
+                  </div>
+                );
+              })}
+              {order.specialInstructions && <div className="pos-info-box" style={{ color: '#b58b3e' }}>{order.specialInstructions}</div>}{(order.rejectionReason || order.cancellationReason) && <div className="pos-info-box" style={{ color: '#ce626a' }}>{order.rejectionReason || order.cancellationReason}</div>}
+            </div>
+          </div>
+          <footer style={{ borderTop: '1px solid var(--p-border)', padding: 12, marginTop: 'auto' }}>
+            {order.status === 'NEW' || order.status === 'ACCEPTED' ? <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 8 }}><button className="pos-button danger small" disabled={Boolean(busy)} onClick={() => { setRejectOrder(order); setReason('Ingredients out of stock'); }}>Reject</button><button className="pos-button primary small" disabled={Boolean(busy)} onClick={() => transition(order, 'PREPARING')}><Check size={13} style={{ display: 'inline', marginRight: 4 }} />{busy === order.orderId ? 'Accepting…' : 'Accept order'}</button></div> : order.status === 'PREPARING' ? <button className="pos-button primary full" disabled={Boolean(busy)} onClick={() => transition(order, order.source === 'TAKEAWAY' ? 'READY_FOR_PICKUP' : 'READY')}><Bell size={14} />{busy === order.orderId ? 'Saving…' : 'Mark ready'}</button> : <p style={{ textAlign: 'center', color: 'var(--p-muted)', fontSize: 9 }}>{order.status === 'READY_FOR_PICKUP' ? 'Waiting for customer collection' : order.status === 'READY' ? order.source === 'DINE_IN_QR' ? 'Waiting for floor staff' : 'Waiting for delivery dispatch' : order.status === 'CONFIRMATION_TIMEOUT' ? 'Front desk is checking delivery' : label(order.status)} · {money(order.total)}</p>}
+          </footer>
+        </article>;
+      })}
     </div>}
     {rejectOrder && <Modal title={`Reject ${rejectOrder.orderNumber}`} onClose={() => { if (!busy) setRejectOrder(null); }}><div className="pos-modal-body"><p style={{ color: 'var(--p-muted)', fontSize: 11, lineHeight: 1.8, marginBottom: 18 }}>Let the customer know why their order cannot be prepared.</p><label className="pos-field"><span>Reason</span><select className="pos-select" style={{ width: '100%' }} value={reason} onChange={event => setReason(event.target.value)}><option>Ingredients out of stock</option><option>Kitchen at maximum capacity</option><option>Special request cannot be fulfilled</option><option>Kitchen closing shortly</option></select></label><button className="pos-button danger full" style={{ marginTop: 20 }} disabled={Boolean(busy)} onClick={() => transition(rejectOrder, 'CANCELLED', reason)}>{busy ? 'Saving…' : 'Confirm rejection'}</button></div></Modal>}
     {stockModal && (
@@ -272,11 +505,12 @@ export default function KitchenDashboard() {
               </div>
             )}
 
-            <div className="pos-form-grid">
-              <div className="pos-field">
+            <div className="pos-form-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12, width: '100%', boxSizing: 'border-box' }}>
+              <div className="pos-field" style={{ minWidth: 0, width: '100%', boxSizing: 'border-box' }}>
                 <span>Shortage status</span>
                 <select
                   className="pos-select"
+                  style={{ width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}
                   value={shortageReason}
                   onChange={e => setShortageReason(e.target.value)}
                 >
@@ -287,10 +521,11 @@ export default function KitchenDashboard() {
                 </select>
               </div>
 
-              <div className="pos-field">
+              <div className="pos-field" style={{ minWidth: 0, width: '100%', boxSizing: 'border-box' }}>
                 <span>Urgency level</span>
                 <select
                   className="pos-select"
+                  style={{ width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}
                   value={urgency}
                   onChange={e => setUrgency(e.target.value)}
                 >

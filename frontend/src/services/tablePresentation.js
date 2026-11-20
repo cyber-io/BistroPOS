@@ -1,10 +1,11 @@
 const defaultRestaurantId = 'a0000000-0000-0000-0000-000000000001';
 
 export function diningAreaForTable(table) {
-  if (table?.diningArea) return table.diningArea;
+  const explicit = String(table?.diningArea || '').trim().toLowerCase();
+  if (['everyday', 'group', 'family', 'party'].includes(explicit)) return explicit;
   const qr = String(table?.qrIdentifier || '');
-  if (qr.endsWith('_PARTY_HALL') || table?.tableId === 'c2000000-0000-0000-0000-000000000001') return 'party';
-  if (/_FAMILY_C[1-4]$/.test(qr) || /^c1000000-0000-0000-0000-00000000000[1-4]$/.test(table?.tableId || '')) return 'family';
+  if (qr.endsWith('_PARTY_HALL') || table?.tableId === 'c2000000-0000-0000-0000-000000000001' || Number(table?.tableNumber) === 201) return 'party';
+  if (/_FAMILY_C[1-4]$/.test(qr) || /^c1000000-0000-0000-0000-00000000000[1-4]$/.test(table?.tableId || '') || (Number(table?.tableNumber) >= 101 && Number(table?.tableNumber) <= 104)) return 'family';
   const capacity = Number(table?.capacity);
   return capacity > 10 ? 'family' : capacity > 4 ? 'group' : 'everyday';
 }
