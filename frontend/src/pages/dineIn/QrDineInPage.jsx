@@ -38,7 +38,9 @@ import {
   CreditCard,
   Languages,
   Gamepad2,
-  Users
+  Users,
+  User,
+  Phone
 } from 'lucide-react';
 
 const getCategoryIcon = (name = '') => {
@@ -96,6 +98,12 @@ export default function QrDineInPage() {
   const [selectedItemForModal, setSelectedItemForModal] = useState(null);
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
 
+  // Guest Identification (Customer Name & Mobile Number)
+  const [guestName, setGuestName] = useState('');
+  const [guestPhone, setGuestPhone] = useState('');
+  const [isGuestModalOpen, setIsGuestModalOpen] = useState(false);
+  const [guestError, setGuestError] = useState('');
+
   // Active Placed Order & 1-Minute Cancellation Timer
   const [activeOrder, setActiveOrder] = useState(null);
   const [cancelSecondsRemaining, setCancelSecondsRemaining] = useState(0);
@@ -104,16 +112,44 @@ export default function QrDineInPage() {
 
   useEffect(() => { activeOrderRef.current = activeOrder; }, [activeOrder]);
   const updateActiveOrder = useCallback(order => {
-    setActiveOrder(order);
-    activeOrderRef.current = order;
-    if (order?.status === 'PENDING_CONFIRMATION') {
-      const promptKey = `${order.orderId}:${order.confirmationRequestedAt || ''}`;
+    // If order is paid or fully settled, table session is cleared
+    const isPaid = order && (order.paymentStatus === 'PAID' || (Number(order.paidAmount) || 0) >= (Number(order.total) || 0) - 0.05);
+    const validOrder = (order && !isPaid && order.status !== 'CANCELLED') ? order : null;
+    setActiveOrder(validOrder);
+    activeOrderRef.current = validOrder;
+    if (validOrder?.status === 'PENDING_CONFIRMATION') {
+      const promptKey = `${validOrder.orderId}:${validOrder.confirmationRequestedAt || ''}`;
       if (!promptedOrders.current.has(promptKey)) {
         promptedOrders.current.add(promptKey);
         setIsReceiptModalOpen(true);
       }
     } else setIsReceiptModalOpen(false);
   }, []);
+
+  // Restore guest info from active order or localStorage
+  useEffect(() => {
+    if (!table) return;
+    try {
+      const saved = JSON.parse(localStorage.getItem(`bistro_table_guest_${table.tableId}`) || 'null');
+      if (saved?.name) setGuestName(saved.name);
+      if (saved?.phone) setGuestPhone(saved.phone);
+    } catch {}
+  }, [table]);
+
+  useEffect(() => {
+    if (activeOrder?.customerName && activeOrder.customerName !== 'Guest') {
+      setGuestName(activeOrder.customerName);
+      if (activeOrder.customerPhone) setGuestPhone(activeOrder.customerPhone);
+      if (table) {
+        try {
+          localStorage.setItem(`bistro_table_guest_${table.tableId}`, JSON.stringify({
+            name: activeOrder.customerName,
+            phone: activeOrder.customerPhone || ''
+          }));
+        } catch {}
+      }
+    }
+  }, [activeOrder, table]);
 
   // A QR link must identify this restaurant and an actual enabled table.
   const loadData = useCallback(async () => {
@@ -148,7 +184,19 @@ export default function QrDineInPage() {
       const context = { tableId: currentTable.tableId, tableNumber: currentTable.tableNumber, restaurantId: rest.restaurantId };
       if (switchOrderContext) switchOrderContext('DINE_IN_QR', context);
       else { setOrderSource('DINE_IN_QR'); setTableInfo(context); }
-      updateActiveOrder(curTableOrders.find(order => !['DELIVERED'].includes(order.status)) || null);
+      // Match active UNPAID order for this table
+      const activeTableOrder = (orders || []).find(order =>
+        order.source === 'DINE_IN_QR' &&
+        order.tableId === currentTable.tableId &&
+        order.restaurantId === rest.restaurantId &&
+        order.status !== 'CANCELLED' &&
+        order.paymentStatus !== 'PAID' &&
+        (Number(order.paidAmount) || 0) < (Number(order.total) || 0) - 0.05
+      );
+      updateActiveOrder(activeTableOrder || curTableOrders.find(order => !['DELIVERED', 'CANCELLED'].includes(order.status)) || null);
+      if (!activeTableOrder) {
+        try { localStorage.removeItem(`bistro_table_guest_${currentTable.tableId}`); } catch {}
+      }
     } catch (err) { if (sequence === loadSequence.current) setLoadError(err.message || 'Unable to open the table menu. Please try again.'); }
     finally { if (sequence === loadSequence.current) setIsLoading(false); }
   }, [restaurantId, tableId, switchOrderContext, updateActiveOrder]);
@@ -226,10 +274,44 @@ export default function QrDineInPage() {
     return () => clearInterval(interval);
   }, [activeOrder]);
 
-  // Place Order Action
-  const handlePlaceOrder = async () => {
+  // Checkout and Guest Details Verification
+  const handleCheckoutClick = () => {
+    if (!items.length) return;
+    setIsCartOpen(false);
+    const cleanPh = guestPhone.replace(/\D/g, '');
+    if (!guestName.trim() || cleanPh.length < 10) {
+      setGuestError('');
+      setIsGuestModalOpen(true);
+      return;
+    }
+    submitOrder(guestName.trim(), cleanPh);
+  };
+
+  const handleGuestSubmit = e => {
+    if (e) e.preventDefault();
+    setGuestError('');
+    if (!guestName.trim()) return setGuestError('Please enter your name.');
+    const cleanPh = guestPhone.replace(/\D/g, '');
+    if (cleanPh.length < 10) return setGuestError('Please enter a valid 10-digit mobile number.');
+
+    try {
+      if (table) {
+        localStorage.setItem(`bistro_table_guest_${table.tableId}`, JSON.stringify({
+          name: guestName.trim(),
+          phone: cleanPh
+        }));
+      }
+    } catch {}
+
+    setIsGuestModalOpen(false);
+    submitOrder(guestName.trim(), cleanPh);
+  };
+
+  // Place or Append Order Action
+  const submitOrder = async (name, phone) => {
     if (!items.length || !table || !restaurant || placingRef.current) return;
-    placingRef.current = true; setIsPlacing(true);
+    placingRef.current = true;
+    setIsPlacing(true);
     try {
       const order = await api.createOrder({
         restaurantId: restaurant?.restaurantId,
@@ -237,13 +319,21 @@ export default function QrDineInPage() {
         tableNumber: table?.tableNumber,
         sessionId: tableSession?.sessionId || null,
         source: 'DINE_IN_QR',
+        customerName: name || null,
+        customerPhone: phone || null,
         items
       });
+      const isExistingOrder = activeOrder && activeOrder.orderId === order.orderId;
       updateActiveOrder(order);
       setTableOrders(prev => [order, ...prev.filter(o => o.orderId !== order.orderId)]);
       clearCart();
       setIsCartOpen(false);
-      addToast(`Order #${order.orderNumber} placed successfully! Kitchen has been notified.`, 'success');
+      addToast(
+        isExistingOrder
+          ? `Items added to your active Table order #${order.orderNumber}! Kitchen has been notified.`
+          : `Order #${order.orderNumber} placed successfully! Kitchen has been notified.`,
+        'success'
+      );
 
       // Refresh table session so all diners have the full synchronized order list
       api.getTableSession(table.tableId).then(sess => {
@@ -259,7 +349,10 @@ export default function QrDineInPage() {
       }).catch(() => {});
     } catch (err) {
       addToast(err.message, 'error');
-    } finally { placingRef.current = false; setIsPlacing(false); }
+    } finally {
+      placingRef.current = false;
+      setIsPlacing(false);
+    }
   };
 
   // Cancel Order Action (Backend strictly enforces 1-min window)
@@ -525,6 +618,35 @@ export default function QrDineInPage() {
                 <span>Confirm Food Received (Tap Here)</span>
               </button>
             )}
+
+            {/* Running Table Bill & Items List */}
+            <div className="border-t border-slate-100 pt-2.5 space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-slate-800">
+                  Guest: <strong>{activeOrder.customerName || guestName || 'Table Guest'}</strong>
+                </span>
+                <span className="font-black text-brand-600 text-sm">
+                  Running Bill: ₹{Number(activeOrder.total || 0).toFixed(2)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-[11px] text-slate-500">
+                <span>{activeOrder.items?.reduce((s, i) => s + (Number(i.quantity) || 1), 0)} items in this table tab</span>
+                <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                  Running Tab · Pay at End
+                </span>
+              </div>
+              <div className="max-h-32 overflow-y-auto space-y-1 bg-slate-50/70 p-2 rounded-xl border border-slate-100 text-[11px]">
+                {activeOrder.items?.map((it, idx) => (
+                  <div key={it.orderItemId || idx} className="flex justify-between items-center text-slate-700">
+                    <span className="truncate pr-2">{it.quantity}× {it.name || it.itemName}</span>
+                    <span className="font-bold whitespace-nowrap">₹{(Number(it.lineTotal) || (Number(it.price || 0) * (Number(it.quantity) || 1))).toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[10px] text-slate-400 italic">
+                Add more dishes to cart anytime — they will automatically merge into this running order.
+              </p>
+            </div>
           </div>
         )}
 
@@ -957,8 +1079,12 @@ export default function QrDineInPage() {
                 {itemCount}
               </span>
               <div>
-                <p className="text-xs font-bold leading-tight">{tableTitle(table)} Cart</p>
-                <p className="text-[11px] text-slate-400">Tap to review & order</p>
+                <p className="text-xs font-bold leading-tight">
+                  {activeOrder ? `Add to Table ${table?.tableNumber || ''} Bill` : `${tableTitle(table)} Cart`}
+                </p>
+                <p className="text-[11px] text-slate-400">
+                  {activeOrder ? `Will add to Order #${activeOrder.orderNumber}` : `Tap to review & order`}
+                </p>
               </div>
             </div>
 
@@ -994,6 +1120,88 @@ export default function QrDineInPage() {
               <ChevronRight className="w-4 h-4 text-purple-200" />
             </div>
           </button>
+        </div>
+      )}
+
+      {/* Guest Identification Modal (Name & Phone required before placing) */}
+      {isGuestModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div role="dialog" aria-modal="true" className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-sm font-black text-slate-900 leading-tight">
+                  Guest Details · {tableTitle(table)}
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Please enter your name and mobile number before placing your order.
+                </p>
+              </div>
+              <button onClick={() => setIsGuestModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1">
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            {guestError && (
+              <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-xs text-red-600 font-semibold">
+                {guestError}
+              </div>
+            )}
+
+            <form onSubmit={handleGuestSubmit} className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Your Name <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <User className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+                  <input
+                    type="text"
+                    required
+                    maxLength={100}
+                    placeholder="e.g. Rahul Sharma"
+                    value={guestName}
+                    onChange={e => setGuestName(e.target.value)}
+                    className="w-full text-xs pl-9 pr-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Mobile Number <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <Phone className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+                  <input
+                    type="tel"
+                    required
+                    maxLength={10}
+                    placeholder="10-digit mobile number"
+                    value={guestPhone}
+                    onChange={e => setGuestPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                    className="w-full text-xs pl-9 pr-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setIsGuestModalOpen(false)}
+                  className="flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold hover:bg-slate-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isPlacing}
+                  className="flex-1 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-xs font-black shadow-md shadow-brand-500/20"
+                >
+                  {isPlacing ? 'Placing...' : 'Confirm & Order'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
@@ -1078,7 +1286,7 @@ export default function QrDineInPage() {
       <CartDrawer
         isOpen={isCartOpen}
         onClose={() => setIsCartOpen(false)}
-        onCheckout={handlePlaceOrder}
+        onCheckout={handleCheckoutClick}
       />
     </div>
   );

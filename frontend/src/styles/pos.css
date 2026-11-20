@@ -119,3 +119,331 @@
 }
 .pos-custom-photo{height:135px;width:100%;object-fit:cover;border-radius:7px}
 
+/* ========================================================
+   Reception Orders Redesign – Consolidated Table Session Cards
+   ======================================================== */
+.pos-session-card {
+  border: 1px solid var(--p-border);
+  border-radius: 9px;
+  background: var(--p-card);
+  box-shadow: var(--p-shadow);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.pos-session-card:hover {
+  border-color: var(--p-blue);
+}
+
+.pos-session-card.has-new {
+  border-left: 3px solid #e5a021;
+}
+
+.pos-session-card.is-paid {
+  border-left: 3px solid #23b28a;
+  opacity: 0.95;
+}
+
+.pos-session-header {
+  padding: 11px 13px 9px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--p-border);
+  background: var(--p-elevated);
+}
+
+.pos-session-title-group {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.pos-table-id-pill {
+  font-size: 8.5px;
+  background: var(--p-bg);
+  color: var(--p-muted);
+  border: 1px solid var(--p-border);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-weight: 600;
+  display: inline-block;
+}
+
+.pos-session-name {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  white-space: nowrap;
+}
+
+.pos-session-ids {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.pos-session-id {
+  font-size: 8.5px;
+  color: var(--p-muted);
+  font-family: monospace;
+}
+
+.pos-orders-count-badge {
+  font-size: 8.5px;
+  background: var(--p-blue-soft);
+  color: var(--p-blue);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.pos-session-time {
+  display: block;
+  font-size: 8.5px;
+  color: var(--p-muted);
+  margin-top: 4px;
+}
+
+.pos-session-customer-row {
+  padding: 8px 13px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--p-card);
+  border-bottom: 1px solid var(--p-border);
+  font-size: 9.5px;
+}
+
+.pos-session-cust-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.pos-cust-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pos-field-label {
+  color: var(--p-muted);
+}
+
+.pos-cust-val {
+  font-weight: 600;
+  color: var(--p-text);
+}
+
+.pos-session-item-badge {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--p-blue);
+  background: var(--p-blue-soft);
+  padding: 2px 7px;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+
+.pos-session-items-preview {
+  padding: 8px 13px;
+  font-size: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-height: 80px;
+}
+
+.pos-session-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 0;
+}
+
+.pos-item-qty {
+  color: var(--p-muted);
+  font-weight: 600;
+  min-width: 18px;
+}
+
+.pos-item-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+
+.pos-item-mini-badge {
+  font-size: 8px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.pos-item-price {
+  color: var(--p-text);
+  font-weight: 600;
+  font-size: 9.5px;
+}
+
+.pos-session-more-items {
+  font-size: 9px;
+  color: var(--p-blue);
+  padding: 4px 0 2px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.pos-session-financials {
+  padding: 8px 13px;
+  border-top: 1px dashed var(--p-border);
+  background: var(--p-card);
+  font-size: 9.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.pos-fin-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--p-muted);
+}
+
+.pos-fin-row.discount {
+  color: #10b981;
+}
+
+.pos-fin-row.grand-total {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--p-border);
+  font-size: 11px;
+  color: var(--p-text);
+}
+
+.pos-total-amount {
+  font-size: 12.5px;
+  font-weight: 750;
+  color: var(--p-text);
+}
+
+.pos-session-expanded-details {
+  border-top: 1px solid var(--p-border);
+  background: var(--p-bg);
+  padding: 10px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.pos-expanded-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 10px;
+}
+
+.pos-expanded-header strong {
+  font-size: 10.5px;
+  font-weight: 650;
+}
+
+.pos-expanded-header small {
+  color: var(--p-muted);
+  font-size: 8.5px;
+}
+
+.pos-order-ticket-block {
+  background: var(--p-card);
+  border: 1px solid var(--p-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.pos-ticket-title-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px dashed var(--p-border);
+}
+
+.pos-ticket-num {
+  font-size: 9.5px;
+  font-weight: 700;
+}
+
+.pos-ticket-time {
+  font-size: 8.5px;
+  color: var(--p-muted);
+  margin-left: 6px;
+}
+
+.pos-ticket-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pos-ticket-item-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 9.5px;
+}
+
+.pos-item-cust-text,
+.pos-item-note-text {
+  display: block;
+  font-size: 8px;
+  color: var(--p-muted);
+  margin-top: 1px;
+}
+
+.pos-item-note-text {
+  color: #d97706;
+}
+
+.pos-session-card-actions {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--p-border);
+  background: var(--p-card);
+}
+
+.pos-session-card-actions > button {
+  flex: 1;
+  padding: 7px 4px;
+  font-size: 9.5px;
+  min-height: 29px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.pos-chip-non-dine {
+  background: var(--p-elevated);
+  color: var(--p-text);
+  border: 1px solid var(--p-border);
+}
+
+
