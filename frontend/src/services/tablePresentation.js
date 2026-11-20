@@ -28,3 +28,40 @@ export function tableTitle(table) {
   const name = tableLabel(table);
   return name === 'Party hall' || name === 'Table' ? name : `Table ${name}`;
 }
+
+export function getPublicOrigin(restaurant) {
+  if (restaurant?.settings?.publicWebsiteUrl) {
+    try {
+      const url = new URL(restaurant.settings.publicWebsiteUrl);
+      if (['http:', 'https:'].includes(url.protocol)) return url.origin;
+    } catch {}
+  }
+
+  // If running in browser and accessed via a real network IP or hostname (not loopback),
+  // prefer window.location.origin so QR codes automatically match the active network address.
+  if (typeof window !== 'undefined' && window.location) {
+    const host = window.location.hostname;
+    const isLoopback = ['localhost', '127.0.0.1', '[::1]', '0.0.0.0'].includes(host);
+    if (!isLoopback) {
+      return window.location.origin;
+    }
+  }
+
+  // Fallback to configured VITE_PUBLIC_SITE_URL (e.g. for Electron desktop or when accessed via localhost)
+  const envUrl = import.meta.env?.VITE_PUBLIC_SITE_URL;
+  if (envUrl) {
+    try {
+      const url = new URL(envUrl);
+      if (['http:', 'https:'].includes(url.protocol)) return url.origin;
+    } catch {}
+  }
+
+  return typeof window !== 'undefined' ? window.location.origin : '';
+}
+
+export function getTableQrUrl(restaurant, table) {
+  const origin = getPublicOrigin(restaurant);
+  const resId = table?.restaurantId || restaurant?.restaurantId || defaultRestaurantId;
+  const tableId = table?.tableId || '';
+  return origin ? `${origin}/qr/${resId}/${tableId}` : '';
+}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api, subscribeRealtimeEvents } from '../../services/api';
-import { tableTitle } from '../../services/tablePresentation';
+import { tableTitle, getTableQrUrl } from '../../services/tablePresentation';
 import { useNotification } from '../../context/NotificationContext';
 import {
   LayoutDashboard,
@@ -733,9 +733,7 @@ export default function ReceptionistDashboard() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                 {tables.map(tbl => {
-                  const qrUrl = typeof window !== 'undefined'
-                    ? `${window.location.origin}/qr/a0000000-0000-0000-0000-000000000001/${tbl.tableId}`
-                    : `/qr/a0000000-0000-0000-0000-000000000001/${tbl.tableId}`;
+                  const qrUrl = getTableQrUrl(null, tbl);
                   const qrImgSrc = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=${encodeURIComponent(qrUrl)}`;
 
                   return (

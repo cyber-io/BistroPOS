@@ -40,8 +40,8 @@ export function FamilyDiningTable({ table, layout, children, onClick, ...props }
           {seating === 'chairs' ? <ChairRow count={topCount} /> : <FamilySofa seats={topCount} />}
           {seating === 'sofas' ? <FamilySofa seats={bottomCount} bottom /> : <ChairRow count={bottomCount} bottom />}
           {seating !== 'sofas' && <>
-            <FamilyChair x={58} y={158} rotation={270} />
-            <FamilyChair x={622} y={158} rotation={90} />
+            <FamilyChair x={58} y={160} rotation={270} />
+            <FamilyChair x={622} y={160} rotation={90} />
           </>}
           <rect className="pos-plan-tabletop" x={100} y={90} width={480} height={140} rx={12} />
         </svg>

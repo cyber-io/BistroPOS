@@ -39,10 +39,65 @@
   min-width: 0;
   font-size: 11px;
   font-weight: 600;
+  color: var(--p-text);
 }
 
-.pos-plan-area-field .pos-select { width: 260px; max-width: 100%; height: 43px; min-height: 43px; font-size: 13px; }
-.pos-plan-area-count { padding-bottom: 13px; color: var(--plan-muted); font-size: 10px; white-space: nowrap; }
+.pos-select-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 260px;
+  max-width: 100%;
+}
+
+.pos-plan-area-field .pos-select {
+  width: 100%;
+  height: 40px;
+  min-height: 40px;
+  line-height: 38px;
+  padding: 0 36px 0 14px;
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid var(--plan-border, var(--p-border));
+  border-radius: 9px;
+  background: var(--p-card);
+  color: var(--p-text);
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  cursor: pointer;
+  box-sizing: border-box;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.pos-plan-area-field .pos-select:hover {
+  border-color: #9fb6ed;
+}
+
+.pos-plan-area-field .pos-select:focus {
+  border-color: var(--p-blue);
+  box-shadow: 0 0 0 3px var(--p-blue-soft);
+}
+
+.pos-select-arrow {
+  position: absolute;
+  right: 13px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--plan-muted, var(--p-muted));
+}
+
+.pos-plan-area-count {
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--plan-muted);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
 
 .pos-table-status-toolbar { flex-wrap: wrap; gap: 12px 16px; margin-bottom: 18px; }
 .pos-table-status-controls { min-width: 0; }
@@ -91,6 +146,12 @@
   border: 1px solid var(--plan-border);
   border-radius: 10px;
   background: var(--plan-floor);
+}
+
+.pos-dining-plan-family .pos-dining-plan-floor {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .pos-plan-table-grid {
@@ -253,6 +314,7 @@
   .pos-table-status-toolbar .pos-tab { min-height: 34px; }
   .pos-table-status-toolbar .pos-floor-header { width: 100%; }
   .pos-plan-area-field { flex: 1; }
+  .pos-select-wrap { width: 100%; }
   .pos-plan-area-field .pos-select { width: 100%; }
   .pos-plan-area-count { font-size: 9px; }
   .pos-dining-plan { padding: 16px 12px 12px; border-radius: 12px; }
