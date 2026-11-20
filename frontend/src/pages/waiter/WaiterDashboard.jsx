@@ -273,6 +273,31 @@ export default function WaiterDashboard() {
                   <Badge status={cleaning ? (request.status === 'PENDING' ? 'WAITING_FOR_CLEANING' : 'CLEANING') : request.status} />
                 </header>
                 <div style={{ padding: 15 }}>
+                  {request.requestType && request.requestType !== 'CUSTOM' && (
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      marginBottom: 8,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      background: request.requestType === 'WATER' ? '#e0f2fe' :
+                                  request.requestType === 'TISSUES' ? '#f3e8ff' :
+                                  request.requestType === 'BILL' ? '#dcfce7' :
+                                  request.requestType === 'TABLE_CLEANING' ? '#fef3c7' : '#f1f5f9',
+                      color: request.requestType === 'WATER' ? '#0369a1' :
+                             request.requestType === 'TISSUES' ? '#7e22ce' :
+                             request.requestType === 'BILL' ? '#15803d' :
+                             request.requestType === 'TABLE_CLEANING' ? '#b45309' : '#475569',
+                      padding: '2px 8px',
+                      borderRadius: 6
+                    }}>
+                      {request.requestType === 'WATER' && '💧 Water Request'}
+                      {request.requestType === 'TISSUES' && '🧻 Tissues Request'}
+                      {request.requestType === 'BILL' && '🧾 Bill Request'}
+                      {request.requestType === 'TABLE_CLEANING' && '🧹 Table Cleaning'}
+                    </span>
+                  )}
                   <p style={{ fontSize: 12, lineHeight: 1.8, marginBottom: 10 }}>{request.message}</p>
                   <p style={{ color: 'var(--p-muted)', fontSize: 9, display: 'flex', alignItems: 'center', gap: 5 }}>
                     <Clock size={12} />
