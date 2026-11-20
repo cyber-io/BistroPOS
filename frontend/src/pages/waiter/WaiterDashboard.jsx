@@ -85,7 +85,29 @@ export default function WaiterDashboard() {
   const { addToast } = useNotification();
   const [orders, setOrders] = useState([]);
   const [requests, setRequests] = useState([]);
-  const [filter, setFilter] = useState('ALL');
+  const [filter, setFilterState] = useState(() => {
+    try {
+      const saved = localStorage.getItem('bistro_waiter_filter');
+      if (saved && ['ALL', 'PENDING', 'MINE'].includes(saved)) {
+        return saved;
+      }
+    } catch {
+      // ignore
+    }
+    return 'ALL';
+  });
+
+  const setFilter = useCallback((nextFilter) => {
+    setFilterState(prev => {
+      const val = typeof nextFilter === 'function' ? nextFilter(prev) : nextFilter;
+      try {
+        localStorage.setItem('bistro_waiter_filter', val);
+      } catch {
+        // ignore
+      }
+      return val;
+    });
+  }, []);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(null);
@@ -213,8 +235,15 @@ export default function WaiterDashboard() {
         </header>
         <div style={{ padding: '12px 12px 0' }}>
           <div className="pos-segment" style={{ display: 'flex', width: '100%' }}>
-            {[['ALL', 'All calls'], ['PENDING', 'Unassigned'], ['MINE', 'Assigned to me']].map(([key, title]) => (
-              <button key={key} className={filter === key ? 'active' : ''} onClick={() => setFilter(key)} style={{ flex: 1 }}>{title}</button>
+            {[
+              ['ALL', 'All calls', requests.length],
+              ['PENDING', 'Unassigned', pending.length],
+              ['MINE', 'Assigned to me', assigned.length]
+            ].map(([key, title, count]) => (
+              <button key={key} className={filter === key ? 'active' : ''} onClick={() => setFilter(key)} style={{ flex: 1 }}>
+                {title}
+                {count > 0 && <span className="pos-count" style={{ marginLeft: 7 }}>{count}</span>}
+              </button>
             ))}
           </div>
         </div>

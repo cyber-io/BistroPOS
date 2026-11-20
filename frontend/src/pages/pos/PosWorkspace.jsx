@@ -9,7 +9,7 @@ import PosShell from '../../components/pos/PosShell';
 import TableFloorPlan, { FloorPlanTable, getDiningAreaTables } from '../../components/pos/TableFloorPlan';
 import { Badge, Empty, Spinner, Modal, money, time, label } from '../../components/pos/PosUI';
 import ErrorBoundary from '../../components/common/ErrorBoundary';
-import { tableLabel, tableTitle } from '../../services/tablePresentation';
+import { tableLabel, tableTitle, getPublicOrigin, getTableQrUrl } from '../../services/tablePresentation';
 import { cleanPhone, getRescheduleNotificationText, getWhatsAppUrl, getSmsUrl } from '../../services/notificationHelpers';
 
 const DONE = ['DELIVERED', 'PICKED_UP', 'CANCELLED', 'CONFIRMATION_TIMEOUT'];
@@ -154,7 +154,7 @@ function Totals({ order }) { return <div className="pos-detail-totals"><div><spa
 function OrderCard({ order, onDetails, onPay, paid = false }) {
   const items = order?.items || [];
   return (
-    <article className="pos-order-card">
+    <article className="pos-order-card" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div className="pos-order-card-top">
         <div style={{ width: '100%' }}>
           <div className="pos-order-number">
@@ -173,7 +173,7 @@ function OrderCard({ order, onDetails, onPay, paid = false }) {
           </div>
         </div>
       </div>
-      <div className="pos-order-items">
+      <div className="pos-order-items" style={{ flex: 1 }}>
         {items.slice(0, 3).map((i, idx) => (
           <div key={idx}>
             <span>{i.quantity}×</span>
@@ -183,7 +183,7 @@ function OrderCard({ order, onDetails, onPay, paid = false }) {
         ))}
         {items.length > 3 && <div><span>+{items.length - 3} more items</span></div>}
       </div>
-      <div className="pos-order-total">
+      <div className="pos-order-total" style={{ marginTop: 'auto' }}>
         <span>Total</span>
         <strong>{money(order?.total)}</strong>
       </div>
@@ -201,6 +201,58 @@ function OrderCard({ order, onDetails, onPay, paid = false }) {
   );
 }
 
+const SECTION_FILTERS = {
+  orders: ['ALL', 'ACTIVE', 'READY', 'COMPLETED', 'CANCELLED', 'DINE_IN_QR', 'DELIVERY', 'TAKEAWAY'],
+  history: ['ALL', 'COMPLETED', 'CANCELLED', 'DINE_IN_QR', 'DELIVERY', 'TAKEAWAY'],
+  tables: ['ALL', 'AVAILABLE', 'OCCUPIED', 'RESERVED', 'WAITING_FOR_CLEANING'],
+  reservations: ['ALL', 'CONFIRMED', 'ARRIVED', 'SEATED', 'COMPLETED', 'CANCELLED'],
+  inventory: ['ALL', 'AVAILABLE', 'SOLD_OUT']
+};
+
+const getSavedFilter = (sec) => {
+  try {
+    const saved = localStorage.getItem(`bistro_pos_filter_${sec}`);
+    if (saved && SECTION_FILTERS[sec]?.includes(saved)) {
+      return saved;
+    }
+  } catch {
+    // ignore
+  }
+  return 'ALL';
+};
+
+const saveFilter = (sec, value) => {
+  try {
+    if (value && value !== 'ALL') {
+      localStorage.setItem(`bistro_pos_filter_${sec}`, value);
+    } else {
+      localStorage.removeItem(`bistro_pos_filter_${sec}`);
+    }
+  } catch {
+    // ignore
+  }
+};
+
+const getSavedTableArea = () => {
+  try {
+    const saved = localStorage.getItem('bistro_pos_table_area');
+    if (saved && ['everyday', 'family', 'banquet', 'rooftop', 'bar'].includes(saved)) {
+      return saved;
+    }
+  } catch {
+    // ignore
+  }
+  return 'everyday';
+};
+
+const saveTableArea = (area) => {
+  try {
+    localStorage.setItem('bistro_pos_table_area', area);
+  } catch {
+    // ignore
+  }
+};
+
 export default function PosWorkspace() {
   const { currentUser } = useAuth();
   const { addToast } = useNotification();
@@ -212,8 +264,8 @@ export default function PosWorkspace() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState('ALL');
-  const [tableArea, setTableArea] = useState('everyday');
+  const [filter, setFilterState] = useState(() => getSavedFilter(section));
+  const [tableArea, setTableAreaState] = useState(getSavedTableArea);
   const [category, setCategory] = useState('ALL');
   const [dashboardDate, setDashboardDate] = useState(today());
   const [orderDate, setOrderDate] = useState('');
@@ -222,6 +274,22 @@ export default function PosWorkspace() {
   const [dialog, setDialog] = useState(null);
   const [selected, setSelected] = useState(null);
   const [reservationEdit, setReservationEdit] = useState(null);
+
+  const setFilter = useCallback((nextFilter) => {
+    setFilterState(prev => {
+      const val = typeof nextFilter === 'function' ? nextFilter(prev) : nextFilter;
+      saveFilter(section, val);
+      return val;
+    });
+  }, [section]);
+
+  const setTableArea = useCallback((nextArea) => {
+    setTableAreaState(prev => {
+      const val = typeof nextArea === 'function' ? nextArea(prev) : nextArea;
+      saveTableArea(val);
+      return val;
+    });
+  }, []);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -260,7 +328,11 @@ export default function PosWorkspace() {
     return () => { unsub(); clearInterval(id); };
   }, [load, addToast]);
 
-  useEffect(() => { setFilter('ALL'); setQuery(''); setCategory('ALL'); }, [section]);
+  useEffect(() => {
+    setFilterState(getSavedFilter(section));
+    setQuery('');
+    setCategory('ALL');
+  }, [section]);
 
   const paidIds = useMemo(() => new Set(data.orders.filter(o => o.paymentStatus === 'PAID' || data.payments.filter(p => p.orderId === o.orderId && p.status === 'PAID').reduce((n, p) => n + Number(p.amount), 0) >= Number(o.total)).map(o => o.orderId)), [data.orders, data.payments]);
   const active = data.orders.filter(o => !DONE.includes(o.status));
@@ -338,6 +410,28 @@ export default function PosWorkspace() {
     })
     .filter(o => filter === 'ALL' || (filter === 'ACTIVE' ? !DONE.includes(o.status) : filter === 'COMPLETED' ? ['DELIVERED', 'PICKED_UP'].includes(o.status) : filter === 'CANCELLED' ? ['CANCELLED', 'CONFIRMATION_TIMEOUT'].includes(o.status) : o.source === filter || o.status === filter))
     .filter(o => `${o.orderNumber} ${o.customerName} ${o.customerPhone || ''} ${o.tableNumber ? `${tableLabel(o)} Table ${o.tableNumber}` : ''}`.toLowerCase().includes(query.toLowerCase()));
+
+  const getOrderTabCount = useCallback((id) => {
+    const list = orderDate ? data.orders.filter(o => toLocalDate(o.createdAt) === orderDate) : data.orders;
+    if (id === 'ALL') return list.length;
+    if (id === 'ACTIVE') return list.filter(o => !DONE.includes(o.status)).length;
+    if (id === 'READY') return list.filter(o => o.status === 'READY').length;
+    if (id === 'COMPLETED') return list.filter(o => ['DELIVERED', 'PICKED_UP'].includes(o.status)).length;
+    if (id === 'CANCELLED') return list.filter(o => ['CANCELLED', 'CONFIRMATION_TIMEOUT'].includes(o.status)).length;
+    return list.filter(o => o.source === id).length;
+  }, [data.orders, orderDate]);
+
+  const getHistoryTabCount = useCallback((id) => {
+    const list = data.orders.filter(o => DONE.includes(o.status) && (!historyDate || toLocalDate(o.createdAt) === historyDate));
+    if (id === 'ALL') return list.length;
+    if (id === 'COMPLETED') return list.filter(o => ['DELIVERED', 'PICKED_UP'].includes(o.status)).length;
+    if (id === 'CANCELLED') return list.filter(o => ['CANCELLED', 'CONFIRMATION_TIMEOUT'].includes(o.status)).length;
+    return list.filter(o => o.source === id).length;
+  }, [data.orders, historyDate]);
+
+  const getReservationTabCount = useCallback((id) => {
+    return data.reservations.filter(r => (!reservationDate || r.reservationDate?.slice(0, 10) === reservationDate) && (id === 'ALL' || r.status === id)).length;
+  }, [data.reservations, reservationDate]);
 
   return (
     <PosShell alertCount={openIssues.length + openHelp.length} onAlerts={() => navigate('/pos/notifications')}>
@@ -563,7 +657,7 @@ export default function PosWorkspace() {
                         <button className="pos-button small" onClick={() => setOrderDate('')}>Show all dates</button>
                       </div>
                     )}
-                    <div className="pos-tabs">{[['ALL', 'All orders'], ['ACTIVE', 'In progress'], ['READY', 'Ready to serve'], ['COMPLETED', 'Completed'], ['CANCELLED', 'Cancelled'], ['DINE_IN_QR', 'Dine in'], ['DELIVERY', 'Delivery'], ['TAKEAWAY', 'Takeaway']].map(([id, name]) => <button className={`pos-tab ${filter === id ? 'active' : ''}`} onClick={() => setFilter(id)} key={id}>{name}</button>)}</div>
+                    <div className="pos-tabs">{[['ALL', 'All orders'], ['ACTIVE', 'In progress'], ['READY', 'Ready to serve'], ['COMPLETED', 'Completed'], ['CANCELLED', 'Cancelled'], ['DINE_IN_QR', 'Dine in'], ['DELIVERY', 'Delivery'], ['TAKEAWAY', 'Takeaway']].map(([id, name]) => { const count = getOrderTabCount(id); return <button className={`pos-tab ${filter === id ? 'active' : ''}`} onClick={() => setFilter(id)} key={id}>{name}{count > 0 && <span>{count}</span>}</button>; })}</div>
                     {filteredOrders.length ? <div className="pos-orders-grid">{filteredOrders.map(o => <OrderCard key={o.orderId} order={o} paid={paidIds.has(o.orderId)} onDetails={openOrder} onPay={pay} />)}</div> : <section className="pos-panel"><Empty title={query || orderDate ? 'No matching orders' : 'No orders found'}>{orderDate ? `No orders found for ${orderDate === today() ? 'today' : shortDate(orderDate)}. Use the calendar to select another date or click "Show all dates".` : query ? 'Try another order number, table or customer name.' : 'Orders will appear here when customers place them.'}</Empty></section>}
                   </>
                 )}
@@ -581,7 +675,7 @@ export default function PosWorkspace() {
                       </div>
                       {historyDate && <button className="pos-button small" onClick={() => setHistoryDate('')}>View all history</button>}
                     </div>
-                    <div className="pos-tabs">{[['ALL', 'All history'], ['COMPLETED', 'Completed'], ['CANCELLED', 'Cancelled'], ['DINE_IN_QR', 'Dine in'], ['DELIVERY', 'Delivery'], ['TAKEAWAY', 'Takeaway']].map(([id, name]) => <button className={`pos-tab ${filter === id ? 'active' : ''}`} onClick={() => setFilter(id)} key={id}>{name}</button>)}</div>
+                    <div className="pos-tabs">{[['ALL', 'All history'], ['COMPLETED', 'Completed'], ['CANCELLED', 'Cancelled'], ['DINE_IN_QR', 'Dine in'], ['DELIVERY', 'Delivery'], ['TAKEAWAY', 'Takeaway']].map(([id, name]) => { const count = getHistoryTabCount(id); return <button className={`pos-tab ${filter === id ? 'active' : ''}`} onClick={() => setFilter(id)} key={id}>{name}{count > 0 && <span>{count}</span>}</button>; })}</div>
                     {filteredOrders.length ? <div className="pos-orders-grid">{filteredOrders.map(o => <OrderCard key={o.orderId} order={o} paid={paidIds.has(o.orderId)} onDetails={openOrder} onPay={pay} />)}</div> : <section className="pos-panel"><Empty title={historyDate ? `No history for ${shortDate(historyDate)}` : 'No historical orders'}>{historyDate ? 'No completed or cancelled orders recorded on this date. Select another date with the calendar.' : 'Past closed orders will appear here for audit and reporting.'}</Empty></section>}
                   </>
                 )}
@@ -648,7 +742,7 @@ export default function PosWorkspace() {
                         <button className="pos-button small" onClick={() => setReservationDate('')}>Show all dates</button>
                       </div>
                     )}
-                    <div className="pos-tabs">{['ALL', 'CONFIRMED', 'ARRIVED', 'SEATED', 'COMPLETED', 'CANCELLED'].map(id => <button key={id} className={`pos-tab ${filter === id ? 'active' : ''}`} onClick={() => setFilter(id)}>{id === 'ALL' ? 'All reservations' : label(id)}</button>)}</div>
+                    <div className="pos-tabs">{['ALL', 'CONFIRMED', 'ARRIVED', 'SEATED', 'COMPLETED', 'CANCELLED'].map(id => { const count = getReservationTabCount(id); return <button key={id} className={`pos-tab ${filter === id ? 'active' : ''}`} onClick={() => setFilter(id)}>{id === 'ALL' ? 'All reservations' : label(id)}{count > 0 && <span>{count}</span>}</button>; })}</div>
                     {data.reservations.filter(r => (!reservationDate || r.reservationDate?.slice(0, 10) === reservationDate) && (filter === 'ALL' || r.status === filter)).length ? (
                       <div className="pos-data-wrap">
                         <table className="pos-data-table">
@@ -863,15 +957,6 @@ function OrderDetails({ order, paid, payments, restaurant, onClose, onPay, onUpd
     }
   };
 
-  const handleDeleteOrder = async () => {
-    if (!window.confirm(`Permanently remove order ${order.orderNumber}?`)) return;
-    const ok = await run(() => api.deleteOrder(order.orderId || order.orderNumber), `Order ${order.orderNumber} removed`);
-    if (ok) {
-      onClose();
-      onUpdated();
-    }
-  };
-
   const items = order?.items || [];
   return (
     <Modal title="Order details" onClose={onClose}>
@@ -949,9 +1034,6 @@ function OrderDetails({ order, paid, payments, restaurant, onClose, onPay, onUpd
         )}
       </div>
       <div className="pos-modal-footer">
-        <button className="pos-button danger" disabled={busy} onClick={handleDeleteOrder}>
-          <Trash2 size={13} /> Remove order
-        </button>
         <button className="pos-button" onClick={() => window.print()}>
           <Printer /> Print receipt
         </button>
@@ -1326,17 +1408,9 @@ function PaymentDialog({ order, restaurant, onClose, onPaid }) {
 function TableDialog({ restaurant, table, orders, reservations, onClose, busy, run, onOrder, onNew, onPay, paidIds }) {
   const [qr, setQr] = useState(false);
   const [qrImage, setQrImage] = useState('');
-  const site = restaurant?.settings?.publicWebsiteUrl || import.meta.env.VITE_PUBLIC_SITE_URL || window.location.origin;
-  let publicOrigin = '';
-  try {
-    const url = new URL(site);
-    if (['http:', 'https:'].includes(url.protocol)) publicOrigin = url.origin;
-  } catch {
-    publicOrigin = window.location.origin;
-  }
+  const publicOrigin = getPublicOrigin(restaurant);
   const isLocalHost = Boolean(publicOrigin && ['localhost', '127.0.0.1', '[::1]'].includes(new URL(publicOrigin).hostname));
-  const resId = table?.restaurantId || restaurant?.restaurantId || 'a0000000-0000-0000-0000-000000000001';
-  const qrUrl = publicOrigin ? `${publicOrigin}/qr/${resId}/${table.tableId}` : '';
+  const qrUrl = getTableQrUrl(restaurant, table);
 
   useEffect(() => {
     if (qrUrl) {

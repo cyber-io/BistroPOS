@@ -151,6 +151,96 @@ public class TableService : ITableService
 
         return true;
     }
+
+    public async Task<DiningSessionDto?> GetOrCreateActiveSessionAsync(Guid tableId)
+    {
+        var table = await _db.Tables.FindAsync(tableId);
+        if (table == null) return null;
+
+        var session = await _db.DiningSessions
+            .Where(s => s.TableId == tableId && s.Status == "ACTIVE")
+            .OrderByDescending(s => s.CreatedAt)
+            .FirstOrDefaultAsync();
+
+        if (session == null)
+        {
+            session = new DiningSession
+            {
+                RestaurantId = table.RestaurantId,
+                TableId = tableId,
+                SessionCode = $"SES-{table.TableNumber}-{DateTime.UtcNow:MMddHHmm}",
+                Status = "ACTIVE",
+                CreatedAt = DateTime.UtcNow
+            };
+            _db.DiningSessions.Add(session);
+            await _db.SaveChangesAsync();
+        }
+
+        var orders = await _db.Orders
+            .Include(o => o.Items)
+            .Where(o => o.TableId == tableId && (o.SessionId == session.SessionId || o.CreatedAt >= session.CreatedAt))
+            .OrderByDescending(o => o.CreatedAt)
+            .ToListAsync();
+
+        var orderDtos = orders.Select(o => new OrderDto(
+            o.OrderId,
+            o.OrderNumber,
+            o.RestaurantId,
+            o.CustomerId,
+            o.TableId,
+            table.TableNumber,
+            o.Source,
+            o.Status,
+            o.Subtotal,
+            o.Tax,
+            o.Discount,
+            o.DeliveryFee,
+            o.Total,
+            o.SpecialInstructions,
+            o.RejectionReason,
+            o.CancellationReason,
+            o.CancelledBy,
+            o.CreatedAt,
+            o.Items.Select(i => new OrderItemDto(
+                i.OrderItemId,
+                i.MenuItemId,
+                i.ItemNameSnapshot,
+                i.PriceSnapshot,
+                i.Quantity,
+                i.LineTotal,
+                i.Customization,
+                i.SpecialInstruction
+            )).ToList(),
+            EstimatedPrepTimeMinutes: o.EstimatedPrepTimeMinutes,
+            EstimatedReadyAt: o.EstimatedReadyAt,
+            SessionId: session.SessionId
+        )).ToList();
+
+        return new DiningSessionDto(
+            session.SessionId,
+            session.RestaurantId,
+            session.TableId,
+            table.TableNumber,
+            session.SessionCode,
+            session.Status,
+            session.CreatedAt,
+            orderDtos
+        );
+    }
+
+    public async Task<bool> CloseSessionAsync(Guid tableId)
+    {
+        var session = await _db.DiningSessions
+            .Where(s => s.TableId == tableId && s.Status == "ACTIVE")
+            .FirstOrDefaultAsync();
+
+        if (session == null) return false;
+
+        session.Status = "CLOSED";
+        session.ClosedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+        return true;
+    }
 }
 
 public class HelpRequestService : IHelpRequestService
@@ -181,6 +271,7 @@ public class HelpRequestService : IHelpRequestService
             TableId = request.TableId,
             CustomerId = request.CustomerId,
             Message = request.Message,
+            RequestType = string.IsNullOrWhiteSpace(request.RequestType) ? "CUSTOM" : request.RequestType,
             Status = "PENDING",
             CreatedAt = DateTime.UtcNow
         };
@@ -194,8 +285,8 @@ public class HelpRequestService : IHelpRequestService
             UserRoles.Waiter,
             "CUSTOMER_HELP_REQUEST",
             $"Table {tableNum} needs assistance",
-            $"TABLE {tableNum} IS CALLING FOR HELP: \"{request.Message}\"",
-            new { helpReq.RequestId, TableNumber = tableNum, request.Message }
+            $"TABLE {tableNum} IS CALLING FOR HELP ({helpReq.RequestType}): \"{request.Message}\"",
+            new { helpReq.RequestId, TableNumber = tableNum, request.Message, helpReq.RequestType }
         );
 
         await _audit.LogAsync(
@@ -204,7 +295,7 @@ public class HelpRequestService : IHelpRequestService
             "CUSTOMER",
             "HELP_REQUEST_CREATED",
             "help_requests",
-            new { helpReq.RequestId, TableNumber = tableNum, request.Message }
+            new { helpReq.RequestId, TableNumber = tableNum, request.Message, helpReq.RequestType }
         );
 
         return new HelpRequestDto(
@@ -218,7 +309,8 @@ public class HelpRequestService : IHelpRequestService
             null,
             helpReq.CreatedAt,
             null,
-            _tokens.Create("help", helpReq.RequestId)
+            _tokens.Create("help", helpReq.RequestId),
+            helpReq.RequestType
         );
     }
 
@@ -240,7 +332,9 @@ public class HelpRequestService : IHelpRequestService
             h.AssignedWaiterId,
             h.AssignedWaiterName,
             h.CreatedAt,
-            h.AcceptedAt
+            h.AcceptedAt,
+            null,
+            h.RequestType
         )).ToList();
     }
 

@@ -129,18 +129,54 @@ public class OrderService : IOrderService
         // 3. Generate unique order number
         var orderNumber = "ORD-" + Guid.NewGuid().ToString("N")[..10].ToUpperInvariant();
 
+        // Calculate dynamic prep time estimate
+        var maxPrep = 15;
+        if (menuItems.Values.Any()) maxPrep = menuItems.Values.Max(m => m.PrepTimeMinutes > 0 ? m.PrepTimeMinutes : 15);
+        var activeKitchenTickets = await _db.Orders.CountAsync(o => o.RestaurantId == request.RestaurantId && (o.Status == OrderStatuses.New || o.Status == OrderStatuses.Preparing));
+        var prepMinutes = maxPrep + Math.Min(30, activeKitchenTickets * 2);
+        var readyAt = DateTime.UtcNow.AddMinutes(prepMinutes);
+
+        // Associate with active shared dining session for dine-in orders
+        Guid? activeSessionId = request.SessionId;
+        if (request.TableId.HasValue && request.Source == OrderSources.DineInQr && !activeSessionId.HasValue)
+        {
+            var currentSession = await _db.DiningSessions
+                .Where(s => s.TableId == request.TableId.Value && s.Status == "ACTIVE")
+                .OrderByDescending(s => s.CreatedAt)
+                .FirstOrDefaultAsync();
+
+            if (currentSession == null)
+            {
+                var tableForSession = await _db.Tables.FindAsync(request.TableId.Value);
+                currentSession = new DiningSession
+                {
+                    RestaurantId = request.RestaurantId,
+                    TableId = request.TableId.Value,
+                    SessionCode = $"SES-{tableForSession?.TableNumber ?? 1}-{DateTime.UtcNow:MMddHHmm}",
+                    Status = "ACTIVE",
+                    CreatedAt = DateTime.UtcNow
+                };
+                _db.DiningSessions.Add(currentSession);
+                await _db.SaveChangesAsync();
+            }
+            activeSessionId = currentSession.SessionId;
+        }
+
         var order = new Order
         {
             OrderNumber = orderNumber,
             RestaurantId = request.RestaurantId,
             CustomerId = request.CustomerId,
             TableId = request.TableId,
+            SessionId = activeSessionId,
             Source = request.Source,
             Status = OrderStatuses.New,
             Subtotal = subtotal,
             Tax = tax,
             DeliveryFee = deliveryFee,
             Total = total,
+            EstimatedPrepTimeMinutes = prepMinutes,
+            EstimatedReadyAt = readyAt,
             DeliveryAddress = request.DeliveryAddressJson,
             CustomerName = request.CustomerName,
             CustomerPhone = request.CustomerPhone,
@@ -585,6 +621,9 @@ public class OrderService : IOrderService
                 i.LineTotal,
                 i.Customization,
                 i.SpecialInstruction
-            )).ToList()
+            )).ToList(),
+            EstimatedPrepTimeMinutes: o.EstimatedPrepTimeMinutes,
+            EstimatedReadyAt: o.EstimatedReadyAt,
+            SessionId: o.SessionId
         );
 }

@@ -157,6 +157,21 @@ public class TablesController : ControllerBase
         if (!success) return NotFound();
         return Ok(new { success = true, message = "Table status updated successfully." });
     }
+
+    [HttpGet("{id:guid}/session")]
+    public async Task<IActionResult> GetTableSession(Guid id)
+    {
+        var session = await _tables.GetOrCreateActiveSessionAsync(id);
+        if (session == null) return NotFound();
+        return Ok(session);
+    }
+
+    [HttpPost("{id:guid}/session/close")]
+    public async Task<IActionResult> CloseTableSession(Guid id)
+    {
+        var success = await _tables.CloseSessionAsync(id);
+        return Ok(new { success });
+    }
 }
 
 [ApiController]
@@ -211,7 +226,13 @@ public class MenuController : ControllerBase
             m.SpiceLevel,
             m.IsSweet,
             m.AddOns,
-            m.CustomizationOptions
+            m.CustomizationOptions,
+            m.Allergens,
+            m.Ingredients,
+            m.Portions,
+            m.DietaryTags,
+            m.IsSpecial,
+            m.PrepTimeMinutes
         )).ToList();
 
         return Ok(dtos);
@@ -446,7 +467,7 @@ public class HelpController : ControllerBase
     public async Task<IActionResult> GetHelpById(Guid id)
     {
         var h = await _db.HelpRequests.Include(x => x.Table).FirstOrDefaultAsync(x => x.RequestId == id);
-        return h == null ? NotFound() : Ok(new HelpRequestDto(h.RequestId,h.RestaurantId,h.TableId,h.Table?.TableNumber??0,h.Message,h.Status,h.AssignedWaiterId,h.AssignedWaiterName,h.CreatedAt,h.AcceptedAt,_tokens.Create("help",h.RequestId)));
+        return h == null ? NotFound() : Ok(new HelpRequestDto(h.RequestId,h.RestaurantId,h.TableId,h.Table?.TableNumber??0,h.Message,h.Status,h.AssignedWaiterId,h.AssignedWaiterName,h.CreatedAt,h.AcceptedAt,_tokens.Create("help",h.RequestId),h.RequestType));
     }
 
     [HttpPost]

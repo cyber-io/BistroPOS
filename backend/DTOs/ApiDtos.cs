@@ -59,7 +59,8 @@ public record CreateOrderRequest(
     DateTime? TakeawayPickupTime,
     string? IdempotencyKey,
     string? CustomerName = null,
-    string? CustomerPhone = null
+    string? CustomerPhone = null,
+    Guid? SessionId = null
 );
 
 public record OrderItemDto(
@@ -100,7 +101,10 @@ public record OrderDto(
     string? CustomerPhone = null,
     string? DeliveryAddressJson = null,
     DateTime? TakeawayPickupTime = null,
-    DateTime? ConfirmationRequestedAt = null
+    DateTime? ConfirmationRequestedAt = null,
+    int EstimatedPrepTimeMinutes = 15,
+    DateTime? EstimatedReadyAt = null,
+    Guid? SessionId = null
 );
 
 public record UpdateOrderStatusRequest(
@@ -223,7 +227,24 @@ public record MenuItemDto(
     string SpiceLevel,
     bool IsSweet,
     string? AddOnsJson,
-    string? CustomizationOptionsJson
+    string? CustomizationOptionsJson,
+    string? AllergensJson = "[]",
+    string? Ingredients = null,
+    string? PortionsJson = "[]",
+    string? DietaryTagsJson = "[]",
+    bool IsSpecial = false,
+    int PrepTimeMinutes = 15
+);
+
+public record DiningSessionDto(
+    Guid SessionId,
+    Guid RestaurantId,
+    Guid TableId,
+    int TableNumber,
+    string SessionCode,
+    string Status,
+    DateTime CreatedAt,
+    List<OrderDto> Orders
 );
 
 public record UpdateItemAvailabilityRequest(
@@ -272,7 +293,8 @@ public record CreateHelpRequestDto(
     Guid RestaurantId,
     Guid TableId,
     Guid? CustomerId,
-    [Required] string Message
+    [Required] string Message,
+    string? RequestType = "CUSTOM"
 );
 
 public record AssignHelpRequestDto(
@@ -291,7 +313,8 @@ public record HelpRequestDto(
     string? AssignedWaiterName,
     DateTime CreatedAt,
     DateTime? AcceptedAt,
-    string? AccessToken = null
+    string? AccessToken = null,
+    string RequestType = "CUSTOM"
 );
 
 public record CreateIssueDto(

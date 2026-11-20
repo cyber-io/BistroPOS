@@ -1,5 +1,5 @@
 import React from 'react';
-import { Armchair } from 'lucide-react';
+import { Armchair, ChevronDown } from 'lucide-react';
 import { Empty, label } from './PosUI';
 import FamilyDiningPlan, { FamilyDiningTable } from './FamilyDiningPlan';
 import PartyHallPlan from './PartyHallPlan';
@@ -135,9 +135,18 @@ export default function TableFloorPlan({ tables, allTables = tables, selectedAre
       <div className="pos-plan-area-toolbar">
         <label className="pos-plan-area-field" htmlFor="pos-dining-area">
           <span>Dining area</span>
-          <select id="pos-dining-area" className="pos-select" value={area.id} onChange={event => onAreaChange(event.target.value)} aria-controls="pos-selected-dining-plan">
-            {diningAreas.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}
-          </select>
+          <div className="pos-select-wrap">
+            <select
+              id="pos-dining-area"
+              className="pos-select"
+              value={area.id}
+              onChange={event => onAreaChange(event.target.value)}
+              aria-controls="pos-selected-dining-plan"
+            >
+              {diningAreas.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}
+            </select>
+            <ChevronDown size={16} className="pos-select-arrow" aria-hidden="true" />
+          </div>
         </label>
         <span className="pos-plan-area-count" role="status">{areaTables.length} {area.id === 'party' ? (areaTables.length === 1 ? 'hall' : 'halls') : (areaTables.length === 1 ? 'table' : 'tables')} shown</span>
       </div>

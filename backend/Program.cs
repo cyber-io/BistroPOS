@@ -193,6 +193,35 @@ try
             BEGIN
                 ALTER TABLE restaurant_pos.tables DROP CONSTRAINT IF EXISTS tables_status_check;
                 ALTER TABLE restaurant_pos.tables ADD CONSTRAINT tables_status_check CHECK (status IN ('AVAILABLE', 'RESERVED', 'OCCUPIED', 'WAITING_FOR_CLEANING', 'CLEANING', 'OUT_OF_SERVICE'));
+
+                -- Phase 1 Schema extensions
+                ALTER TABLE restaurant_pos.menu_items
+                    ADD COLUMN IF NOT EXISTS allergens JSONB DEFAULT '[]'::jsonb,
+                    ADD COLUMN IF NOT EXISTS ingredients TEXT,
+                    ADD COLUMN IF NOT EXISTS portions JSONB DEFAULT '[]'::jsonb,
+                    ADD COLUMN IF NOT EXISTS dietary_tags JSONB DEFAULT '[]'::jsonb,
+                    ADD COLUMN IF NOT EXISTS is_special BOOLEAN DEFAULT FALSE,
+                    ADD COLUMN IF NOT EXISTS prep_time_minutes INT DEFAULT 15;
+
+                CREATE TABLE IF NOT EXISTS restaurant_pos.dining_sessions (
+                    session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    restaurant_id UUID NOT NULL REFERENCES restaurant_pos.restaurants(restaurant_id) ON DELETE CASCADE,
+                    table_id UUID NOT NULL REFERENCES restaurant_pos.tables(table_id) ON DELETE CASCADE,
+                    session_code VARCHAR(50) NOT NULL,
+                    status VARCHAR(50) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'CLOSED')),
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    closed_at TIMESTAMPTZ
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_dining_sessions_table ON restaurant_pos.dining_sessions(table_id, status);
+
+                ALTER TABLE restaurant_pos.orders
+                    ADD COLUMN IF NOT EXISTS session_id UUID REFERENCES restaurant_pos.dining_sessions(session_id) ON DELETE SET NULL,
+                    ADD COLUMN IF NOT EXISTS estimated_prep_time_minutes INT DEFAULT 15,
+                    ADD COLUMN IF NOT EXISTS estimated_ready_at TIMESTAMPTZ;
+
+                ALTER TABLE restaurant_pos.help_requests
+                    ADD COLUMN IF NOT EXISTS request_type VARCHAR(50) DEFAULT 'CUSTOM';
             EXCEPTION WHEN OTHERS THEN
                 NULL;
             END $$;

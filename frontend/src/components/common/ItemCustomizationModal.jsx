@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { customizationCharge } from '../../context/CartContext';
-import { Plus, Minus, X, Flame, Candy, ShoppingBag } from 'lucide-react';
+import { Plus, Minus, X, Flame, Candy, ShoppingBag, AlertTriangle, Sparkles } from 'lucide-react';
 
 export default function ItemCustomizationModal({ isOpen, onClose, item, onAddToCart }) {
   const [quantity, setQuantity] = useState(1);
   const [selectedChoices, setSelectedChoices] = useState({});
   const [selectedAddOns, setSelectedAddOns] = useState([]);
+  const [selectedPortion, setSelectedPortion] = useState(null);
   const [specialInstruction, setSpecialInstruction] = useState('');
 
   useEffect(() => {
@@ -14,6 +15,11 @@ export default function ItemCustomizationModal({ isOpen, onClose, item, onAddToC
     setSelectedChoices(Object.fromEntries((item.customizationOptions || []).filter(option => option.choices?.length).map(option => [option.name, option.choices[0]])));
     setSelectedAddOns([]);
     setSpecialInstruction('');
+    if (item.portions && item.portions.length > 0) {
+      setSelectedPortion(item.portions[0]);
+    } else {
+      setSelectedPortion(null);
+    }
   }, [isOpen, item?.menuItemId]);
   useEffect(() => {
     if (!isOpen) return;
@@ -35,11 +41,12 @@ export default function ItemCustomizationModal({ isOpen, onClose, item, onAddToC
   };
 
   const addOnsTotal = selectedAddOns.reduce((sum, a) => sum + (a.price || 0), 0);
-  const unitPrice = Number(item.price) + addOnsTotal + customizationCharge(selectedChoices);
+  const effectiveBasePrice = selectedPortion ? Number(selectedPortion.price) : Number(item.price);
+  const unitPrice = effectiveBasePrice + addOnsTotal + customizationCharge(selectedChoices);
   const totalPrice = unitPrice * quantity;
 
   const handleAdd = () => {
-    onAddToCart(item, quantity, selectedChoices, selectedAddOns, specialInstruction.trim());
+    onAddToCart(item, quantity, selectedChoices, selectedAddOns, specialInstruction.trim(), selectedPortion);
     onClose();
   };
 
@@ -75,16 +82,26 @@ export default function ItemCustomizationModal({ isOpen, onClose, item, onAddToC
               <span className="text-xs font-semibold uppercase tracking-wider text-slate-300">
                 {item.categoryName || 'Chef Special'}
               </span>
+              {item.isSpecial && (
+                <span className="inline-flex items-center text-[10px] bg-amber-500/90 px-1.5 py-0.5 rounded text-white font-bold">
+                  ⭐ Special
+                </span>
+              )}
               {item.isSweet && (
                 <span className="inline-flex items-center text-[10px] bg-pink-500/80 px-1.5 py-0.5 rounded text-white font-bold">
                   <Candy className="w-3 h-3 mr-0.5" /> Sweet
                 </span>
               )}
-              {item.spiceLevel !== 'NONE' && (
+              {item.spiceLevel && item.spiceLevel !== 'NONE' && (
                 <span className="inline-flex items-center text-[10px] bg-red-500/80 px-1.5 py-0.5 rounded text-white font-bold">
                   <Flame className="w-3 h-3 mr-0.5" /> {item.spiceLevel}
                 </span>
               )}
+              {(item.dietaryTags || []).map((tag, i) => (
+                <span key={i} className="inline-flex items-center text-[10px] bg-emerald-600/90 px-1.5 py-0.5 rounded text-white font-semibold">
+                  {tag}
+                </span>
+              ))}
             </div>
             <h3 className="text-lg font-black leading-snug">{item.name}</h3>
             <p className="text-xs text-slate-300 line-clamp-1">{item.description}</p>
@@ -93,6 +110,62 @@ export default function ItemCustomizationModal({ isOpen, onClose, item, onAddToC
 
         {/* Scrollable Customization Content */}
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {/* Ingredients & Allergens Information */}
+          {(item.ingredients || (item.allergens && item.allergens.length > 0)) && (
+            <div className="p-3 bg-amber-50/70 rounded-xl border border-amber-200/80 space-y-1.5 text-xs">
+              {item.ingredients && (
+                <div className="text-slate-700">
+                  <strong className="text-slate-900 font-semibold">Ingredients: </strong>
+                  <span>{item.ingredients}</span>
+                </div>
+              )}
+              {item.allergens && item.allergens.length > 0 && (
+                <div className="flex items-start gap-1.5 text-amber-950">
+                  <span className="font-bold shrink-0 text-amber-800 flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600" /> Allergens:
+                  </span>
+                  <div className="flex flex-wrap gap-1">
+                    {item.allergens.map((alg, i) => (
+                      <span key={i} className="inline-block px-1.5 py-0.5 rounded bg-amber-200/80 font-bold text-[10px] text-amber-950">
+                        {alg}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Portion Size Selector */}
+          {item.portions && item.portions.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Portion Size</h4>
+                <span className="text-[11px] text-brand-600 font-semibold">Select size</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {item.portions.map(p => {
+                  const isSelected = selectedPortion?.name === p.name;
+                  return (
+                    <button
+                      key={p.name}
+                      type="button"
+                      onClick={() => setSelectedPortion(p)}
+                      className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-between transition-all ${
+                        isSelected
+                          ? 'border-brand-500 bg-brand-50 text-brand-700 ring-1 ring-brand-500 font-bold'
+                          : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span>{p.name}</span>
+                      <span className="font-bold text-slate-900">₹{p.price}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Options / Choices */}
           {item.customizationOptions && item.customizationOptions.length > 0 && (
             <div className="space-y-3">
