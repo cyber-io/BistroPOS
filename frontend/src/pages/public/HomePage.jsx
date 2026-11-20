@@ -92,7 +92,7 @@ export default function HomePage() {
             className="website-hero-dish"
             src={HERO_DISH_IMAGE}
             alt="Bistro & Bloom Signature Salad"
-            fetchPriority="high"
+            fetchpriority="high"
           />
         </div>
 
