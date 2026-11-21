@@ -118,6 +118,37 @@ public class RestaurantsController : ControllerBase
         await _db.SaveChangesAsync();
         return Ok(restaurant);
     }
+
+    [HttpGet("{id:guid}/wifi")]
+    public async Task<IActionResult> GetWifi(Guid id)
+    {
+        var restaurant = await _db.Restaurants.FindAsync(id);
+        if (restaurant == null) return NotFound();
+        return Ok(new
+        {
+            restaurantId = restaurant.RestaurantId,
+            wifiSsid = restaurant.WifiSsid ?? "Bistro-HighSpeed-Guest",
+            wifiPassword = restaurant.WifiEnabled ? (restaurant.WifiPassword ?? "Bistro@2026") : null,
+            wifiEnabled = restaurant.WifiEnabled,
+            googleReviewUrl = restaurant.GoogleReviewUrl ?? "https://maps.google.com",
+            subscriptionTier = restaurant.SubscriptionTier ?? "PRO"
+        });
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Receptionist}")]
+    [HttpPatch("{id:guid}/wifi")]
+    public async Task<IActionResult> UpdateWifi(Guid id, [FromBody] UpdateRestaurantWifiDto dto)
+    {
+        var restaurant = await _db.Restaurants.FindAsync(id);
+        if (restaurant == null) return NotFound();
+        if (dto.WifiSsid != null) restaurant.WifiSsid = dto.WifiSsid;
+        if (dto.WifiPassword != null) restaurant.WifiPassword = dto.WifiPassword;
+        if (dto.WifiEnabled.HasValue) restaurant.WifiEnabled = dto.WifiEnabled.Value;
+        if (dto.GoogleReviewUrl != null) restaurant.GoogleReviewUrl = dto.GoogleReviewUrl;
+        restaurant.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+        return Ok(restaurant);
+    }
 }
 
 [ApiController]
@@ -171,6 +202,59 @@ public class TablesController : ControllerBase
     {
         var success = await _tables.CloseSessionAsync(id);
         return Ok(new { success });
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Receptionist}")]
+    [HttpPatch("{id:guid}/position")]
+    public async Task<IActionResult> UpdatePosition(Guid id, [FromBody] UpdateTablePositionDto request)
+    {
+        var success = await _tables.UpdateTablePositionAsync(id, request);
+        if (!success) return NotFound();
+        return Ok(new { success = true, message = "Table floor position updated successfully." });
+    }
+}
+
+[ApiController]
+[Route("api/[controller]")]
+public class InventoryController : ControllerBase
+{
+    private readonly IInventoryService _inventory;
+
+    public InventoryController(IInventoryService inventory)
+    {
+        _inventory = inventory;
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> GetInventory([FromQuery] Guid? restaurantId)
+    {
+        var targetId = restaurantId ?? UserProvisioning.DefaultRestaurantId;
+        var items = await _inventory.GetInventoryAsync(targetId);
+        return Ok(items);
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Kitchen}")]
+    [HttpPost]
+    public async Task<IActionResult> CreateItem([FromBody] CreateInventoryItemDto request)
+    {
+        var created = await _inventory.CreateItemAsync(request);
+        return CreatedAtAction(nameof(GetInventory), new { restaurantId = created.RestaurantId }, created);
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Kitchen},{UserRoles.Receptionist}")]
+    [HttpPatch("{id:guid}/stock")]
+    public async Task<IActionResult> UpdateStock(Guid id, [FromBody] UpdateStockDto request)
+    {
+        var success = await _inventory.UpdateStockAsync(id, request.QuantityChange, request.Reason);
+        if (!success) return NotFound();
+        return Ok(new { success = true, message = "Stock updated successfully." });
+    }
+
+    [HttpPost("shortage")]
+    public async Task<IActionResult> ReportShortage([FromBody] ReportShortageDto request)
+    {
+        var success = await _inventory.ReportShortageAsync(request);
+        return Ok(new { success = true, message = "Shortage alert processed." });
     }
 }
 
@@ -498,7 +582,7 @@ public class HelpController : ControllerBase
         return Ok(new { success = true, message = $"Assigned to {dto.WaiterName}" });
     }
 
-    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Waiter},{UserRoles.Receptionist}")]
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Waiter}")]
     [HttpPost("{id:guid}/resolve")]
     public async Task<IActionResult> ResolveHelp(Guid id)
     {
@@ -657,5 +741,70 @@ public class UsersController : ControllerBase
         _db.Users.Remove(user);
         await _db.SaveChangesAsync();
         return Ok(new { message = "Staff member removed successfully." });
+    }
+}
+
+[ApiController]
+[Route("api/[controller]")]
+public class LoyaltyController : ControllerBase
+{
+    private readonly ILoyaltyService _loyalty;
+
+    public LoyaltyController(ILoyaltyService loyalty)
+    {
+        _loyalty = loyalty;
+    }
+
+    [HttpGet("balance")]
+    public async Task<IActionResult> GetBalance([FromQuery] Guid restaurantId, [FromQuery] string phone)
+    {
+        if (string.IsNullOrWhiteSpace(phone)) return BadRequest("Phone number is required.");
+        var loyalty = await _loyalty.GetLoyaltyByPhoneAsync(restaurantId, phone);
+        if (loyalty == null)
+        {
+            return Ok(new CustomerLoyaltyDto(Guid.Empty, restaurantId, phone, null, null, 0, 0, "BRONZE"));
+        }
+        return Ok(loyalty);
+    }
+
+    [HttpPost("earn")]
+    public async Task<IActionResult> EarnPoints([FromBody] EarnLoyaltyPointsDto request)
+    {
+        var result = await _loyalty.EarnPointsAsync(request);
+        return Ok(result);
+    }
+
+    [HttpPost("redeem")]
+    public async Task<IActionResult> RedeemPoints([FromBody] RedeemLoyaltyPointsDto request)
+    {
+        var result = await _loyalty.RedeemPointsAsync(request);
+        if (!result.Success) return BadRequest(new { message = result.Message });
+        return Ok(new { loyalty = result.Loyalty, discountAmount = result.DiscountAmount, message = result.Message });
+    }
+}
+
+[ApiController]
+[Route("api/[controller]")]
+public class FeedbackController : ControllerBase
+{
+    private readonly IFeedbackService _feedback;
+
+    public FeedbackController(IFeedbackService feedback)
+    {
+        _feedback = feedback;
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> SubmitFeedback([FromBody] CreateFeedbackDto request)
+    {
+        var result = await _feedback.CreateFeedbackAsync(request);
+        return Ok(result);
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> GetFeedbacks([FromQuery] Guid restaurantId)
+    {
+        var list = await _feedback.GetFeedbacksAsync(restaurantId);
+        return Ok(list);
     }
 }

@@ -38,8 +38,17 @@ public interface ITableService
     Task<TableDto?> GetTableByIdAsync(Guid tableId);
     Task<QrValidationResponse> ValidateQrAsync(string qrIdentifier);
     Task<bool> UpdateTableStatusAsync(Guid tableId, UpdateTableStatusRequest request);
+    Task<bool> UpdateTablePositionAsync(Guid tableId, UpdateTablePositionDto request);
     Task<DiningSessionDto?> GetOrCreateActiveSessionAsync(Guid tableId);
     Task<bool> CloseSessionAsync(Guid tableId);
+}
+
+public interface IInventoryService
+{
+    Task<List<InventoryItemDto>> GetInventoryAsync(Guid restaurantId);
+    Task<InventoryItemDto> CreateItemAsync(CreateInventoryItemDto request);
+    Task<bool> UpdateStockAsync(Guid itemId, decimal quantityChange, string? reason);
+    Task<bool> ReportShortageAsync(ReportShortageDto request);
 }
 
 public interface IHelpRequestService
@@ -68,4 +77,17 @@ public interface INotificationService
 public interface IAuditLogService
 {
     Task LogAsync(Guid? restaurantId, Guid? userId, string? userRole, string action, string resource, object? metadata = null, string? ipAddress = null);
+}
+
+public interface ILoyaltyService
+{
+    Task<CustomerLoyaltyDto?> GetLoyaltyByPhoneAsync(Guid restaurantId, string phone);
+    Task<CustomerLoyaltyDto> EarnPointsAsync(EarnLoyaltyPointsDto request);
+    Task<(bool Success, CustomerLoyaltyDto? Loyalty, decimal DiscountAmount, string Message)> RedeemPointsAsync(RedeemLoyaltyPointsDto request);
+}
+
+public interface IFeedbackService
+{
+    Task<CustomerFeedbackDto> CreateFeedbackAsync(CreateFeedbackDto request);
+    Task<List<CustomerFeedbackDto>> GetFeedbacksAsync(Guid restaurantId);
 }

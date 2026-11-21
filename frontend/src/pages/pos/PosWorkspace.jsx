@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Plus, Search, RefreshCw, ArrowUpRight, CreditCard, Banknote, Timer, Check, ClipboardCheck, ClipboardList, Package, Armchair, CalendarDays, History, LayoutGrid, Info, AlertCircle, Bell, SlidersHorizontal, UtensilsCrossed, ShoppingBag, Truck, Minus, Trash2, Printer, QrCode, ArrowLeft, CheckCircle2, X, Users, HandPlatter, Coffee, MapPin, Download, Sparkles, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
+import { Plus, Search, RefreshCw, ArrowUpRight, CreditCard, Banknote, Timer, Check, ClipboardCheck, ClipboardList, Package, Armchair, CalendarDays, History, LayoutGrid, Info, AlertCircle, Bell, SlidersHorizontal, UtensilsCrossed, ShoppingBag, Truck, Minus, Trash2, Printer, QrCode, ArrowLeft, CheckCircle2, X, Users, HandPlatter, Coffee, MapPin, Download, Sparkles, ChevronLeft, ChevronRight, Calendar, ChevronDown, ChevronUp, Clock, Phone, User } from 'lucide-react';
 import QRCode from 'qrcode';
 import { api, subscribeRealtimeEvents, uniqueKey } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
@@ -38,54 +38,35 @@ function PosDateFilter({
   value,
   onChange,
   labelText = 'Select date',
-  allLabel = 'All dates',
-  showAllOption = true,
+  allLabel = 'All history',
+  showAllOption = false,
   count = null
 }) {
-  const isCurrentToday = value === today();
-  const isCurrentYesterday = value === yesterday();
-  const isCurrentTomorrow = value === tomorrow();
-
   return (
     <div className="pos-date-picker-wrap" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-      <div className="pos-segment" style={{ margin: 0 }}>
-        {showAllOption && (
-          <button
-            type="button"
-            className={value === '' ? 'active' : ''}
-            onClick={() => onChange('')}
-            title={allLabel}
-          >
-            {allLabel}
-          </button>
-        )}
+      {showAllOption && (
         <button
           type="button"
-          className={isCurrentYesterday ? 'active' : ''}
-          onClick={() => onChange(yesterday())}
-          title="Yesterday"
+          className={`pos-button small ${value === '' ? 'primary' : ''}`}
+          style={{
+            height: 32,
+            padding: '0 10px',
+            fontSize: 11,
+            fontWeight: 600,
+            borderRadius: 7,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 5
+          }}
+          onClick={() => onChange('')}
+          title={allLabel}
         >
-          Yesterday
+          <History size={13} />
+          {allLabel}
         </button>
-        <button
-          type="button"
-          className={isCurrentToday ? 'active' : ''}
-          onClick={() => onChange(today())}
-          title="Today"
-        >
-          Today
-        </button>
-        <button
-          type="button"
-          className={isCurrentTomorrow ? 'active' : ''}
-          onClick={() => onChange(tomorrow())}
-          title="Tomorrow"
-        >
-          Tomorrow
-        </button>
-      </div>
+      )}
 
-      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2, background: 'var(--p-card)', border: '1px solid var(--p-border)', borderRadius: 7, padding: '2px 4px' }}>
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2, background: 'var(--p-card)', border: '1px solid var(--p-border)', borderRadius: 7, padding: '2px 4px', height: 32 }}>
         <button
           type="button"
           className="pos-icon-button"
@@ -96,7 +77,8 @@ function PosDateFilter({
           <ChevronLeft size={13} />
         </button>
 
-        <label style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', cursor: 'pointer', margin: 0 }}>
+        <label style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', cursor: 'pointer', margin: 0, gap: 5, padding: '0 4px' }}>
+          <Calendar size={13} style={{ color: 'var(--p-muted)', flexShrink: 0 }} />
           <input
             className="pos-input"
             type="date"
@@ -104,13 +86,14 @@ function PosDateFilter({
             value={value}
             onChange={e => onChange(e.target.value)}
             style={{
-              width: 130,
+              width: 125,
               height: 26,
               fontSize: 11,
-              padding: '2px 6px',
+              padding: '2px 4px',
               border: 0,
               background: 'transparent',
-              fontWeight: 500
+              fontWeight: 600,
+              cursor: 'pointer'
             }}
           />
         </label>
@@ -126,18 +109,6 @@ function PosDateFilter({
         </button>
       </div>
 
-      {value && (
-        <button
-          type="button"
-          onClick={() => onChange('')}
-          className="pos-icon-button"
-          title="Clear date (Show all)"
-          style={{ width: 22, height: 22, border: 0, padding: 0, color: 'var(--p-muted)' }}
-        >
-          <X size={11} />
-        </button>
-      )}
-
       {typeof count === 'number' && (
         <span style={{ fontSize: 10, color: 'var(--p-muted)' }}>
           ({count})
@@ -149,7 +120,7 @@ function PosDateFilter({
 
 function FoodImage({ item, className = '' }) { return <img src={item.image || '/images/bistro-hero-plate.png'} alt={item.name || ''} className={className} loading="lazy" onError={e => { e.currentTarget.onerror = null; e.currentTarget.src = '/images/bistro-hero-plate.png'; }} />; }
 function SearchField({ value, onChange, placeholder = 'Search order or customer…' }) { return <div className="pos-search"><Search /><input className="pos-input" aria-label={placeholder} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} /></div>; }
-function Totals({ order }) { return <div className="pos-detail-totals"><div><span>Subtotal</span><span>{money(order.subtotal)}</span></div><div><span>Tax</span><span>{money(order.tax)}</span></div>{order.discount > 0 && <div><span>Discount</span><span>−{money(order.discount)}</span></div>}{order.deliveryFee > 0 && <div><span>Delivery fee</span><span>{money(order.deliveryFee)}</span></div>}<div className="total"><span>Total payment</span><span>{money(order.total)}</span></div></div>; }
+function Totals({ order }) { return <div className="pos-detail-totals"><div><span>Subtotal</span><span>{money(order?.subtotal)}</span></div><div><span>Tax</span><span>{money(order?.tax)}</span></div>{Number(order?.discount) > 0 && <div><span>Discount</span><span>−{money(order.discount)}</span></div>}{Number(order?.deliveryFee) > 0 && <div><span>Delivery fee</span><span>{money(order.deliveryFee)}</span></div>}<div className="total"><span>Total payment</span><span>{money(order?.grandTotal || order?.total)}</span></div></div>; }
 
 function OrderCard({ order, onDetails, onPay, paid = false }) {
   const items = order?.items || [];
@@ -223,10 +194,8 @@ const getSavedFilter = (sec) => {
 
 const saveFilter = (sec, value) => {
   try {
-    if (value && value !== 'ALL') {
+    if (value) {
       localStorage.setItem(`bistro_pos_filter_${sec}`, value);
-    } else {
-      localStorage.removeItem(`bistro_pos_filter_${sec}`);
     }
   } catch {
     // ignore
@@ -253,6 +222,403 @@ const saveTableArea = (area) => {
   }
 };
 
+function createSessionObj(type, orders, tableInfo, paidIds) {
+  const firstOrder = orders[0];
+  const lastOrder = orders[orders.length - 1];
+  const isDineIn = type === 'TABLE_SESSION' || Boolean(tableInfo) || Boolean(firstOrder?.tableId);
+
+  const items = [];
+  for (const order of orders) {
+    for (const item of (order.items || [])) {
+      items.push({
+        ...item,
+        orderId: order.orderId,
+        orderNumber: order.orderNumber,
+        orderCreatedAt: order.createdAt,
+        orderStatus: order.status,
+        itemStatus: item.status || order.status
+      });
+    }
+  }
+
+  const subtotal = orders.reduce((sum, o) => sum + Number(o.subtotal || 0), 0);
+  const tax = orders.reduce((sum, o) => sum + Number(o.tax || 0), 0);
+  const discount = orders.reduce((sum, o) => sum + Number(o.discount || 0), 0);
+  const deliveryFee = orders.reduce((sum, o) => sum + Number(o.deliveryFee || 0), 0);
+  const grandTotal = orders.reduce((sum, o) => sum + Number(o.total || 0), 0);
+  const paidAmount = orders.reduce((sum, o) => sum + Number(o.paidAmount || 0), 0);
+
+  const isPaid = orders.every(o => paidIds.has(o.orderId) || o.paymentStatus === 'PAID');
+  const isCancelled = orders.every(o => ['CANCELLED', 'CONFIRMATION_TIMEOUT'].includes(o.status));
+  const isClosed = isPaid || isCancelled;
+
+  const customerName = orders.find(o => o.customerName && o.customerName !== 'Guest' && !o.customerName.startsWith('Table '))?.customerName 
+    || tableInfo?.currentCustomerName 
+    || firstOrder?.customerName 
+    || (isDineIn ? 'Guest' : 'Customer');
+    
+  const customerPhone = orders.find(o => o.customerPhone)?.customerPhone 
+    || tableInfo?.currentCustomerPhone 
+    || firstOrder?.customerPhone 
+    || '';
+
+  let overallStatus = 'NEW';
+  if (isPaid) {
+    overallStatus = 'PAID';
+  } else if (isCancelled) {
+    overallStatus = 'CANCELLED';
+  } else if (items.some(i => i.itemStatus === 'NEW' || i.orderStatus === 'NEW')) {
+    overallStatus = 'NEW';
+  } else if (items.some(i => ['PREPARING', 'ACCEPTED'].includes(i.itemStatus || i.orderStatus))) {
+    overallStatus = 'PREPARING';
+  } else if (items.some(i => ['READY', 'READY_FOR_PICKUP'].includes(i.itemStatus || i.orderStatus))) {
+    overallStatus = 'READY';
+  } else if (items.length > 0 && items.every(i => ['DELIVERED', 'PICKED_UP'].includes(i.itemStatus || i.orderStatus))) {
+    overallStatus = 'DELIVERED';
+  } else {
+    overallStatus = lastOrder?.status || 'ACTIVE';
+  }
+
+  const tableNumber = tableInfo?.tableNumber || firstOrder?.tableNumber;
+  const tableTitleText = tableInfo ? tableTitle(tableInfo) : (firstOrder?.tableNumber ? tableTitle(firstOrder) : (SOURCES[firstOrder?.source] || 'Order'));
+
+  const shortId = firstOrder?.orderNumber ? firstOrder.orderNumber.replace(/^ORD-/, '').slice(0, 8) : firstOrder?.orderId?.slice(0, 8);
+  const sessionId = isDineIn ? `SES-T${tableNumber || 'X'}-${shortId}` : (firstOrder?.orderNumber || 'SES-ORDER');
+
+  return {
+    type,
+    sessionId,
+    tableId: tableInfo?.tableId || firstOrder?.tableId,
+    tableNumber,
+    tableName: tableTitleText,
+    tableInfo,
+    customerName,
+    customerPhone,
+    startedAt: firstOrder?.createdAt,
+    latestAt: lastOrder?.createdAt,
+    source: firstOrder?.source || 'DINE_IN_QR',
+    orders,
+    items,
+    totalItemCount: items.reduce((sum, i) => sum + (Number(i.quantity) || 1), 0),
+    subtotal: Math.round(subtotal * 100) / 100,
+    tax: Math.round(tax * 100) / 100,
+    discount: Math.round(discount * 100) / 100,
+    deliveryFee: Math.round(deliveryFee * 100) / 100,
+    grandTotal: Math.round(grandTotal * 100) / 100,
+    paidAmount: Math.round(paidAmount * 100) / 100,
+    balanceDue: Math.max(0, Math.round((grandTotal - paidAmount) * 100) / 100),
+    isPaid,
+    isCancelled,
+    isClosed,
+    status: overallStatus,
+    hasNewItems: items.some(i => i.itemStatus === 'NEW' || i.orderStatus === 'NEW'),
+    hasPreparingItems: items.some(i => ['PREPARING', 'ACCEPTED'].includes(i.itemStatus || i.orderStatus)),
+    hasReadyItems: items.some(i => ['READY', 'READY_FOR_PICKUP'].includes(i.itemStatus || i.orderStatus)),
+    hasDeliveredItems: items.some(i => ['DELIVERED', 'PICKED_UP'].includes(i.itemStatus || i.orderStatus)),
+  };
+}
+
+function groupOrdersIntoSessions(orders, tables, paidIds, orderDate, payments = []) {
+  const ordersOnDate = orders.filter(o => !orderDate || toLocalDate(o.createdAt) === orderDate);
+  const tableOrdersMap = new Map();
+  const nonTableOrders = [];
+
+  // Map each orderId to its earliest paid payment timestamp
+  const orderPaymentTimeMap = new Map();
+  if (Array.isArray(payments)) {
+    for (const p of payments) {
+      if (p.orderId && p.status === 'PAID') {
+        const pTime = new Date(p.createdAt).getTime();
+        const existing = orderPaymentTimeMap.get(p.orderId);
+        if (!existing || pTime < existing) {
+          orderPaymentTimeMap.set(p.orderId, pTime);
+        }
+      }
+    }
+  }
+
+  for (const order of ordersOnDate) {
+    if (order.tableId) {
+      if (!tableOrdersMap.has(order.tableId)) {
+        tableOrdersMap.set(order.tableId, []);
+      }
+      tableOrdersMap.get(order.tableId).push(order);
+    } else {
+      nonTableOrders.push(order);
+    }
+  }
+
+  const sessions = [];
+
+  for (const [tableId, tOrders] of tableOrdersMap.entries()) {
+    const sorted = [...tOrders].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    const tableInfo = tables.find(t => t.tableId === tableId) || { tableId, tableNumber: sorted[0]?.tableNumber };
+
+    // Group orders for this table into customer dining sessions
+    let currentSessionOrders = [];
+
+    for (let i = 0; i < sorted.length; i++) {
+      const order = sorted[i];
+
+      if (currentSessionOrders.length === 0) {
+        currentSessionOrders.push(order);
+        continue;
+      }
+
+      const prevOrder = currentSessionOrders[currentSessionOrders.length - 1];
+      const isPrevPaid = paidIds.has(prevOrder.orderId) || prevOrder.paymentStatus === 'PAID';
+      const isCurrPaid = paidIds.has(order.orderId) || order.paymentStatus === 'PAID';
+
+      const prevCust = (prevOrder.customerName || '').trim().toLowerCase();
+      const currCust = (order.customerName || '').trim().toLowerCase();
+      const prevPhone = (prevOrder.customerPhone || '').replace(/\D/g, '');
+      const currPhone = (order.customerPhone || '').replace(/\D/g, '');
+
+      const prevTime = new Date(prevOrder.createdAt).getTime();
+      const currTime = new Date(order.createdAt).getTime();
+      const timeDiffMinutes = (currTime - prevTime) / 60000;
+
+      const prevPaymentTime = orderPaymentTimeMap.get(prevOrder.orderId);
+
+      // Check if this order marks a new dining session / different customer on this table:
+      let isNewSession = false;
+
+      // 1. Different explicit customer names (e.g. Rahul vs Priya)
+      if (prevCust && currCust && prevCust !== 'guest' && currCust !== 'guest' && prevCust !== currCust) {
+        isNewSession = true;
+      }
+      // 2. Different explicit phone numbers
+      else if (prevPhone && currPhone && prevPhone !== currPhone) {
+        isNewSession = true;
+      }
+      // 3. Previous order was paid before this order was placed
+      else if (prevPaymentTime && currTime > prevPaymentTime) {
+        isNewSession = true;
+      }
+      // 4. One order is paid and the next is unpaid (past vs active)
+      else if (isPrevPaid && !isCurrPaid) {
+        isNewSession = true;
+      }
+      // 5. Both orders are paid, but placed with a significant gap (> 45 min)
+      else if (isPrevPaid && isCurrPaid && timeDiffMinutes > 45) {
+        isNewSession = true;
+      }
+      // 6. Large gap between orders (> 90 min)
+      else if (timeDiffMinutes > 90) {
+        isNewSession = true;
+      }
+
+      if (isNewSession) {
+        sessions.push(createSessionObj('TABLE_SESSION', currentSessionOrders, tableInfo, paidIds));
+        currentSessionOrders = [order];
+      } else {
+        currentSessionOrders.push(order);
+      }
+    }
+
+    if (currentSessionOrders.length > 0) {
+      sessions.push(createSessionObj('TABLE_SESSION', currentSessionOrders, tableInfo, paidIds));
+    }
+  }
+
+  for (const order of nonTableOrders) {
+    sessions.push(createSessionObj(order.source || 'TAKEAWAY', [order], null, paidIds));
+  }
+
+  return sessions.sort((a, b) => {
+    if (a.isClosed !== b.isClosed) return a.isClosed ? 1 : -1;
+    return new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime();
+  });
+}
+
+function TableSessionCard({ session, onDetails, onPay, onAddItems }) {
+  const [expanded, setExpanded] = useState(false);
+  const isDineIn = session.type === 'TABLE_SESSION' || session.source === 'DINE_IN_QR';
+  const tableChipText = isDineIn ? (session.tableNumber ? `A${session.tableNumber}` : 'T') : (session.source === 'DELIVERY' ? <Truck size={14} /> : <ShoppingBag size={14} />);
+  const elapsedMinutes = Math.max(0, Math.floor((Date.now() - new Date(session.startedAt).getTime()) / 60000));
+  const timeElapsedStr = elapsedMinutes < 1 ? 'Just now' : `${elapsedMinutes}m ago`;
+
+  return (
+    <article className={`pos-session-card ${session.isPaid ? 'is-paid' : ''} ${session.hasNewItems ? 'has-new' : ''}`}>
+      <div className="pos-session-header">
+        <div className="pos-session-title-group">
+          <span className={`pos-table-chip ${isDineIn ? '' : 'pos-chip-non-dine'}`}>
+            {tableChipText}
+          </span>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <strong className="pos-session-name">{session.tableName}</strong>
+              {session.tableNumber && (
+                <span className="pos-table-id-pill" title={`Table ID: ${session.tableId}`}>
+                  ID #{session.tableNumber}
+                </span>
+              )}
+            </div>
+            <div className="pos-session-ids">
+              <span className="pos-session-id" title="Session ID">{session.sessionId}</span>
+              {session.orders.length > 1 && (
+                <span className="pos-orders-count-badge">
+                  {session.orders.length} orders
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+        <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
+          <Badge status={session.status} />
+          <small className="pos-session-time">
+            <Clock size={10} style={{ display: 'inline', marginRight: 3 }} />
+            {time(session.startedAt)} · {timeElapsedStr}
+          </small>
+        </div>
+      </div>
+
+      <div className="pos-session-customer-row">
+        <div className="pos-session-cust-info">
+          <div className="pos-cust-field">
+            <span className="pos-field-label">Customer:</span>
+            <strong className="pos-cust-val">{session.customerName || 'Guest'}</strong>
+          </div>
+          {session.customerPhone && (
+            <div className="pos-cust-field">
+              <span className="pos-field-label">Phone:</span>
+              <span className="pos-cust-val">{session.customerPhone}</span>
+            </div>
+          )}
+        </div>
+        <div className="pos-session-item-badge">
+          <span>{session.totalItemCount} {session.totalItemCount === 1 ? 'item' : 'items'}</span>
+        </div>
+      </div>
+
+      <div className="pos-session-items-preview">
+        {session.items.slice(0, 3).map((item, idx) => (
+          <div key={idx} className="pos-session-preview-row">
+            <span className="pos-item-qty">{item.quantity}×</span>
+            <span className="pos-item-name">{item.name || item.itemName}</span>
+            <span className={`pos-item-mini-badge status-${(item.itemStatus || item.orderStatus || 'new').toLowerCase()}`}>
+              {label(item.itemStatus || item.orderStatus || 'NEW')}
+            </span>
+            <span className="pos-item-price">{money(item.lineTotal)}</span>
+          </div>
+        ))}
+        {session.items.length > 3 && (
+          <div className="pos-session-more-items" onClick={() => setExpanded(!expanded)}>
+            <span>+{session.items.length - 3} more items across {session.orders.length} orders</span>
+          </div>
+        )}
+      </div>
+
+      <div className="pos-session-financials">
+        <div className="pos-fin-row">
+          <span>Subtotal</span>
+          <span>{money(session.subtotal)}</span>
+        </div>
+        <div className="pos-fin-row">
+          <span>Tax</span>
+          <span>{money(session.tax)}</span>
+        </div>
+        {Number(session.discount) > 0 && (
+          <div className="pos-fin-row discount">
+            <span>Discount</span>
+            <span>−{money(session.discount)}</span>
+          </div>
+        )}
+        <div className="pos-fin-row grand-total">
+          <strong>Grand Total</strong>
+          <strong className="pos-total-amount">{money(session.grandTotal)}</strong>
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="pos-session-expanded-details">
+          <div className="pos-expanded-header">
+            <strong>Session Orders Breakdown ({session.orders.length})</strong>
+            <small>Kitchen & preparation status</small>
+          </div>
+          {session.orders.map((ord, ordIdx) => (
+            <div key={ord.orderId || ordIdx} className="pos-order-ticket-block">
+              <div className="pos-ticket-title-bar">
+                <div>
+                  <b className="pos-ticket-num">{ord.orderNumber}</b>
+                  <span className="pos-ticket-time">at {time(ord.createdAt)}</span>
+                </div>
+                <Badge status={ord.status} />
+              </div>
+              <div className="pos-ticket-items-list">
+                {(ord.items || []).map((it, itIdx) => (
+                  <div key={it.orderItemId || itIdx} className="pos-ticket-item-row">
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <b>{it.quantity}× {it.name || it.itemName}</b>
+                        <span className={`pos-item-mini-badge status-${(it.status || ord.status).toLowerCase()}`}>
+                          {label(it.status || ord.status)}
+                        </span>
+                      </div>
+                      {it.customization && Object.keys(it.customization).length > 0 && (
+                        <small className="pos-item-cust-text">
+                          {Object.entries(it.customization).map(([k, v]) => `${label(k)}: ${Array.isArray(v) ? v.join(', ') : v}`).join(' · ')}
+                        </small>
+                      )}
+                      {it.specialInstruction && (
+                        <small className="pos-item-note-text">Note: {it.specialInstruction}</small>
+                      )}
+                    </div>
+                    <b>{money(it.lineTotal)}</b>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="pos-session-card-actions">
+        <button
+          type="button"
+          className="pos-button small"
+          onClick={() => setExpanded(!expanded)}
+          title="Toggle kitchen and item details"
+        >
+          {expanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+          {expanded ? 'Collapse' : 'View details'}
+        </button>
+
+        {isDineIn && !session.isPaid && !session.isCancelled && (
+          <button
+            type="button"
+            className="pos-button small"
+            onClick={() => onAddItems && onAddItems(session)}
+            title="Add more items to this running table session"
+          >
+            <Plus size={11} /> Add items
+          </button>
+        )}
+
+        <button
+          type="button"
+          className="pos-button small"
+          onClick={() => onDetails && onDetails(session)}
+          title="Full order details modal"
+        >
+          <ArrowUpRight size={11} /> Details
+        </button>
+
+        {!['CANCELLED', 'CONFIRMATION_TIMEOUT'].includes(session.status) && (
+          <button
+            type="button"
+            className={`pos-button small ${session.isPaid ? '' : 'primary'}`}
+            disabled={session.isPaid}
+            onClick={() => onPay && onPay(session)}
+          >
+            {session.isPaid ? <><Check size={11} /> Paid</> : <><CreditCard size={11} /> Pay bill</>}
+          </button>
+        )}
+      </div>
+    </article>
+  );
+}
+
 export default function PosWorkspace() {
   const { currentUser } = useAuth();
   const { addToast } = useNotification();
@@ -268,9 +634,9 @@ export default function PosWorkspace() {
   const [tableArea, setTableAreaState] = useState(getSavedTableArea);
   const [category, setCategory] = useState('ALL');
   const [dashboardDate, setDashboardDate] = useState(today());
-  const [orderDate, setOrderDate] = useState('');
-  const [reservationDate, setReservationDate] = useState('');
-  const [historyDate, setHistoryDate] = useState('');
+  const [orderDate, setOrderDate] = useState(today());
+  const [reservationDate, setReservationDate] = useState(today());
+  const [historyDate, setHistoryDate] = useState(today());
   const [dialog, setDialog] = useState(null);
   const [selected, setSelected] = useState(null);
   const [reservationEdit, setReservationEdit] = useState(null);
@@ -385,6 +751,9 @@ export default function PosWorkspace() {
   const openOrder = order => { setSelected(order); setDialog('order'); };
   const pay = order => { setSelected(order); setDialog('payment'); };
   const newOrder = table => { setSelected(table?.tableId ? table : null); setDialog('new-order'); };
+  const handleAddItems = session => {
+    newOrder(session.tableInfo || { tableId: session.tableId, tableNumber: session.tableNumber });
+  };
   const newReservation = () => { setReservationEdit(null); setDialog('reservation'); };
   const tableOrders = t => data.orders.filter(o => o.tableId === t.tableId && !['CANCELLED', 'CONFIRMATION_TIMEOUT'].includes(o.status) && (!DONE.includes(o.status) || !paidIds.has(o.orderId)));
   const getTableInfo = t => {
@@ -396,6 +765,147 @@ export default function PosWorkspace() {
       billTotal: orders.length ? money(orders.reduce((sum, order) => sum + order.total, 0)) : null,
     };
   };
+
+  const orderSessions = useMemo(() => {
+    return groupOrdersIntoSessions(data.orders, data.tables, paidIds, orderDate, data.payments);
+  }, [data.orders, data.tables, paidIds, orderDate, data.payments]);
+
+  const ORDER_TABS = useMemo(() => [
+    { id: 'ALL', name: 'All orders' },
+    { id: 'NEW', name: 'New order' },
+    { id: 'IN_PROGRESS', name: 'In progress' },
+    { id: 'READY', name: 'Ready to serve' },
+    { id: 'COMPLETED', name: 'Completed' },
+    { id: 'CANCELLED', name: 'Cancelled' },
+    { id: 'DINE_IN', name: 'Dine in' },
+    { id: 'DELIVERY', name: 'Delivery' },
+    { id: 'TAKEAWAY', name: 'Takeaway' },
+  ], []);
+
+  const tabCounts = useMemo(() => {
+    const activeSessions = orderSessions.filter(s => !s.isClosed);
+    return {
+      ALL: activeSessions.length > 0 ? activeSessions.length : orderSessions.length,
+      NEW: activeSessions.filter(s => s.hasNewItems).length,
+      IN_PROGRESS: activeSessions.filter(s => s.hasPreparingItems).length,
+      READY: activeSessions.filter(s => s.hasReadyItems).length,
+      COMPLETED: orderSessions.filter(s => s.isPaid || (s.isClosed && !s.isCancelled)).length,
+      CANCELLED: orderSessions.filter(s => s.isCancelled).length,
+      DINE_IN: activeSessions.filter(s => s.type === 'TABLE_SESSION' || s.source === 'DINE_IN_QR').length,
+      DELIVERY: activeSessions.filter(s => s.source === 'DELIVERY').length,
+      TAKEAWAY: activeSessions.filter(s => s.source === 'TAKEAWAY').length,
+    };
+  }, [orderSessions]);
+
+  const filteredSessions = useMemo(() => {
+    let list = orderSessions;
+
+    if (filter === 'ALL') {
+      const hasActive = list.some(s => !s.isClosed);
+      if (hasActive) {
+        list = list.filter(s => !s.isClosed);
+      }
+    } else if (filter === 'NEW') {
+      list = list.filter(s => !s.isClosed && s.hasNewItems);
+    } else if (filter === 'IN_PROGRESS') {
+      list = list.filter(s => !s.isClosed && s.hasPreparingItems);
+    } else if (filter === 'READY') {
+      list = list.filter(s => !s.isClosed && s.hasReadyItems);
+    } else if (filter === 'COMPLETED') {
+      list = list.filter(s => s.isPaid || (s.isClosed && !s.isCancelled));
+    } else if (filter === 'CANCELLED') {
+      list = list.filter(s => s.isCancelled);
+    } else if (filter === 'DINE_IN' || filter === 'DINE_IN_QR') {
+      list = list.filter(s => (s.type === 'TABLE_SESSION' || s.source === 'DINE_IN_QR') && !s.isClosed);
+    } else if (filter === 'DELIVERY') {
+      list = list.filter(s => s.source === 'DELIVERY' && !s.isClosed);
+    } else if (filter === 'TAKEAWAY') {
+      list = list.filter(s => s.source === 'TAKEAWAY' && !s.isClosed);
+    }
+
+    if (query.trim()) {
+      const q = query.trim().toLowerCase();
+      list = list.filter(session => {
+        const matchTable = (session.tableName || '').toLowerCase().includes(q) ||
+                           String(session.tableNumber || '').includes(q) ||
+                           String(session.tableId || '').toLowerCase().includes(q);
+        const matchCustomer = (session.customerName || '').toLowerCase().includes(q);
+        const matchPhone = (session.customerPhone || '').toLowerCase().includes(q);
+        const matchSession = (session.sessionId || '').toLowerCase().includes(q);
+        const matchOrders = session.orders.some(o => (o.orderNumber || '').toLowerCase().includes(q));
+        const matchItems = session.items.some(i => (i.name || i.itemName || '').toLowerCase().includes(q));
+        return matchTable || matchCustomer || matchPhone || matchSession || matchOrders || matchItems;
+      });
+    }
+
+    return list;
+  }, [orderSessions, filter, query]);
+
+  const historySessions = useMemo(() => {
+    const closedOrders = data.orders.filter(o => 
+      paidIds.has(o.orderId) || o.paymentStatus === 'PAID' || DONE.includes(o.status)
+    );
+    return groupOrdersIntoSessions(closedOrders, data.tables, paidIds, historyDate, data.payments);
+  }, [data.orders, data.tables, paidIds, historyDate, data.payments]);
+
+  const HISTORY_TABS = useMemo(() => [
+    { id: 'ALL', name: 'All history' },
+    { id: 'COMPLETED', name: 'Completed' },
+    { id: 'CANCELLED', name: 'Cancelled' },
+    { id: 'DINE_IN', name: 'Dine in' },
+    { id: 'DELIVERY', name: 'Delivery' },
+    { id: 'TAKEAWAY', name: 'Takeaway' },
+  ], []);
+
+  const historyTabCounts = useMemo(() => {
+    return {
+      ALL: historySessions.length,
+      COMPLETED: historySessions.filter(s => s.isPaid || !s.isCancelled).length,
+      CANCELLED: historySessions.filter(s => s.isCancelled).length,
+      DINE_IN: historySessions.filter(s => s.type === 'TABLE_SESSION' || s.source === 'DINE_IN_QR').length,
+      DELIVERY: historySessions.filter(s => s.source === 'DELIVERY').length,
+      TAKEAWAY: historySessions.filter(s => s.source === 'TAKEAWAY').length,
+    };
+  }, [historySessions]);
+
+  const filteredHistorySessions = useMemo(() => {
+    let list = historySessions;
+
+    if (filter === 'COMPLETED') {
+      list = list.filter(s => s.isPaid || !s.isCancelled);
+    } else if (filter === 'CANCELLED') {
+      list = list.filter(s => s.isCancelled);
+    } else if (filter === 'DINE_IN' || filter === 'DINE_IN_QR') {
+      list = list.filter(s => s.type === 'TABLE_SESSION' || s.source === 'DINE_IN_QR');
+    } else if (filter === 'DELIVERY') {
+      list = list.filter(s => s.source === 'DELIVERY');
+    } else if (filter === 'TAKEAWAY') {
+      list = list.filter(s => s.source === 'TAKEAWAY');
+    }
+
+    if (query.trim()) {
+      const q = query.trim().toLowerCase();
+      list = list.filter(session => {
+        const matchTable = (session.tableName || '').toLowerCase().includes(q) ||
+                           String(session.tableNumber || '').includes(q) ||
+                           String(session.tableId || '').toLowerCase().includes(q);
+        const matchCustomer = (session.customerName || '').toLowerCase().includes(q);
+        const matchPhone = (session.customerPhone || '').toLowerCase().includes(q);
+        const matchSession = (session.sessionId || '').toLowerCase().includes(q);
+        const matchOrders = session.orders.some(o => (o.orderNumber || '').toLowerCase().includes(q));
+        const matchItems = session.items.some(i => (i.name || i.itemName || '').toLowerCase().includes(q));
+        return matchTable || matchCustomer || matchPhone || matchSession || matchOrders || matchItems;
+      });
+    }
+
+    return list;
+  }, [historySessions, filter, query]);
+
+  const totalHistoryRevenue = useMemo(() => {
+    return filteredHistorySessions
+      .filter(s => !s.isCancelled)
+      .reduce((sum, s) => sum + Number(s.grandTotal || 0), 0);
+  }, [filteredHistorySessions]);
 
   const filteredOrders = data.orders
     .filter(o => section !== 'history' || DONE.includes(o.status))
@@ -449,30 +959,15 @@ export default function PosWorkspace() {
                   <strong>{now.toLocaleTimeString('en-GB')}</strong>
                   <span>{now.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' })}</span>
                 </div>
+                <PosDateFilter
+                  value={dashboardDate}
+                  onChange={setDashboardDate}
+                  labelText="Filter dashboard date"
+                  showAllOption={false}
+                />
                 <button className="pos-icon-button" onClick={() => load()} aria-label="Refresh workspace"><RefreshCw size={16} className={loading ? 'pos-spin' : ''} /></button>
                 <button className="pos-button primary" onClick={() => newOrder()}><Plus /> Create new order</button>
               </div>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 18, flexWrap: 'wrap', background: 'var(--p-card)', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--p-border)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <CalendarDays size={16} style={{ color: 'var(--p-blue)' }} />
-                <span style={{ fontSize: 12, fontWeight: 700 }}>
-                  {dashboardDate === today() ? "Today's Service Overview" : dashboardDate === yesterday() ? "Yesterday's Service Summary" : dashboardDate === tomorrow() ? "Tomorrow's Schedule & Bookings" : dashboardDate ? `Service Overview for ${shortDate(dashboardDate)}` : "All-Time Overview"}
-                </span>
-                {dashboardDate && (
-                  <span className="pos-badge" style={{ fontSize: 9 }}>
-                    {dashboardDate === today() ? 'Current Date' : dashboardDate < today() ? 'Past Date' : 'Future Date'}
-                  </span>
-                )}
-              </div>
-              <PosDateFilter
-                value={dashboardDate}
-                onChange={setDashboardDate}
-                labelText="Filter dashboard date"
-                allLabel="All time"
-                showAllOption={true}
-              />
             </div>
 
             {loading ? <Spinner /> : (
@@ -634,9 +1129,9 @@ export default function PosWorkspace() {
                 {({ orders: 'Orders', tables: 'Table overview', reservations: 'Reservations', history: 'Order history', inventory: 'Inventory', notifications: 'Notifications & assistance' })[section] || 'Workspace'}
               </h1>
               <div className="pos-toolbar-actions">
-                {section === 'orders' && <PosDateFilter value={orderDate} onChange={setOrderDate} labelText="Filter orders by date" allLabel="All dates" showAllOption={true} />}
-                {section === 'history' && <PosDateFilter value={historyDate} onChange={setHistoryDate} labelText="Filter history by date" allLabel="All history" showAllOption={true} />}
-                {section === 'reservations' && <PosDateFilter value={reservationDate} onChange={setReservationDate} labelText="Filter reservations by date" allLabel="All dates" showAllOption={true} />}
+                {section === 'orders' && <PosDateFilter value={orderDate} onChange={setOrderDate} labelText="Filter orders by date" showAllOption={false} />}
+                {section === 'history' && <PosDateFilter value={historyDate} onChange={setHistoryDate} labelText="Filter history by date" showAllOption={false} />}
+                {section === 'reservations' && <PosDateFilter value={reservationDate} onChange={setReservationDate} labelText="Filter reservations by date" allLabel="All history" showAllOption={true} />}
                 {['orders', 'history', 'inventory'].includes(section) && <SearchField value={query} onChange={setQuery} placeholder={section === 'inventory' ? 'Search menu items…' : 'Search order or customer…'} />}
                 <button className="pos-icon-button" onClick={() => load()} aria-label="Refresh"><RefreshCw size={15} className={loading ? 'pos-spin' : ''} /></button>
                 {section === 'reservations' && <button className="pos-button primary" onClick={newReservation}><Plus /> Add new reservation</button>}
@@ -652,13 +1147,46 @@ export default function PosWorkspace() {
                     {orderDate && (
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'var(--p-card)', border: '1px solid var(--p-border)', borderRadius: 8, marginBottom: 16 }}>
                         <span style={{ fontSize: 11, fontWeight: 600 }}>
-                          📋 Showing orders for: <strong style={{ color: 'var(--p-blue)' }}>{orderDate === today() ? 'Today' : orderDate === yesterday() ? 'Yesterday' : orderDate === tomorrow() ? 'Tomorrow' : shortDate(orderDate)}</strong> ({filteredOrders.length} {filteredOrders.length === 1 ? 'order' : 'orders'})
+                          📋 Showing orders for: <strong style={{ color: 'var(--p-blue)' }}>{orderDate === today() ? 'Today' : orderDate === yesterday() ? 'Yesterday' : orderDate === tomorrow() ? 'Tomorrow' : shortDate(orderDate)}</strong> ({filteredSessions.length} {filteredSessions.length === 1 ? 'table / order session' : 'table / order sessions'})
                         </span>
-                        <button className="pos-button small" onClick={() => setOrderDate('')}>Show all dates</button>
+                        {orderDate !== today() && (
+                          <button className="pos-button small" onClick={() => setOrderDate(today())}>Jump to today</button>
+                        )}
                       </div>
                     )}
-                    <div className="pos-tabs">{[['ALL', 'All orders'], ['ACTIVE', 'In progress'], ['READY', 'Ready to serve'], ['COMPLETED', 'Completed'], ['CANCELLED', 'Cancelled'], ['DINE_IN_QR', 'Dine in'], ['DELIVERY', 'Delivery'], ['TAKEAWAY', 'Takeaway']].map(([id, name]) => { const count = getOrderTabCount(id); return <button className={`pos-tab ${filter === id ? 'active' : ''}`} onClick={() => setFilter(id)} key={id}>{name}{count > 0 && <span>{count}</span>}</button>; })}</div>
-                    {filteredOrders.length ? <div className="pos-orders-grid">{filteredOrders.map(o => <OrderCard key={o.orderId} order={o} paid={paidIds.has(o.orderId)} onDetails={openOrder} onPay={pay} />)}</div> : <section className="pos-panel"><Empty title={query || orderDate ? 'No matching orders' : 'No orders found'}>{orderDate ? `No orders found for ${orderDate === today() ? 'today' : shortDate(orderDate)}. Use the calendar to select another date or click "Show all dates".` : query ? 'Try another order number, table or customer name.' : 'Orders will appear here when customers place them.'}</Empty></section>}
+                    <div className="pos-tabs">
+                      {ORDER_TABS.map(({ id, name }) => (
+                        <button
+                          key={id}
+                          className={`pos-tab ${filter === id ? 'active' : ''}`}
+                          onClick={() => setFilter(id)}
+                        >
+                          {name}
+                          {typeof tabCounts[id] === 'number' && (
+                            <span className="pos-count">{tabCounts[id]}</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                    {filteredSessions.length ? (
+                      <div className="pos-orders-grid">
+                        {filteredSessions.map(session => (
+                          <TableSessionCard
+                            key={session.sessionId}
+                            session={session}
+                            onDetails={openOrder}
+                            onPay={pay}
+                            onAddItems={handleAddItems}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <section className="pos-panel">
+                        <Empty title={query || orderDate ? 'No matching orders' : 'No active orders'}>
+                          {orderDate ? `No orders found for ${orderDate === today() ? 'today' : shortDate(orderDate)}. Use the calendar to select another date.` : query ? 'Try another table, customer name, phone number, or order ID.' : 'Orders and active table sessions will appear here in real time.'}
+                        </Empty>
+                      </section>
+                    )}
                   </>
                 )}
 
@@ -667,16 +1195,47 @@ export default function PosWorkspace() {
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'var(--p-card)', border: '1px solid var(--p-border)', borderRadius: 8, marginBottom: 16 }}>
                       <div>
                         <span style={{ fontSize: 11, fontWeight: 650 }}>
-                          📜 {historyDate ? (historyDate === today() ? 'Today’s closed orders' : historyDate === yesterday() ? 'Yesterday’s closed orders' : `Closed orders for ${shortDate(historyDate)}`) : 'All historical orders'} ({filteredOrders.length} {filteredOrders.length === 1 ? 'order' : 'orders'})
+                          📜 {historyDate ? (historyDate === today() ? 'Today’s closed sessions' : historyDate === yesterday() ? 'Yesterday’s closed sessions' : `Closed sessions for ${shortDate(historyDate)}`) : 'All historical dining sessions'} ({filteredHistorySessions.length} {filteredHistorySessions.length === 1 ? 'session' : 'sessions'})
                         </span>
                         <span style={{ display: 'block', fontSize: 10, color: 'var(--p-muted)', marginTop: 2 }}>
-                          Total closed revenue: <b style={{ color: 'var(--p-text)' }}>{money(filteredOrders.filter(o => ['DELIVERED', 'PICKED_UP'].includes(o.status)).reduce((s, o) => s + Number(o.total || 0), 0))}</b>
+                          Total closed revenue: <b style={{ color: 'var(--p-text)' }}>{money(totalHistoryRevenue)}</b>
                         </span>
                       </div>
                       {historyDate && <button className="pos-button small" onClick={() => setHistoryDate('')}>View all history</button>}
                     </div>
-                    <div className="pos-tabs">{[['ALL', 'All history'], ['COMPLETED', 'Completed'], ['CANCELLED', 'Cancelled'], ['DINE_IN_QR', 'Dine in'], ['DELIVERY', 'Delivery'], ['TAKEAWAY', 'Takeaway']].map(([id, name]) => { const count = getHistoryTabCount(id); return <button className={`pos-tab ${filter === id ? 'active' : ''}`} onClick={() => setFilter(id)} key={id}>{name}{count > 0 && <span>{count}</span>}</button>; })}</div>
-                    {filteredOrders.length ? <div className="pos-orders-grid">{filteredOrders.map(o => <OrderCard key={o.orderId} order={o} paid={paidIds.has(o.orderId)} onDetails={openOrder} onPay={pay} />)}</div> : <section className="pos-panel"><Empty title={historyDate ? `No history for ${shortDate(historyDate)}` : 'No historical orders'}>{historyDate ? 'No completed or cancelled orders recorded on this date. Select another date with the calendar.' : 'Past closed orders will appear here for audit and reporting.'}</Empty></section>}
+                    <div className="pos-tabs">
+                      {HISTORY_TABS.map(({ id, name }) => (
+                        <button
+                          key={id}
+                          className={`pos-tab ${filter === id || (id === 'DINE_IN' && filter === 'DINE_IN_QR') ? 'active' : ''}`}
+                          onClick={() => setFilter(id)}
+                        >
+                          {name}
+                          {typeof historyTabCounts[id] === 'number' && (
+                            <span className="pos-count">{historyTabCounts[id]}</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                    {filteredHistorySessions.length ? (
+                      <div className="pos-orders-grid">
+                        {filteredHistorySessions.map(session => (
+                          <TableSessionCard
+                            key={session.sessionId}
+                            session={session}
+                            onDetails={openOrder}
+                            onPay={pay}
+                            onAddItems={handleAddItems}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <section className="pos-panel">
+                        <Empty title={historyDate ? `No history for ${shortDate(historyDate)}` : 'No historical sessions'}>
+                          {historyDate ? 'No completed or cancelled dining sessions recorded on this date. Select another date with the calendar.' : 'Past closed dining sessions will appear here for audit and reporting.'}
+                        </Empty>
+                      </section>
+                    )}
                   </>
                 )}
 
@@ -734,14 +1293,16 @@ export default function PosWorkspace() {
                 {section === 'reservations' && (
                   <>
                     <p className="pos-section-note">Table availability is calculated for your selected date, time and party size. Tables are assigned automatically to prevent booking conflicts.</p>
-                    {reservationDate && (
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'var(--p-card)', border: '1px solid var(--p-border)', borderRadius: 8, marginBottom: 16 }}>
-                        <span style={{ fontSize: 11, fontWeight: 600 }}>
-                          📅 Showing reservations for: <strong style={{ color: 'var(--p-blue)' }}>{reservationDate === today() ? 'Today' : reservationDate === yesterday() ? 'Yesterday' : reservationDate === tomorrow() ? 'Tomorrow' : shortDate(reservationDate)}</strong> ({data.reservations.filter(r => (!reservationDate || r.reservationDate?.slice(0, 10) === reservationDate) && (filter === 'ALL' || r.status === filter)).length} bookings)
-                        </span>
-                        <button className="pos-button small" onClick={() => setReservationDate('')}>Show all dates</button>
-                      </div>
-                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'var(--p-card)', border: '1px solid var(--p-border)', borderRadius: 8, marginBottom: 16 }}>
+                      <span style={{ fontSize: 11, fontWeight: 600 }}>
+                        📅 Showing: <strong style={{ color: 'var(--p-blue)' }}>{reservationDate ? (reservationDate === today() ? 'Today’s reservations' : reservationDate === yesterday() ? 'Yesterday’s reservations' : reservationDate === tomorrow() ? 'Tomorrow’s reservations' : `Reservations for ${shortDate(reservationDate)}`) : 'All reservation history'}</strong> ({data.reservations.filter(r => (!reservationDate || r.reservationDate?.slice(0, 10) === reservationDate) && (filter === 'ALL' || r.status === filter)).length} bookings)
+                      </span>
+                      {reservationDate ? (
+                        <button className="pos-button small" onClick={() => setReservationDate('')}>View all history</button>
+                      ) : (
+                        <button className="pos-button small" onClick={() => setReservationDate(today())}>Show today only</button>
+                      )}
+                    </div>
                     <div className="pos-tabs">{['ALL', 'CONFIRMED', 'ARRIVED', 'SEATED', 'COMPLETED', 'CANCELLED'].map(id => { const count = getReservationTabCount(id); return <button key={id} className={`pos-tab ${filter === id ? 'active' : ''}`} onClick={() => setFilter(id)}>{id === 'ALL' ? 'All reservations' : label(id)}{count > 0 && <span>{count}</span>}</button>; })}</div>
                     {data.reservations.filter(r => (!reservationDate || r.reservationDate?.slice(0, 10) === reservationDate) && (filter === 'ALL' || r.status === filter)).length ? (
                       <div className="pos-data-wrap">
@@ -779,7 +1340,7 @@ export default function PosWorkspace() {
                     ) : (
                       <section className="pos-panel">
                         <Empty icon={CalendarDays} title={reservationDate ? `No reservations for ${reservationDate === today() ? 'today' : reservationDate === yesterday() ? 'yesterday' : reservationDate === tomorrow() ? 'tomorrow' : reservationDate}` : 'No reservations found'}>
-                          {reservationDate ? 'Click "All dates" to view all upcoming customer bookings, or pick another date from the calendar.' : 'New website bookings and staff reservations will appear here in real-time.'}
+                          {reservationDate ? 'Click "All history" to view all customer bookings, or pick another date from the calendar.' : 'New website bookings and staff reservations will appear here in real-time.'}
                         </Empty>
                       </section>
                     )}
@@ -855,10 +1416,8 @@ export default function PosWorkspace() {
                         <p>{h.message}</p>
                         <footer>
                           <span>{h.assignedWaiterName ? `Assigned to ${h.assignedWaiterName}` : `Requested at ${time(h.createdAt)}`}</span>
-                          {h.status === 'PENDING' ? (
+                          {h.status === 'PENDING' && (
                             <button className="pos-button small primary" disabled={busy} onClick={() => run(() => api.acceptHelpRequest(h.requestId, currentUser.name), 'Assistance assigned')}>Accept request</button>
-                          ) : (
-                            <button className="pos-button small" disabled={busy} onClick={() => run(() => api.resolveHelpRequest(h.requestId), 'Help request resolved')}>Mark resolved</button>
                           )}
                         </footer>
                       </article>
@@ -875,17 +1434,17 @@ export default function PosWorkspace() {
 
         {dialog === 'new-order' && (
           <ErrorBoundary onReset={close}>
-            <NewOrder menu={data.menu} categories={data.categories} tables={data.tables} table={selected} restaurant={data.restaurant} onClose={close} onCreated={async order => { close(); addToast(`${order.orderNumber} sent to the kitchen`, 'success'); await load(true); setSelected(order); setDialog('order'); }} />
+            <NewOrder menu={data.menu} categories={data.categories} tables={data.tables} orders={data.orders} paidIds={paidIds} table={selected} restaurant={data.restaurant} onClose={close} onCreated={async order => { close(); addToast(`${order.orderNumber} sent to the kitchen`, 'success'); await load(true); setSelected(order); setDialog('order'); }} />
           </ErrorBoundary>
         )}
         {dialog === 'order' && selected && (
           <ErrorBoundary onReset={close}>
-            <OrderDetails order={data.orders.find(o => o.orderId === selected.orderId) || selected} paid={paidIds.has(selected.orderId)} payments={data.payments} restaurant={data.restaurant} onClose={close} onPay={() => pay(selected)} onUpdated={() => load(true)} busy={busy} run={run} />
+            <OrderDetails order={selected.sessionId ? selected : (data.orders.find(o => o.orderId === selected.orderId) || selected)} paid={selected.isPaid ?? paidIds.has(selected.orderId)} payments={data.payments} restaurant={data.restaurant} onClose={close} onPay={() => pay(selected)} onUpdated={() => load(true)} busy={busy} run={run} />
           </ErrorBoundary>
         )}
         {dialog === 'payment' && selected && (
           <ErrorBoundary onReset={close}>
-            <PaymentDialog order={data.orders.find(o => o.orderId === selected.orderId) || selected} restaurant={data.restaurant} onClose={close} onPaid={() => load(true)} />
+            <PaymentDialog order={selected.sessionId ? selected : (data.orders.find(o => o.orderId === selected.orderId) || selected)} restaurant={data.restaurant} onClose={close} onPaid={() => load(true)} />
           </ErrorBoundary>
         )}
         {dialog === 'table' && selected && (
@@ -929,7 +1488,7 @@ export default function PosWorkspace() {
   );
 }
 
-function NewOrder({ menu = [], categories = [], tables = [], table, restaurant, onClose, onCreated }) {
+function NewOrder({ menu = [], categories = [], tables = [], orders = [], paidIds = new Set(), table, restaurant, onClose, onCreated }) {
   const safeMenu = Array.isArray(menu) ? menu : [];
   const safeCategories = Array.isArray(categories) ? categories : [];
   const safeTables = Array.isArray(tables) ? tables : [];
@@ -943,61 +1502,160 @@ function NewOrder({ menu = [], categories = [], tables = [], table, restaurant, 
   const [key] = useState(() => uniqueKey());
   const taxRate = restaurant?.settings?.taxRate ?? .05;
   const subtotal = items.reduce((n, i) => n + (Number(i.price) || 0) * (Number(i.quantity) || 1), 0); const tax = Math.round(subtotal * taxRate * 100) / 100;
+
+  const activeTableOrder = useMemo(() => {
+    if (source !== 'DINE_IN_QR' || !tableId) return null;
+    return (orders || []).find(o =>
+      o.tableId === tableId &&
+      !['CANCELLED', 'CONFIRMATION_TIMEOUT'].includes(o.status) &&
+      !paidIds?.has(o.orderId)
+    );
+  }, [source, tableId, orders, paidIds]);
+
+  useEffect(() => {
+    if (activeTableOrder) {
+      if (activeTableOrder.customerName && activeTableOrder.customerName !== 'Guest') {
+        setName(activeTableOrder.customerName);
+      }
+      if (activeTableOrder.customerPhone) {
+        setPhone(activeTableOrder.customerPhone);
+      }
+    }
+  }, [activeTableOrder]);
+
   const pick = m => { if (m?.customizationOptions?.length || m?.addOns?.length) { setCustom(m); setOptions(Object.fromEntries((m.customizationOptions || []).map(o => [o.name, o.choices?.[0] || '']))); setAddOns([]); setItemNote(''); } else add(m); };
   const add = (m, customization = {}, extra = [], specialInstruction = '') => { if (!m) return; const cost = (Number(m.price) || 0) + (Array.isArray(extra) ? extra : []).reduce((s, a) => s + (Number(a.price) || 0), 0) + Object.values(customization || {}).reduce((s, v) => s + (Number(String(v).match(/\(\+₹(\d+)\)/)?.[1]) || 0), 0); const itemKey = JSON.stringify([m.menuItemId, customization, (extra || []).map(a => a.name), specialInstruction]); setItems(prev => { const found = prev.find(i => i.itemKey === itemKey); return found ? prev.map(i => i.itemKey === itemKey ? { ...i, quantity: i.quantity + 1 } : i) : [...prev, { ...m, itemKey, quantity: 1, price: cost, customization, addOns: extra, specialInstruction }]; }); setCustom(null); };
   const qty = (id, n) => setItems(prev => prev.map(i => i.itemKey === id ? { ...i, quantity: i.quantity + n } : i).filter(i => i.quantity > 0));
-  const submit = async () => { setError(''); if (source === 'DINE_IN_QR' && !tableId) return setError('Select a table for this order.'); if (!items.length) return setError('Add at least one menu item.'); setBusy(true); try { const result = await api.createOrder({ source, tableId: source === 'DINE_IN_QR' ? tableId : null, customerName: name || null, customerPhone: phone || null, items, specialInstructions: note, idempotencyKey: key }); await onCreated(result); } catch (e) { setError(e.message); } finally { setBusy(false); } };
-  return <Modal wide title="Create new order" onClose={onClose}><div className="pos-new-order-bar"><div className="pos-segment">{[['DINE_IN_QR', 'Dine in'], ['TAKEAWAY', 'Takeaway']].map(([s, title]) => <button key={s} className={source === s ? 'active' : ''} onClick={() => setSource(s)}>{s === 'DINE_IN_QR' ? <UtensilsCrossed size={12} style={{ display: 'inline', marginRight: 5 }} /> : <ShoppingBag size={12} style={{ display: 'inline', marginRight: 5 }} />}{title}</button>)}</div><span className="pos-step-label">01 Select items <span style={{ margin: '0 10px' }}>→</span> 02 Send to kitchen</span></div>{error && <div className="pos-error" style={{ margin: '12px 15px 0' }} role="alert"><AlertCircle size={15} />{error}</div>}<div className="pos-new-order-layout"><div className="pos-new-menu"><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}><strong style={{ fontSize: 12 }}>Menu list</strong><SearchField value={search} onChange={setSearch} placeholder="Search menu…" /></div><div className="pos-tabs">{[{ categoryId: 'ALL', name: 'All items' }, ...safeCategories].map(c => <button key={c.categoryId} className={`pos-tab ${category === c.categoryId ? 'active' : ''}`} onClick={() => setCategory(c.categoryId)}>{c.name}</button>)}</div><div className="pos-menu-grid">{safeMenu.filter(m => (category === 'ALL' || m.categoryId === category) && String(m.name || '').toLowerCase().includes(String(search || '').toLowerCase())).map(m => <article className="pos-menu-card" key={m.menuItemId}><div className="pos-menu-image"><FoodImage item={m} /><Badge status={m.availability ? 'AVAILABLE' : 'UNAVAILABLE'}>{m.availability ? (m.categoryName || 'Available') : 'Sold out'}</Badge></div><h3><span className={`pos-food-type ${m.vegNonveg === 'VEG' ? '' : 'nonveg'}`} />{m.name}</h3><p>{m.description}</p><div className="pos-menu-card-bottom"><strong>{money(m.price)}</strong><button className="pos-button small" disabled={!m.availability} onClick={() => pick(m)}>Add to cart <Plus size={10} /></button></div></article>)}</div></div><div className="pos-new-cart"><div className="pos-new-cart-header"><strong>{custom ? 'Customize item' : 'Order details'}</strong>{custom ? <button className="pos-icon-button" onClick={() => setCustom(null)} aria-label="Back to order"><ArrowLeft size={15} /></button> : <span className="pos-count">{items.reduce((n, i) => n + (Number(i.quantity) || 0), 0)} items</span>}</div>{custom ? <><div className="pos-new-cart-items"><FoodImage item={custom} className="pos-custom-photo" /><h3 style={{ fontWeight: 650, margin: '12px 0' }}>{custom.name}</h3>{custom.customizationOptions?.map(o => <label key={o.name} className="pos-field" style={{ marginBottom: 15 }}><span>{o.name}</span><select className="pos-select" style={{ width: '100%' }} value={options[o.name]} onChange={e => setOptions({ ...options, [o.name]: e.target.value })}>{(o.choices || []).map(c => <option key={c}>{c}</option>)}</select></label>)}{!!custom.addOns?.length && <div className="pos-field" style={{ marginBottom: 15 }}><span>Add something extra</span>{custom.addOns.map(a => <label key={a.name} style={{ display: 'flex', gap: 7, fontSize: 10, padding: '6px 0' }}><input type="checkbox" checked={addOns.some(x => x.name === a.name)} onChange={e => setAddOns(e.target.checked ? [...addOns, a] : addOns.filter(x => x.name !== a.name))} />{a.name}<span style={{ marginLeft: 'auto' }}>{money(a.price)}</span></label>)}</div>}<label className="pos-field"><span>Special instructions</span><textarea className="pos-textarea" value={itemNote} maxLength={500} onChange={e => setItemNote(e.target.value)} placeholder="Less spicy, sauce on the side…" /></label></div><div className="pos-cart-totals"><button className="pos-button primary full" onClick={() => add(custom, options, addOns, itemNote)}><Plus /> Add to order</button></div></> : <><div className="pos-new-cart-info">{source === 'DINE_IN_QR' && <label className="pos-field"><span>Table</span><select className="pos-select" value={tableId} onChange={e => setTableId(e.target.value)} style={{ width: '100%' }}><option value="">Select table</option>{safeTables.filter(t => !['OUT_OF_SERVICE', 'WAITING_FOR_CLEANING', 'CLEANING'].includes(t.status)).map(t => <option key={t.tableId} value={t.tableId}>{tableLabel(t)} · {t.capacity} people · {label(t.status)}</option>)}</select></label>}<input className="pos-input" value={name} maxLength={255} onChange={e => setName(e.target.value)} placeholder="Customer name (optional)" aria-label="Customer name" /><input className="pos-input" value={phone} maxLength={30} onChange={e => setPhone(e.target.value)} placeholder="Phone (optional)" type="tel" aria-label="Customer phone" /></div><div className="pos-new-cart-items">{items.length ? items.map(i => <div className="pos-new-cart-item" key={i.itemKey}><FoodImage item={i} /><div><b>{i.name}</b>{Object.keys(i.customization || {}).length > 0 && <small style={{ display: 'block', color: 'var(--p-muted)', fontSize: 8, marginBottom: 4 }}>{Object.values(i.customization).join(', ')}</small>}<small>{money(i.price * i.quantity)}</small></div><div className="pos-qty"><button aria-label={`Remove one ${i.name}`} onClick={() => qty(i.itemKey, -1)}><Minus size={11} /></button><span>{i.quantity}</span><button aria-label={`Add one ${i.name}`} onClick={() => qty(i.itemKey, 1)}><Plus size={11} /></button></div></div>) : <Empty icon={ShoppingBag} title="Start with something delicious">Select items from the menu to build this order.</Empty>}<textarea className="pos-textarea" value={note} onChange={e => setNote(e.target.value)} placeholder="Order notes for the kitchen…" aria-label="Order notes" maxLength={1000} style={{ minHeight: 55, marginTop: 12 }} /></div><div className="pos-cart-totals"><div><span>Subtotal</span><span>{money(subtotal)}</span></div><div><span>Tax ({taxRate * 100}%)</span><span>{money(tax)}</span></div><div className="total"><b>Total payment</b><strong>{money(subtotal + tax)}</strong></div><button className="pos-button primary full" disabled={busy || !items.length} onClick={submit}>{busy ? <RefreshCw className="pos-spin" /> : <ClipboardCheck />}{busy ? 'Sending order…' : 'Create order & send to kitchen'}</button><p style={{ fontSize: 8, color: 'var(--p-muted)', textAlign: 'center', marginTop: 9 }}>Final prices are confirmed by the restaurant.</p></div></>}</div></div></Modal>;
+  const submit = async () => {
+    setError('');
+    if (source === 'DINE_IN_QR' && !tableId) return setError('Select a table for this order.');
+    if (!items.length) return setError('Add at least one menu item.');
+    if (source === 'DINE_IN_QR' && !activeTableOrder) {
+      if (!name.trim()) return setError('Please enter customer name to seat this table.');
+      const cleanPhone = phone.replace(/\D/g, '');
+      if (cleanPhone.length < 10) return setError('Please enter a valid 10-digit mobile number for this table.');
+    }
+    setBusy(true);
+    try {
+      const result = await api.createOrder({
+        source,
+        tableId: source === 'DINE_IN_QR' ? tableId : null,
+        customerName: name.trim() || null,
+        customerPhone: phone.replace(/\D/g, '') || null,
+        items,
+        specialInstructions: note,
+        idempotencyKey: key
+      });
+      await onCreated(result);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <Modal wide title="Create new order" onClose={onClose}><div className="pos-new-order-bar"><div className="pos-segment">{[['DINE_IN_QR', 'Dine in'], ['TAKEAWAY', 'Takeaway']].map(([s, title]) => <button key={s} className={source === s ? 'active' : ''} onClick={() => setSource(s)}>{s === 'DINE_IN_QR' ? <UtensilsCrossed size={12} style={{ display: 'inline', marginRight: 5 }} /> : <ShoppingBag size={12} style={{ display: 'inline', marginRight: 5 }} />}{title}</button>)}</div><span className="pos-step-label">01 Select items <span style={{ margin: '0 10px' }}>→</span> 02 Send to kitchen</span></div>{error && <div className="pos-error" style={{ margin: '12px 15px 0' }} role="alert"><AlertCircle size={15} />{error}</div>}{activeTableOrder && <div className="pos-info-box" style={{ margin: '12px 15px 0', background: 'var(--p-blue-soft)', borderColor: 'var(--p-blue)' }}><Info size={15} /><span><strong>Table is currently seated with {activeTableOrder.customerName || 'Guest'}.</strong> Additional items will be added to running Order #{activeTableOrder.orderNumber} (Running Bill: {money(activeTableOrder.total)}).</span></div>}<div className="pos-new-order-layout"><div className="pos-new-menu"><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}><strong style={{ fontSize: 12 }}>Menu list</strong><SearchField value={search} onChange={setSearch} placeholder="Search menu…" /></div><div className="pos-tabs">{[{ categoryId: 'ALL', name: 'All items' }, ...safeCategories].map(c => <button key={c.categoryId} className={`pos-tab ${category === c.categoryId ? 'active' : ''}`} onClick={() => setCategory(c.categoryId)}>{c.name}</button>)}</div><div className="pos-menu-grid">{safeMenu.filter(m => (category === 'ALL' || m.categoryId === category) && String(m.name || '').toLowerCase().includes(String(search || '').toLowerCase())).map(m => <article className="pos-menu-card" key={m.menuItemId}><div className="pos-menu-image"><FoodImage item={m} /><Badge status={m.availability ? 'AVAILABLE' : 'UNAVAILABLE'}>{m.availability ? (m.categoryName || 'Available') : 'Sold out'}</Badge></div><h3><span className={`pos-food-type ${m.vegNonveg === 'VEG' ? '' : 'nonveg'}`} />{m.name}</h3><p>{m.description}</p><div className="pos-menu-card-bottom"><strong>{money(m.price)}</strong><button className="pos-button small" disabled={!m.availability} onClick={() => pick(m)}>Add to cart <Plus size={10} /></button></div></article>)}</div></div><div className="pos-new-cart"><div className="pos-new-cart-header"><strong>{custom ? 'Customize item' : 'Order details'}</strong>{custom ? <button className="pos-icon-button" onClick={() => setCustom(null)} aria-label="Back to order"><ArrowLeft size={15} /></button> : <span className="pos-count">{items.reduce((n, i) => n + (Number(i.quantity) || 0), 0)} items</span>}</div>{custom ? <><div className="pos-new-cart-items"><FoodImage item={custom} className="pos-custom-photo" /><h3 style={{ fontWeight: 650, margin: '12px 0' }}>{custom.name}</h3>{custom.customizationOptions?.map(o => <label key={o.name} className="pos-field" style={{ marginBottom: 15 }}><span>{o.name}</span><select className="pos-select" style={{ width: '100%' }} value={options[o.name]} onChange={e => setOptions({ ...options, [o.name]: e.target.value })}>{(o.choices || []).map(c => <option key={c}>{c}</option>)}</select></label>)}{!!custom.addOns?.length && <div className="pos-field" style={{ marginBottom: 15 }}><span>Add something extra</span>{custom.addOns.map(a => <label key={a.name} style={{ display: 'flex', gap: 7, fontSize: 10, padding: '6px 0' }}><input type="checkbox" checked={addOns.some(x => x.name === a.name)} onChange={e => setAddOns(e.target.checked ? [...addOns, a] : addOns.filter(x => x.name !== a.name))} />{a.name}<span style={{ marginLeft: 'auto' }}>{money(a.price)}</span></label>)}</div>}<label className="pos-field"><span>Special instructions</span><textarea className="pos-textarea" value={itemNote} maxLength={500} onChange={e => setItemNote(e.target.value)} placeholder="Less spicy, sauce on the side…" /></label></div><div className="pos-cart-totals"><button className="pos-button primary full" onClick={() => add(custom, options, addOns, itemNote)}><Plus /> Add to order</button></div></> : <><div className="pos-new-cart-info">{source === 'DINE_IN_QR' && <label className="pos-field"><span>Table</span><select className="pos-select" value={tableId} onChange={e => setTableId(e.target.value)} style={{ width: '100%' }}><option value="">Select table</option>{safeTables.filter(t => !['OUT_OF_SERVICE', 'WAITING_FOR_CLEANING', 'CLEANING'].includes(t.status)).map(t => <option key={t.tableId} value={t.tableId}>{tableLabel(t)} · {t.capacity} people · {label(t.status)}</option>)}</select></label>}<input className="pos-input" value={name} maxLength={255} onChange={e => setName(e.target.value)} placeholder={source === 'DINE_IN_QR' ? (activeTableOrder ? `Customer: ${activeTableOrder.customerName || 'Guest'}` : 'Customer name (Required to seat table)') : 'Customer name (optional)'} aria-label="Customer name" required={source === 'DINE_IN_QR' && !activeTableOrder} /><input className="pos-input" value={phone} maxLength={30} onChange={e => setPhone(e.target.value)} placeholder={source === 'DINE_IN_QR' ? (activeTableOrder ? `Mobile: ${activeTableOrder.customerPhone || 'N/A'}` : '10-digit mobile number (Required)') : 'Phone (optional)'} type="tel" aria-label="Customer phone" required={source === 'DINE_IN_QR' && !activeTableOrder} /></div><div className="pos-new-cart-items">{items.length ? items.map(i => <div className="pos-new-cart-item" key={i.itemKey}><FoodImage item={i} /><div><b>{i.name}</b>{Object.keys(i.customization || {}).length > 0 && <small style={{ display: 'block', color: 'var(--p-muted)', fontSize: 8, marginBottom: 4 }}>{Object.values(i.customization).join(', ')}</small>}<small>{money(i.price * i.quantity)}</small></div><div className="pos-qty"><button aria-label={`Remove one ${i.name}`} onClick={() => qty(i.itemKey, -1)}><Minus size={11} /></button><span>{i.quantity}</span><button aria-label={`Add one ${i.name}`} onClick={() => qty(i.itemKey, 1)}><Plus size={11} /></button></div></div>) : <Empty icon={ShoppingBag} title="Start with something delicious">Select items from the menu to build this order.</Empty>}<textarea className="pos-textarea" value={note} onChange={e => setNote(e.target.value)} placeholder="Order notes for the kitchen…" aria-label="Order notes" maxLength={1000} style={{ minHeight: 55, marginTop: 12 }} /></div><div className="pos-cart-totals"><div><span>Subtotal</span><span>{money(subtotal)}</span></div><div><span>Tax ({taxRate * 100}%)</span><span>{money(tax)}</span></div><div className="total"><b>Total payment</b><strong>{money(subtotal + tax)}</strong></div><button className="pos-button primary full" disabled={busy || !items.length} onClick={submit}>{busy ? <RefreshCw className="pos-spin" /> : <ClipboardCheck />}{busy ? 'Sending order…' : activeTableOrder ? 'Add items to running bill & send to kitchen' : 'Create order & send to kitchen'}</button><p style={{ fontSize: 8, color: 'var(--p-muted)', textAlign: 'center', marginTop: 9 }}>Final prices are confirmed by the restaurant.</p></div></>}</div></div></Modal>;
 }
 
 function OrderDetails({ order, paid, payments, restaurant, onClose, onPay, onUpdated, run, busy }) {
+  const isSession = Boolean(order?.orders && order.orders.length > 0);
   const transition = async status => {
-    if (await run(() => api.updateOrderStatus(order.orderId, status), `Order ${label(status).toLowerCase()}`)) {
+    const targetOrderId = order.orderId || order.orders?.[0]?.orderId;
+    if (targetOrderId && await run(() => api.updateOrderStatus(targetOrderId, status), `Order ${label(status).toLowerCase()}`)) {
       onUpdated();
     }
   };
 
+  const handleDeleteOrder = async () => {
+    const targetId = order.orderId || order.orderNumber || order.orders?.[0]?.orderId;
+    if (!window.confirm(`Permanently remove order ${order.orderNumber || order.sessionId}?`)) return;
+    const ok = await run(() => api.deleteOrder(targetId), `Order removed`);
+    if (ok) {
+      onClose();
+      onUpdated();
+    }
+  };
   const items = order?.items || [];
   return (
-    <Modal title="Order details" onClose={onClose}>
+    <Modal title={isSession ? `Session Details – ${order.tableName || 'Table'}` : "Order details"} onClose={onClose}>
       <div className="pos-modal-body">
         <div className="pos-detail-heading">
-          <strong>{order?.orderNumber}</strong>
+          <strong>{order?.sessionId || order?.orderNumber}</strong>
           <Badge status={order?.status} />
         </div>
         <div className="pos-detail-meta">
           <div>
             <span>Order type</span>
-            <b>{SOURCES[order?.source] || 'Order'}{order?.tableNumber ? ` · ${tableTitle(order)}` : ''}</b>
+            <b>{SOURCES[order?.source] || (order?.tableId ? 'Dine in' : 'Order')}{order?.tableName ? ` · ${order.tableName}` : order?.tableNumber ? ` · ${tableTitle(order)}` : ''}</b>
           </div>
           <div>
             <span>Placed at</span>
-            <b>{time(order?.createdAt)} · {new Date(order?.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</b>
+            <b>{time(order?.startedAt || order?.createdAt)} · {new Date(order?.startedAt || order?.createdAt || Date.now()).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</b>
           </div>
           <div>
             <span>Customer</span>
-            <b>{order?.customerName || 'Guest'}</b>
+            <b>{order?.customerName || 'Guest'}{order?.customerPhone ? ` (${order.customerPhone})` : ''}</b>
           </div>
           <div>
             <span>Payment</span>
             <Badge status={paid ? 'PAID' : 'PENDING'} />
           </div>
         </div>
-        {items.map((i, index) => {
-          const cust = typeof i.customization === 'object' && i.customization !== null ? i.customization : {};
-          return (
-            <div className="pos-line-item" key={index}>
-              <div>
-                <b>{i.quantity}× {i.name || i.itemName || 'Item'}</b>
-                {Object.keys(cust).length > 0 && (
-                  <small>{Object.entries(cust).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join(' · ')}</small>
-                )}
-                {i.specialInstruction && <small>{i.specialInstruction}</small>}
+
+        {isSession && order.orders.length > 1 ? (
+          <div style={{ marginTop: 14 }}>
+            <strong style={{ fontSize: 11, display: 'block', marginBottom: 8 }}>Session Orders Breakdown ({order.orders.length} tickets):</strong>
+            {order.orders.map((ord, oIdx) => (
+              <div key={ord.orderId || oIdx} style={{ background: 'var(--p-card)', border: '1px solid var(--p-border)', borderRadius: 7, padding: '8px 10px', marginBottom: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, borderBottom: '1px dashed var(--p-border)', paddingBottom: 4 }}>
+                  <b style={{ fontSize: 10 }}>{ord.orderNumber} <span style={{ color: 'var(--p-muted)', fontWeight: 400 }}>· {time(ord.createdAt)}</span></b>
+                  <Badge status={ord.status} />
+                </div>
+                {(ord.items || []).map((i, idx) => {
+                  const cust = typeof i.customization === 'object' && i.customization !== null ? i.customization : {};
+                  return (
+                    <div className="pos-line-item" key={idx} style={{ padding: '4px 0' }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <b>{i.quantity}× {i.name || i.itemName || 'Item'}</b>
+                          <span className={`pos-item-mini-badge status-${(i.status || ord.status).toLowerCase()}`}>
+                            {label(i.status || ord.status)}
+                          </span>
+                        </div>
+                        {Object.keys(cust).length > 0 && (
+                          <small>{Object.entries(cust).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join(' · ')}</small>
+                        )}
+                        {i.specialInstruction && <small style={{ color: '#d97706' }}>{i.specialInstruction}</small>}
+                      </div>
+                      <b>{money(i.lineTotal)}</b>
+                    </div>
+                  );
+                })}
               </div>
-              <b>{money(i.lineTotal)}</b>
-            </div>
-          );
-        })}
+            ))}
+          </div>
+        ) : (
+          items.map((i, index) => {
+            const cust = typeof i.customization === 'object' && i.customization !== null ? i.customization : {};
+            return (
+              <div className="pos-line-item" key={index}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <b>{i.quantity}× {i.name || i.itemName || 'Item'}</b>
+                    <span className={`pos-item-mini-badge status-${(i.itemStatus || i.status || order?.status || 'new').toLowerCase()}`}>
+                      {label(i.itemStatus || i.status || order?.status || 'NEW')}
+                    </span>
+                  </div>
+                  {Object.keys(cust).length > 0 && (
+                    <small>{Object.entries(cust).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join(' · ')}</small>
+                  )}
+                  {i.specialInstruction && <small style={{ color: '#d97706' }}>{i.specialInstruction}</small>}
+                </div>
+                <b>{money(i.lineTotal)}</b>
+              </div>
+            );
+          })
+        )}
+
         {order?.specialInstructions && (
           <div className="pos-info-box">
             <Info size={14} />
@@ -1034,6 +1692,11 @@ function OrderDetails({ order, paid, payments, restaurant, onClose, onPay, onUpd
         )}
       </div>
       <div className="pos-modal-footer">
+        {!isSession && (
+          <button className="pos-button danger" disabled={busy} onClick={handleDeleteOrder}>
+            <Trash2 size={13} /> Remove order
+          </button>
+        )}
         <button className="pos-button" onClick={() => window.print()}>
           <Printer /> Print receipt
         </button>
@@ -1052,7 +1715,7 @@ function Receipt({ order, restaurant, paid }) {
   const items = order?.items || [];
   const subtotal = Number(order?.subtotal) || items.reduce((s, i) => s + (Number(i.lineTotal) || (Number(i.price || 0) * Number(i.quantity || 1))), 0);
   const tax = Number(order?.tax) || 0;
-  const total = Number(order?.total) || (subtotal + tax);
+  const total = Number(order?.grandTotal || order?.total) || (subtotal + tax);
   return (
     <div className="pos-receipt-only">
       <div className="pos-receipt-header">
@@ -1061,15 +1724,15 @@ function Receipt({ order, restaurant, paid }) {
       </div>
       <div className="pos-receipt-dash" />
       <div className="pos-receipt-row">
-        <b>{order?.orderNumber}</b>
-        <span>{SOURCES[order?.source] || 'Dine in'}</span>
+        <b>{order?.sessionId || order?.orderNumber}</b>
+        <span>{SOURCES[order?.source] || (order?.tableId ? 'Dine in' : 'Order')}</span>
       </div>
       <div className="pos-receipt-row">
-        <span>{new Date(order?.createdAt || Date.now()).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'medium' })}</span>
+        <span>{new Date(order?.startedAt || order?.createdAt || Date.now()).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'medium' })}</span>
       </div>
-      {order?.tableNumber && (
+      {(order?.tableName || order?.tableNumber) && (
         <div className="pos-receipt-row">
-          <span>{tableTitle(order)}</span>
+          <span>{order?.tableName || tableTitle(order)}</span>
         </div>
       )}
       {order?.customerName && !order.customerName.startsWith('Table ') && (
@@ -1123,7 +1786,12 @@ function Receipt({ order, restaurant, paid }) {
 }
 
 function PaymentDialog({ order, restaurant, onClose, onPaid }) {
-  const rawDue = Math.max(0, Number(order?.total || 0) - Number(order?.paidAmount || 0));
+  const isSession = Boolean(order?.orders && order.orders.length > 0);
+  const ordersList = isSession ? order.orders : [order];
+  const unpaidOrders = ordersList.filter(o => Math.max(0, Number(o.total || 0) - Number(o.paidAmount || 0)) > 0.01);
+  const rawDue = isSession 
+    ? (order.balanceDue ?? unpaidOrders.reduce((s, o) => s + Math.max(0, Number(o.total || 0) - Number(o.paidAmount || 0)), 0))
+    : Math.max(0, Number(order?.total || 0) - Number(order?.paidAmount || 0));
   const due = Math.round(rawDue * 100) / 100;
   const isAlreadyPaid = due <= 0;
   const [method, setMethod] = useState('UPI'); // 'UPI' | 'CARD' | 'CASH' | 'NET_BANKING'
@@ -1139,7 +1807,8 @@ function PaymentDialog({ order, restaurant, onClose, onPaid }) {
   const [key, setKey] = useState(() => uniqueKey());
 
   const upiId = 'bistroandbloom@okaxis';
-  const upiUri = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(restaurant?.name || 'Bistro & Bloom')}&am=${due.toFixed(2)}&cu=INR&tn=${encodeURIComponent(`Order ${order?.orderNumber || ''}`)}`;
+  const billRef = order?.sessionId || order?.orderNumber || (order?.tableNumber ? `Table A${order.tableNumber}` : 'Order');
+  const upiUri = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(restaurant?.name || 'Bistro & Bloom')}&am=${due.toFixed(2)}&cu=INR&tn=${encodeURIComponent(`Bill ${billRef}`)}`;
 
   useEffect(() => {
     QRCode.toDataURL(upiUri, { width: 190, margin: 1, color: { dark: '#11164b', light: '#ffffff' } })
@@ -1162,14 +1831,30 @@ function PaymentDialog({ order, restaurant, onClose, onPaid }) {
     setBusy(true);
     const txnKey = key || uniqueKey();
     try {
-      await api.recordPayment({
-        restaurantId: order?.restaurantId || restaurant?.restaurantId,
-        orderId: order.orderId,
-        amount: due,
-        method,
-        transactionId: `TXN-${Date.now().toString(36).toUpperCase()}`,
-        idempotencyKey: txnKey
-      });
+      if (unpaidOrders.length > 0) {
+        for (const ord of unpaidOrders) {
+          const ordDue = Math.round(Math.max(0, Number(ord.total || 0) - Number(ord.paidAmount || 0)) * 100) / 100;
+          if (ordDue > 0) {
+            await api.recordPayment({
+              restaurantId: ord?.restaurantId || order?.restaurantId || restaurant?.restaurantId,
+              orderId: ord.orderId,
+              amount: ordDue,
+              method,
+              transactionId: `TXN-${Date.now().toString(36).toUpperCase()}-${ord.orderNumber?.slice(-4) || '1'}`,
+              idempotencyKey: uniqueKey()
+            });
+          }
+        }
+      } else {
+        await api.recordPayment({
+          restaurantId: order?.restaurantId || restaurant?.restaurantId,
+          orderId: order.orderId,
+          amount: due,
+          method,
+          transactionId: `TXN-${Date.now().toString(36).toUpperCase()}`,
+          idempotencyKey: txnKey
+        });
+      }
       if (order?.tableId) {
         try { await api.updateTableStatus(order.tableId, 'CLEANING'); } catch { }
       }
@@ -1198,15 +1883,15 @@ function PaymentDialog({ order, restaurant, onClose, onPaid }) {
               <div className="pos-info-box" style={{ background: 'rgba(56, 189, 248, 0.1)', color: '#0284c7', borderColor: 'rgba(56, 189, 248, 0.3)' }}>
                 <Sparkles size={16} />
                 <span>
-                  <strong>Floor staff notified:</strong> {tableTitle(order)} is marked for <strong>CLEANING</strong>. It will be automatically marked available in <strong>2 minutes</strong>.
+                  <strong>Floor staff notified:</strong> {order.tableName || tableTitle(order)} is marked for <strong>CLEANING</strong>. It will be automatically marked available in <strong>2 minutes</strong>.
                 </span>
               </div>
             )}
             <div className="pos-detail-meta">
-              <div><span>Order</span><b>{order?.orderNumber}</b></div>
+              <div><span>{order?.tableName ? 'Table' : 'Order'}</span><b>{order?.tableName || order?.orderNumber}</b></div>
               <div><span>Payment method</span><b>{paidMethod === 'UPI' ? 'UPI / QR Code' : paidMethod === 'CARD' ? 'Card' : paidMethod === 'NET_BANKING' ? 'Net Banking' : 'Cash'}</b></div>
               <div><span>Amount received</span><b>{money(due)}</b></div>
-              {order?.tableNumber && <div><span>Table</span><b>{tableTitle(order)}</b></div>}
+              {order?.sessionId && <div><span>Session</span><b>{order.sessionId}</b></div>}
             </div>
           </div>
           <div className="pos-modal-footer">
@@ -1440,6 +2125,32 @@ function TableDialog({ restaurant, table, orders, reservations, onClose, busy, r
             <Check size={14} /> Mark table available
           </button>
         )}
+        {orders.length > 1 && orders.some(o => !paidIds?.has(o.orderId) && o.status !== 'CANCELLED') && (
+          <div style={{ margin: '8px 0 12px', padding: '10px 12px', background: 'var(--p-blue-soft)', border: '1px solid var(--p-border)', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <strong style={{ fontSize: 11, color: 'var(--p-blue)' }}>Running Session Total: {money(orders.filter(o => !paidIds?.has(o.orderId) && o.status !== 'CANCELLED').reduce((s, o) => s + Number(o.total || 0), 0))}</strong>
+              <small style={{ display: 'block', fontSize: 9, color: 'var(--p-muted)' }}>{orders.filter(o => !paidIds?.has(o.orderId)).length} unpaid orders on this table</small>
+            </div>
+            <button
+              className="pos-button small primary"
+              onClick={() => onPay({
+                type: 'TABLE_SESSION',
+                sessionId: `SES-T${table.tableNumber}`,
+                tableId: table.tableId,
+                tableNumber: table.tableNumber,
+                tableName: tableTitle(table),
+                customerName: table.currentCustomerName || orders[0]?.customerName,
+                orders: orders.filter(o => !paidIds?.has(o.orderId) && o.status !== 'CANCELLED'),
+                items: orders.flatMap(o => o.items || []),
+                subtotal: orders.reduce((s, o) => s + Number(o.subtotal || 0), 0),
+                tax: orders.reduce((s, o) => s + Number(o.tax || 0), 0),
+                total: orders.reduce((s, o) => s + Number(o.total || 0), 0),
+              })}
+            >
+              Pay full table bill
+            </button>
+          </div>
+        )}
         {orders.length ? (
           orders.map(o => {
             const isPaid = paidIds?.has(o.orderId);
@@ -1494,8 +2205,22 @@ function TableDialog({ restaurant, table, orders, reservations, onClose, busy, r
                   <Printer /> Print QR
                 </button>
               </div>
-              <a className="pos-text-link" style={{ marginTop: 12, display: 'inline-block' }} href={qrUrl} target="_blank" rel="noreferrer">
-                Open table menu <ArrowUpRight size={11} />
+              <a
+                className="pos-text-link"
+                style={{
+                  marginTop: 12,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 4,
+                  whiteSpace: 'nowrap'
+                }}
+                href={qrUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <span>Open table menu</span>
+                <ArrowUpRight size={12} style={{ flexShrink: 0 }} />
               </a>
               {isLocalHost && (
                 <p style={{ fontSize: 10, color: 'var(--p-muted)', marginTop: 8 }}>

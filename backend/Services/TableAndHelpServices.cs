@@ -36,7 +36,11 @@ public class TableService : ITableService
             t.QrIdentifier,
             t.CurrentCustomerName,
             t.AssignedWaiterId,
-            t.AssignedWaiter?.Name
+            t.AssignedWaiter?.Name,
+            t.PositionX,
+            t.PositionY,
+            t.Shape ?? "SQUARE",
+            t.DiningArea ?? "everyday"
         )).ToList();
     }
 
@@ -57,7 +61,11 @@ public class TableService : ITableService
             t.QrIdentifier,
             t.CurrentCustomerName,
             t.AssignedWaiterId,
-            t.AssignedWaiter?.Name
+            t.AssignedWaiter?.Name,
+            t.PositionX,
+            t.PositionY,
+            t.Shape ?? "SQUARE",
+            t.DiningArea ?? "everyday"
         );
     }
 
@@ -152,6 +160,31 @@ public class TableService : ITableService
         return true;
     }
 
+    public async Task<bool> UpdateTablePositionAsync(Guid tableId, UpdateTablePositionDto request)
+    {
+        var table = await _db.Tables.FindAsync(tableId);
+        if (table == null) return false;
+
+        table.PositionX = request.PositionX;
+        table.PositionY = request.PositionY;
+        if (!string.IsNullOrWhiteSpace(request.Shape)) table.Shape = request.Shape.Trim().ToUpperInvariant();
+        if (!string.IsNullOrWhiteSpace(request.DiningArea)) table.DiningArea = request.DiningArea.Trim().ToLowerInvariant();
+        table.UpdatedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync();
+
+        await _notifications.NotifyRoleAsync(
+            table.RestaurantId,
+            UserRoles.Receptionist,
+            "TABLE_POSITION_UPDATED",
+            "Table layout updated",
+            $"Table {table.TableNumber} position updated on floor map.",
+            new { TableId = table.TableId, TableNumber = table.TableNumber, PositionX = table.PositionX, PositionY = table.PositionY }
+        );
+
+        return true;
+    }
+
     public async Task<DiningSessionDto?> GetOrCreateActiveSessionAsync(Guid tableId)
     {
         var table = await _db.Tables.FindAsync(tableId);
@@ -164,13 +197,18 @@ public class TableService : ITableService
 
         if (session == null)
         {
+            var earliestActiveOrder = await _db.Orders
+                .Where(o => o.TableId == tableId && o.Status != OrderStatuses.Cancelled && o.CreatedAt >= DateTime.UtcNow.AddHours(-6))
+                .OrderBy(o => o.CreatedAt)
+                .FirstOrDefaultAsync();
+
             session = new DiningSession
             {
                 RestaurantId = table.RestaurantId,
                 TableId = tableId,
                 SessionCode = $"SES-{table.TableNumber}-{DateTime.UtcNow:MMddHHmm}",
                 Status = "ACTIVE",
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = earliestActiveOrder != null ? earliestActiveOrder.CreatedAt.AddSeconds(-1) : DateTime.UtcNow
             };
             _db.DiningSessions.Add(session);
             await _db.SaveChangesAsync();
@@ -178,9 +216,26 @@ public class TableService : ITableService
 
         var orders = await _db.Orders
             .Include(o => o.Items)
-            .Where(o => o.TableId == tableId && (o.SessionId == session.SessionId || o.CreatedAt >= session.CreatedAt))
+            .Where(o => o.TableId == tableId && 
+                       (o.SessionId == session.SessionId || 
+                        o.CreatedAt >= session.CreatedAt ||
+                        (o.Status != OrderStatuses.Cancelled && o.CreatedAt >= DateTime.UtcNow.AddHours(-6))))
             .OrderByDescending(o => o.CreatedAt)
             .ToListAsync();
+
+        var anySessionMissing = false;
+        foreach (var ord in orders)
+        {
+            if (!ord.SessionId.HasValue)
+            {
+                ord.SessionId = session.SessionId;
+                anySessionMissing = true;
+            }
+        }
+        if (anySessionMissing)
+        {
+            await _db.SaveChangesAsync();
+        }
 
         var orderDtos = orders.Select(o => new OrderDto(
             o.OrderId,
