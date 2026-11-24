@@ -8,6 +8,12 @@ import CustomerHelpModal from '../../components/common/CustomerHelpModal';
 import OrderReceiptModal from '../../components/common/OrderReceiptModal';
 import ItemCustomizationModal from '../../components/common/ItemCustomizationModal';
 import CartDrawer from '../../components/common/CartDrawer';
+import BillSplitAndTipModal from '../../components/billing/BillSplitAndTipModal';
+import DigitalReceiptAndFeedbackModal from '../../components/billing/DigitalReceiptAndFeedbackModal';
+import QrTablePaymentModal from '../../components/billing/QrTablePaymentModal';
+import WifiAndEntertainmentCard from '../../components/entertainment/WifiAndEntertainmentCard';
+import AiRecommendationsRail from '../../components/common/AiRecommendationsRail';
+import { translations, getCategoryTranslation } from '../../services/menuTranslations';
 import {
   Utensils,
   ShoppingBag,
@@ -23,8 +29,37 @@ import {
   Check,
   ChevronRight,
   Sparkles,
-  RefreshCw
+  RefreshCw,
+  Wifi,
+  Globe,
+  Calculator,
+  Receipt,
+  Star,
+  CreditCard,
+  Languages,
+  Gamepad2,
+  Users,
+  User,
+  Phone
 } from 'lucide-react';
+
+const getCategoryIcon = (name = '') => {
+  const n = String(name || '').toLowerCase();
+  if (n.includes('pizza')) return '🍕';
+  if (n.includes('burger')) return '🍔';
+  if (n.includes('chinese') || n.includes('noodle') || n.includes('dimsum') || n.includes('asian')) return '🥢';
+  if (n.includes('indian') || n.includes('curry') || n.includes('dal') || n.includes('gravy') || n.includes('thali') || n.includes('paneer')) return '🍲';
+  if (n.includes('beverage') || n.includes('drink') || n.includes('coffee') || n.includes('tea') || n.includes('shake') || n.includes('juice')) return '🍹';
+  if (n.includes('dessert') || n.includes('sweet') || n.includes('cake') || n.includes('ice') || n.includes('pastry')) return '🍰';
+  if (n.includes('starter') || n.includes('snack') || n.includes('appetizer')) return '🥟';
+  if (n.includes('bread') || n.includes('roti') || n.includes('naan') || n.includes('paratha')) return '🫓';
+  if (n.includes('rice') || n.includes('biryani') || n.includes('pulao')) return '🍚';
+  if (n.includes('salad') || n.includes('soup')) return '🥗';
+  if (n.includes('sandwich') || n.includes('wrap') || n.includes('roll')) return '🥪';
+  if (n.includes('pasta')) return '🍝';
+  if (n.includes('grill') || n.includes('bbq') || n.includes('tandoor') || n.includes('tikka')) return '🍢';
+  return '🍽️';
+};
 
 export default function QrDineInPage() {
   const { restaurantId, tableId } = useParams();
@@ -43,14 +78,31 @@ export default function QrDineInPage() {
   const [categories, setCategories] = useState([]);
   const [menuItems, setMenuItems] = useState([]);
   const [activeCategory, setActiveCategory] = useState('ALL');
-  const [vegFilter, setVegFilter] = useState('ALL'); // ALL, VEG, NON_VEG
+  const [dietaryFilter, setDietaryFilter] = useState('ALL'); // ALL, VEG, NON_VEG, VEGAN, GLUTEN_FREE, SPECIAL
+  const [spiceFilter, setSpiceFilter] = useState('ALL'); // ALL, MILD, MEDIUM, HOT, EXTRA_HOT
   const [searchQuery, setSearchQuery] = useState('');
+  const [tableSession, setTableSession] = useState(null);
+  const [tableOrders, setTableOrders] = useState([]);
+  const [activeTab, setActiveTab] = useState('MENU'); // 'MENU' | 'TABLE_ORDERS' | 'ENTERTAINMENT'
+  const [lang, setLang] = useState('en'); // 'en' or 'hi'
+  const [isSplitModalOpen, setIsSplitModalOpen] = useState(false);
+  const [isPayModalOpen, setIsPayModalOpen] = useState(false);
+  const [isFeedbackReceiptOpen, setIsFeedbackReceiptOpen] = useState(false);
+  const [isEntertainmentOpen, setIsEntertainmentOpen] = useState(false);
+  const [selectedOrderForFeedback, setSelectedOrderForFeedback] = useState(null);
+  const t = translations[lang] || translations.en;
 
   // Modals & Drawers
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [selectedItemForModal, setSelectedItemForModal] = useState(null);
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
+
+  // Guest Identification (Customer Name & Mobile Number)
+  const [guestName, setGuestName] = useState('');
+  const [guestPhone, setGuestPhone] = useState('');
+  const [isGuestModalOpen, setIsGuestModalOpen] = useState(false);
+  const [guestError, setGuestError] = useState('');
 
   // Active Placed Order & 1-Minute Cancellation Timer
   const [activeOrder, setActiveOrder] = useState(null);
@@ -60,16 +112,44 @@ export default function QrDineInPage() {
 
   useEffect(() => { activeOrderRef.current = activeOrder; }, [activeOrder]);
   const updateActiveOrder = useCallback(order => {
-    setActiveOrder(order);
-    activeOrderRef.current = order;
-    if (order?.status === 'PENDING_CONFIRMATION') {
-      const promptKey = `${order.orderId}:${order.confirmationRequestedAt || ''}`;
+    // If order is paid or fully settled, table session is cleared
+    const isPaid = order && (order.paymentStatus === 'PAID' || (Number(order.paidAmount) || 0) >= (Number(order.total) || 0) - 0.05);
+    const validOrder = (order && !isPaid && order.status !== 'CANCELLED') ? order : null;
+    setActiveOrder(validOrder);
+    activeOrderRef.current = validOrder;
+    if (validOrder?.status === 'PENDING_CONFIRMATION') {
+      const promptKey = `${validOrder.orderId}:${validOrder.confirmationRequestedAt || ''}`;
       if (!promptedOrders.current.has(promptKey)) {
         promptedOrders.current.add(promptKey);
         setIsReceiptModalOpen(true);
       }
     } else setIsReceiptModalOpen(false);
   }, []);
+
+  // Restore guest info from active order or localStorage
+  useEffect(() => {
+    if (!table) return;
+    try {
+      const saved = JSON.parse(localStorage.getItem(`bistro_table_guest_${table.tableId}`) || 'null');
+      if (saved?.name) setGuestName(saved.name);
+      if (saved?.phone) setGuestPhone(saved.phone);
+    } catch {}
+  }, [table]);
+
+  useEffect(() => {
+    if (activeOrder?.customerName && activeOrder.customerName !== 'Guest') {
+      setGuestName(activeOrder.customerName);
+      if (activeOrder.customerPhone) setGuestPhone(activeOrder.customerPhone);
+      if (table) {
+        try {
+          localStorage.setItem(`bistro_table_guest_${table.tableId}`, JSON.stringify({
+            name: activeOrder.customerName,
+            phone: activeOrder.customerPhone || ''
+          }));
+        } catch {}
+      }
+    }
+  }, [activeOrder, table]);
 
   // A QR link must identify this restaurant and an actual enabled table.
   const loadData = useCallback(async () => {
@@ -81,13 +161,42 @@ export default function QrDineInPage() {
       const currentTable = await api.getTableById(tableId);
       if (!currentTable || String(currentTable.restaurantId).toLowerCase() !== String(rest.restaurantId).toLowerCase()) throw new Error('This table could not be verified. Please scan the QR code on your table again.');
       if (currentTable.status === 'OUT_OF_SERVICE') throw new Error('This table is currently out of service. Please ask our team for assistance.');
-      const [cats, itemsList, orders] = await Promise.all([api.getCategories(), api.getMenuItems(), api.getOrders()]);
+      const [cats, itemsList, orders, session] = await Promise.all([
+        api.getCategories(),
+        api.getMenuItems(),
+        api.getOrders().catch(() => []),
+        api.getTableSession(currentTable.tableId).catch(() => null)
+      ]);
       if (sequence !== loadSequence.current) return;
-      setRestaurant(rest); setTable(currentTable); setCategories(cats); setMenuItems(itemsList);
+      setRestaurant(rest); setTable(currentTable); setCategories(cats); setMenuItems(itemsList); setTableSession(session);
+
+      const sessionOrders = Array.isArray(session?.orders) ? session.orders : [];
+      const orderMap = new Map();
+      sessionOrders.forEach(o => {
+        if (o && o.orderId && o.status !== 'CANCELLED') orderMap.set(o.orderId, o);
+      });
+      orders.filter(o => o.tableId === currentTable.tableId && o.status !== 'CANCELLED').forEach(o => {
+        if (o && o.orderId) orderMap.set(o.orderId, o);
+      });
+      const curTableOrders = Array.from(orderMap.values()).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      setTableOrders(curTableOrders);
+
       const context = { tableId: currentTable.tableId, tableNumber: currentTable.tableNumber, restaurantId: rest.restaurantId };
       if (switchOrderContext) switchOrderContext('DINE_IN_QR', context);
       else { setOrderSource('DINE_IN_QR'); setTableInfo(context); }
-      updateActiveOrder(orders.find(order => order.source === 'DINE_IN_QR' && order.tableId === currentTable.tableId && order.restaurantId === rest.restaurantId && !['DELIVERED', 'CANCELLED'].includes(order.status)) || null);
+      // Match active UNPAID order for this table
+      const activeTableOrder = (orders || []).find(order =>
+        order.source === 'DINE_IN_QR' &&
+        order.tableId === currentTable.tableId &&
+        order.restaurantId === rest.restaurantId &&
+        order.status !== 'CANCELLED' &&
+        order.paymentStatus !== 'PAID' &&
+        (Number(order.paidAmount) || 0) < (Number(order.total) || 0) - 0.05
+      );
+      updateActiveOrder(activeTableOrder || curTableOrders.find(order => !['DELIVERED', 'CANCELLED'].includes(order.status)) || null);
+      if (!activeTableOrder) {
+        try { localStorage.removeItem(`bistro_table_guest_${currentTable.tableId}`); } catch {}
+      }
     } catch (err) { if (sequence === loadSequence.current) setLoadError(err.message || 'Unable to open the table menu. Please try again.'); }
     finally { if (sequence === loadSequence.current) setIsLoading(false); }
   }, [restaurantId, tableId, switchOrderContext, updateActiveOrder]);
@@ -96,21 +205,46 @@ export default function QrDineInPage() {
   useEffect(() => {
     if (!table) return;
     let active = true;
-    const refreshOrder = async () => {
+
+    const syncTableSession = async () => {
       try {
-        const current = activeOrderRef.current;
-        if (!current) return;
-        const latest = await api.getOrderById(current.orderId);
-        if (active && latest) updateActiveOrder(latest);
-      } catch { /* The existing ticket stays visible during a brief reconnect. */ }
+        const [sess, localOrders] = await Promise.all([
+          api.getTableSession(table.tableId).catch(() => null),
+          api.getOrders().catch(() => [])
+        ]);
+        if (!active) return;
+        if (sess) setTableSession(sess);
+        const sessOrders = Array.isArray(sess?.orders) ? sess.orders : [];
+        const deviceOrders = localOrders.filter(o => o.tableId === table.tableId);
+        const map = new Map();
+        sessOrders.forEach(o => { if (o && o.orderId && o.status !== 'CANCELLED') map.set(o.orderId, o); });
+        deviceOrders.forEach(o => { if (o && o.orderId && o.status !== 'CANCELLED') map.set(o.orderId, o); });
+        const list = Array.from(map.values()).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        if (active) {
+          setTableOrders(list);
+          const current = activeOrderRef.current;
+          if (current) {
+            const updated = list.find(o => o.orderId === current.orderId);
+            if (updated) updateActiveOrder(updated);
+          } else {
+            const pending = list.find(o => !['DELIVERED'].includes(o.status));
+            if (pending) updateActiveOrder(pending);
+          }
+        }
+      } catch {
+        // ignore
+      }
     };
+
     const unsub = subscribeRealtimeEvents((type, payload) => {
-      if (type === 'ORDER_STATUS_CHANGED' && payload.orderId === activeOrderRef.current?.orderId && payload.order) updateActiveOrder(payload.order);
+      if (type === 'ORDER_STATUS_CHANGED' || type === 'NEW_ORDER' || type === 'TABLE_ORDER_READY' || type === 'TABLE_STATUS_UPDATED') {
+        syncTableSession();
+      }
       if (type === 'WAITER_HELP_ACCEPTED' && payload.tableId === table.tableId) setWaiterArrivingMsg(`The waiter ${payload.waiterName || payload.assignedWaiterName || ''} is coming.`);
       if (type === 'HELP_REQUEST_RESOLVED' && payload.tableId === table.tableId) setWaiterArrivingMsg(null);
       if (type === 'FOOD_AVAILABILITY_CHANGED') setMenuItems(previous => previous.map(item => item.menuItemId === payload.menuItemId ? { ...item, availability: payload.availability } : item));
     });
-    const timer = setInterval(refreshOrder, 4000);
+    const timer = setInterval(syncTableSession, 3000);
     return () => { active = false; unsub(); clearInterval(timer); };
   }, [table, updateActiveOrder]);
 
@@ -140,25 +274,85 @@ export default function QrDineInPage() {
     return () => clearInterval(interval);
   }, [activeOrder]);
 
-  // Place Order Action
-  const handlePlaceOrder = async () => {
+  // Checkout and Guest Details Verification
+  const handleCheckoutClick = () => {
+    if (!items.length) return;
+    setIsCartOpen(false);
+    const cleanPh = guestPhone.replace(/\D/g, '');
+    if (!guestName.trim() || cleanPh.length < 10) {
+      setGuestError('');
+      setIsGuestModalOpen(true);
+      return;
+    }
+    submitOrder(guestName.trim(), cleanPh);
+  };
+
+  const handleGuestSubmit = e => {
+    if (e) e.preventDefault();
+    setGuestError('');
+    if (!guestName.trim()) return setGuestError('Please enter your name.');
+    const cleanPh = guestPhone.replace(/\D/g, '');
+    if (cleanPh.length < 10) return setGuestError('Please enter a valid 10-digit mobile number.');
+
+    try {
+      if (table) {
+        localStorage.setItem(`bistro_table_guest_${table.tableId}`, JSON.stringify({
+          name: guestName.trim(),
+          phone: cleanPh
+        }));
+      }
+    } catch {}
+
+    setIsGuestModalOpen(false);
+    submitOrder(guestName.trim(), cleanPh);
+  };
+
+  // Place or Append Order Action
+  const submitOrder = async (name, phone) => {
     if (!items.length || !table || !restaurant || placingRef.current) return;
-    placingRef.current = true; setIsPlacing(true);
+    placingRef.current = true;
+    setIsPlacing(true);
     try {
       const order = await api.createOrder({
         restaurantId: restaurant?.restaurantId,
         tableId: table?.tableId,
         tableNumber: table?.tableNumber,
+        sessionId: tableSession?.sessionId || null,
         source: 'DINE_IN_QR',
+        customerName: name || null,
+        customerPhone: phone || null,
         items
       });
+      const isExistingOrder = activeOrder && activeOrder.orderId === order.orderId;
       updateActiveOrder(order);
+      setTableOrders(prev => [order, ...prev.filter(o => o.orderId !== order.orderId)]);
       clearCart();
       setIsCartOpen(false);
-      addToast(`Order #${order.orderNumber} placed successfully! Kitchen has been notified.`, 'success');
+      addToast(
+        isExistingOrder
+          ? `Items added to your active Table order #${order.orderNumber}! Kitchen has been notified.`
+          : `Order #${order.orderNumber} placed successfully! Kitchen has been notified.`,
+        'success'
+      );
+
+      // Refresh table session so all diners have the full synchronized order list
+      api.getTableSession(table.tableId).then(sess => {
+        if (sess) {
+          setTableSession(sess);
+          if (Array.isArray(sess.orders)) {
+            const map = new Map();
+            sess.orders.forEach(o => { if (o && o.orderId && o.status !== 'CANCELLED') map.set(o.orderId, o); });
+            map.set(order.orderId, order);
+            setTableOrders(Array.from(map.values()).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
+          }
+        }
+      }).catch(() => {});
     } catch (err) {
       addToast(err.message, 'error');
-    } finally { placingRef.current = false; setIsPlacing(false); }
+    } finally {
+      placingRef.current = false;
+      setIsPlacing(false);
+    }
   };
 
   // Cancel Order Action (Backend strictly enforces 1-min window)
@@ -169,6 +363,10 @@ export default function QrDineInPage() {
       await api.cancelOrder(activeOrder.orderId, 'Customer cancelled within 1 min');
       addToast('Order cancelled successfully.', 'info');
       updateActiveOrder(null);
+      setTableOrders(prev => prev.filter(o => o.orderId !== activeOrder.orderId));
+      api.getTableSession(table.tableId).then(sess => {
+        if (sess) setTableSession(sess);
+      }).catch(() => {});
     } catch (err) {
       addToast(err.message, 'error');
     } finally {
@@ -179,56 +377,92 @@ export default function QrDineInPage() {
   // Filtered Menu Items
   const filteredItems = menuItems.filter(item => {
     const matchesCat = activeCategory === 'ALL' || item.categoryId === activeCategory;
-    const matchesVeg = vegFilter === 'ALL' || item.vegNonveg === vegFilter;
-    const matchesSearch = !searchQuery || item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          (item.description || '').toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesCat && matchesVeg && matchesSearch;
+    const matchesDietary =
+      dietaryFilter === 'ALL' ||
+      (dietaryFilter === 'VEG' && item.vegNonveg === 'VEG') ||
+      (dietaryFilter === 'NON_VEG' && item.vegNonveg === 'NON_VEG') ||
+      (dietaryFilter === 'VEGAN' && (item.dietaryTags || []).some(t => /vegan/i.test(t))) ||
+      (dietaryFilter === 'GLUTEN_FREE' && (item.dietaryTags || []).some(t => /gluten/i.test(t))) ||
+      (dietaryFilter === 'SPECIAL' && Boolean(item.isSpecial));
+    const matchesSpice =
+      spiceFilter === 'ALL' ||
+      (item.spiceLevel || '').toUpperCase().replace(/\s+/g, '_') === spiceFilter;
+    const matchesSearch = !searchQuery ||
+      item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (item.description || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (item.ingredients || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (item.allergens || []).some(a => a.toLowerCase().includes(searchQuery.toLowerCase()));
+    return matchesCat && matchesDietary && matchesSpice && matchesSearch;
   });
 
   if (isLoading || loadError) return <main className="min-h-screen bg-[#f7f8fb] flex items-center justify-center px-6 py-12 text-center"><div className="max-w-sm w-full bg-white border border-slate-200 rounded-2xl p-8"><div className="w-14 h-14 mx-auto mb-5 rounded-xl bg-blue-50 text-blue-500 flex items-center justify-center">{isLoading ? <RefreshCw className="animate-spin" size={24} /> : <AlertCircle size={26} />}</div><h1 className="text-xl font-semibold text-slate-900">{isLoading ? 'Opening your table menu…' : 'We couldn’t verify this table'}</h1><p className="text-sm text-slate-500 leading-6 mt-3">{isLoading ? 'Checking your table and today’s menu.' : loadError}</p>{!isLoading && <><button onClick={loadData} className="btn-3d-crimson mt-6 w-full py-3 rounded-xl text-white text-sm font-semibold">Try again</button><a href="/" className="block text-xs text-slate-500 mt-5">Visit the restaurant website</a></>}</div></main>;
 
   return (
     <div className="min-h-screen bg-slate-50 pb-28">
-      {/* 1. Mobile-First Dedicated QR Menu Header (Section 4) */}
-      <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-sm">
+      {/* 1. Mobile-First Dedicated QR Menu Header matching screenshot */}
+      <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-xs">
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
+          {/* Left: Restaurant Logo & Table Title */}
           <div className="flex items-center space-x-3">
             <img
               src={restaurant.logo || '/favicon.svg'}
               alt={restaurant?.name}
-              className="w-10 h-10 rounded-xl object-cover shadow-sm ring-2 ring-brand-100"
+              className="w-11 h-11 rounded-2xl object-cover shadow-sm ring-1 ring-slate-200"
             />
             <div>
               <h1 className="text-sm font-black text-slate-900 leading-tight">
                 {restaurant.name}
               </h1>
               <div className="flex items-center space-x-1.5 mt-0.5">
-                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-black bg-brand-500 text-white shadow-sm">
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-black bg-[#1a382b] text-white shadow-xs">
                   {tableTitle(table)}
                 </span>
-                <span className="text-[11px] text-slate-500">Dine-In Menu</span>
+                <span className="text-xs text-slate-500 font-medium">Dine-In Menu</span>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center space-x-2">
-            {/* Help Button in Upper Right Corner (Section 7) */}
+          {/* Right: 4 Pill Action Buttons (Languages, Gamepad, Help, Cart) */}
+          <div className="flex items-center space-x-1.5 sm:space-x-2">
+            {/* 1. Language Toggle Button */}
             <button
+              type="button"
+              onClick={() => setLang(l => l === 'en' ? 'hi' : 'en')}
+              className="w-9 h-9 rounded-2xl bg-[#ede9fe]/80 text-[#6d28d9] hover:bg-[#ddd6fe] flex items-center justify-center transition-all shadow-2xs border border-purple-100/70 active:scale-95"
+              title="Change Language / भाषा बदलें"
+            >
+              <Languages size={17} />
+            </button>
+
+            {/* 2. Wi-Fi & Entertainment Game Button */}
+            <button
+              type="button"
+              onClick={() => setIsEntertainmentOpen(true)}
+              className="w-9 h-9 rounded-2xl bg-[#faf5ff] text-[#7c3aed] hover:bg-[#f3e8ff] flex items-center justify-center transition-all shadow-2xs border border-purple-100/70 active:scale-95"
+              title="Entertainment & Table Lounge"
+            >
+              <Gamepad2 size={18} />
+            </button>
+
+            {/* 3. Help Button */}
+            <button
+              type="button"
               onClick={() => setIsHelpOpen(true)}
-              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold shadow-md shadow-amber-500/20 active:scale-95 transition-all"
+              className="h-9 px-3.5 rounded-2xl bg-[#f59e0b] hover:bg-[#d97706] text-white text-xs font-black flex items-center gap-1.5 shadow-xs active:scale-95 transition-all"
               title="Call Waiter"
             >
-              <HelpCircle className="w-4 h-4" />
+              <HelpCircle size={15} />
               <span>Help</span>
             </button>
 
-            {/* Cart Trigger */}
+            {/* 4. Cart Trigger */}
             <button
+              type="button"
               onClick={() => setIsCartOpen(true)}
-              className="relative p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 transition-colors"
+              className="relative w-9 h-9 rounded-2xl bg-white border border-slate-200 text-slate-800 hover:bg-slate-50 flex items-center justify-center transition-all shadow-2xs active:scale-95"
               aria-label="View Cart"
             >
-              <ShoppingBag className="w-5 h-5" />
+              <ShoppingBag size={17} />
               {itemCount > 0 && (
                 <span className="absolute -top-1 -right-1 bg-brand-500 text-white text-[10px] font-black w-4 h-4 rounded-full flex items-center justify-center animate-soft-pulse">
                   {itemCount}
@@ -253,7 +487,35 @@ export default function QrDineInPage() {
       </header>
 
       {/* Main Content Area */}
-      <main className="max-w-2xl mx-auto px-4 pt-4 space-y-4">
+      <main className="max-w-2xl mx-auto px-4 pt-3 space-y-3">
+        {/* Table Orders Active Notification Strip when dining session has placed orders */}
+        {tableOrders.length > 0 && activeTab === 'MENU' && (
+          <div className="flex items-center justify-between p-2.5 px-3.5 rounded-2xl bg-gradient-to-r from-slate-900 to-indigo-950 text-white shadow-xs">
+            <div className="flex items-center gap-2">
+              <Users size={14} className="text-purple-400" />
+              <span className="text-xs font-bold">
+                Table Activity • {tableOrders.length} order{tableOrders.length > 1 ? 's' : ''} placed
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setActiveTab('TABLE_ORDERS')}
+                className="px-2.5 py-1 rounded-xl bg-white/10 hover:bg-white/20 text-white text-[11px] font-bold transition-all"
+              >
+                View Orders
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsPayModalOpen(true)}
+                className="px-3 py-1 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-[11px] font-black shadow-xs transition-all"
+              >
+                Pay Bill
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Active Order Status Card with 1-Min Cancellation (Section 5 & 6) */}
         {activeOrder && (
           <div className="p-4 rounded-2xl bg-white border border-brand-200 shadow-md shadow-brand-500/5 space-y-3">
@@ -299,6 +561,28 @@ export default function QrDineInPage() {
               </div>
             </div>
 
+            {/* Dynamic Preparation Time & Delay Warning (Feature 14) */}
+            {['NEW', 'ACCEPTED', 'PREPARING'].includes(activeOrder.status) && (
+              <div className="p-2.5 rounded-xl bg-amber-50/80 border border-amber-200/80 text-xs space-y-1">
+                <div className="flex items-center justify-between text-amber-900 font-bold">
+                  <span className="flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-amber-600 animate-spin" />
+                    Kitchen Preparation
+                  </span>
+                  <span>~{activeOrder.estimatedPrepTimeMinutes || 15} mins</span>
+                </div>
+                {activeOrder.estimatedReadyAt && new Date() > new Date(activeOrder.estimatedReadyAt) ? (
+                  <p className="text-[11px] text-amber-800">
+                    ⚠️ Taking a little extra time to perfect your dishes. Thank you for your patience!
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-slate-600">
+                    Estimated ready by: <strong>{activeOrder.estimatedReadyAt ? new Date(activeOrder.estimatedReadyAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Soon'}</strong>
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* 1-Minute Cancellation Countdown Window (Section 5) */}
             {activeOrder.status === 'NEW' && (
               <div className="flex items-center justify-between p-2.5 rounded-xl bg-red-50 border border-red-200 text-xs">
@@ -334,167 +618,453 @@ export default function QrDineInPage() {
                 <span>Confirm Food Received (Tap Here)</span>
               </button>
             )}
+
+            {/* Running Table Bill & Items List */}
+            <div className="border-t border-slate-100 pt-2.5 space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-slate-800">
+                  Guest: <strong>{activeOrder.customerName || guestName || 'Table Guest'}</strong>
+                </span>
+                <span className="font-black text-brand-600 text-sm">
+                  Running Bill: ₹{Number(activeOrder.total || 0).toFixed(2)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-[11px] text-slate-500">
+                <span>{activeOrder.items?.reduce((s, i) => s + (Number(i.quantity) || 1), 0)} items in this table tab</span>
+                <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                  Running Tab · Pay at End
+                </span>
+              </div>
+              <div className="max-h-32 overflow-y-auto space-y-1 bg-slate-50/70 p-2 rounded-xl border border-slate-100 text-[11px]">
+                {activeOrder.items?.map((it, idx) => (
+                  <div key={it.orderItemId || idx} className="flex justify-between items-center text-slate-700">
+                    <span className="truncate pr-2">{it.quantity}× {it.name || it.itemName}</span>
+                    <span className="font-bold whitespace-nowrap">₹{(Number(it.lineTotal) || (Number(it.price || 0) * (Number(it.quantity) || 1))).toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[10px] text-slate-400 italic">
+                Add more dishes to cart anytime — they will automatically merge into this running order.
+              </p>
+            </div>
           </div>
         )}
 
         {isPlacing && <div role="status" className="p-3 rounded-xl border border-blue-100 bg-blue-50 text-blue-700 text-xs">Sending your order to the kitchen…</div>}
 
-        {/* Search & Filters */}
-        <div className="space-y-3">
-          <div className="relative">
-            <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
-            <input
-              type="text"
-              aria-label="Search table menu"
-              placeholder="Search dishes (e.g. Pizza, Dosa, Burger)..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full text-xs pl-9 pr-4 py-2.5 rounded-2xl border border-slate-200 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-            />
-          </div>
-
-          {/* Veg / Non-Veg Filters */}
-          <div className="flex items-center justify-between gap-2 overflow-x-auto pb-1">
-            <div className="flex items-center space-x-1.5 bg-slate-200/60 p-1 rounded-xl">
-              <button
-                onClick={() => setVegFilter('ALL')}
-                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                  vegFilter === 'ALL' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'
-                }`}
-              >
-                All
-              </button>
-              <button
-                onClick={() => setVegFilter('VEG')}
-                className={`px-3 py-1 rounded-lg text-xs font-bold flex items-center space-x-1 transition-all ${
-                  vegFilter === 'VEG' ? 'bg-emerald-600 text-white shadow-sm' : 'text-emerald-700'
-                }`}
-              >
-                <span className="w-2 h-2 rounded-full bg-emerald-300" />
-                <span>Pure Veg</span>
-              </button>
-              <button
-                onClick={() => setVegFilter('NON_VEG')}
-                className={`px-3 py-1 rounded-lg text-xs font-bold flex items-center space-x-1 transition-all ${
-                  vegFilter === 'NON_VEG' ? 'bg-rose-600 text-white shadow-sm' : 'text-rose-700'
-                }`}
-              >
-                <span className="w-2 h-2 rounded-full bg-rose-300" />
-                <span>Non-Veg</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Horizontal Category Pill Scroll */}
-          <div className="flex items-center space-x-2 overflow-x-auto no-scrollbar py-1">
+        {/* Tab 1: Shared Table Orders Feed (Feature 2) */}
+        {activeTab === 'TABLE_ORDERS' && (
+          <div className="space-y-3">
             <button
-              onClick={() => setActiveCategory('ALL')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
-                activeCategory === 'ALL'
-                  ? 'bg-slate-900 text-white shadow-sm'
-                  : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
-              }`}
+              type="button"
+              onClick={() => setActiveTab('MENU')}
+              className="px-3.5 py-2 rounded-2xl bg-white border border-slate-200 text-slate-800 text-xs font-bold flex items-center gap-1.5 shadow-2xs hover:bg-slate-50 transition-all"
             >
-              All Items
+              <span>← Back to Food Menu</span>
             </button>
-            {categories.map((cat) => (
-              <button
-                key={cat.categoryId}
-                onClick={() => setActiveCategory(cat.categoryId)}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center space-x-1.5 ${
-                  activeCategory === cat.categoryId
-                    ? 'bg-brand-500 text-white shadow-sm shadow-brand-500/20'
-                    : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
-                }`}
-              >
-                <span>{cat.icon}</span>
-                <span>{cat.name}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Food Item Grid (Section 4) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-          {filteredItems.length === 0 ? (
-            <div className="col-span-full py-12 text-center text-slate-400">
-              <Utensils className="w-12 h-12 mx-auto mb-2 text-slate-300" />
-              <p className="text-sm font-bold text-slate-600">No dishes found</p>
-              <p className="text-xs text-slate-400">Try adjusting your filters or search keywords.</p>
-            </div>
-          ) : (
-            filteredItems.map((item) => (
-              <div
-                key={item.menuItemId}
-                className={`bg-white rounded-2xl border p-3 flex gap-3 shadow-sm transition-all hover:shadow-md ${
-                  !item.availability ? 'opacity-60 bg-slate-50/80 border-slate-200' : 'border-slate-200/80'
-                }`}
-              >
-                {/* Image */}
-                <div className="relative w-24 h-24 rounded-xl overflow-hidden bg-slate-100 flex-shrink-0">
-                  <img
-                    src={item.image}
-                    alt={item.name}
-                    className="w-full h-full object-cover"
-                    loading="lazy"
-                  />
-                  {!item.availability && (
-                    <div className="absolute inset-0 bg-black/60 flex items-center justify-center p-1 text-center">
-                      <span className="text-[10px] font-black text-white uppercase tracking-wider">Sold Out</span>
-                    </div>
-                  )}
+            <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900">Table Dining Session</h2>
+                  <p className="text-xs text-slate-500">
+                    {tableSession ? `Active Session #${tableSession.sessionCode}` : 'Current Table Activity'}
+                  </p>
                 </div>
-
-                {/* Details */}
-                <div className="flex-1 min-w-0 flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-center space-x-1.5 mb-0.5">
-                      <span className={`inline-block w-3 h-3 rounded-sm border flex items-center justify-center ${
-                        item.vegNonveg === 'VEG' ? 'border-emerald-600' : 'border-rose-600'
-                      }`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${
-                          item.vegNonveg === 'VEG' ? 'bg-emerald-600' : 'bg-rose-600'
-                        }`} />
-                      </span>
-                      <h3 className="text-xs font-bold text-slate-900 truncate leading-tight">
-                        {item.name}
-                      </h3>
-                    </div>
-
-                    <p className="text-[11px] text-slate-500 line-clamp-2 leading-relaxed">
-                      {item.description}
-                    </p>
-
-                    <div className="flex items-center space-x-2 mt-1">
-                      {item.isSweet && (
-                        <span className="text-[9px] text-pink-600 bg-pink-50 px-1 py-0.5 rounded font-bold">Sweet</span>
-                      )}
-                      {item.spiceLevel && item.spiceLevel !== 'NONE' && (
-                        <span className="text-[9px] text-red-600 bg-red-50 px-1 py-0.5 rounded font-bold">{item.spiceLevel}</span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Price & Add Button */}
-                  <div className="flex items-center justify-between pt-2">
-                    <span className="text-xs font-black text-slate-900">₹{item.price}</span>
-
-                    {item.availability ? (
-                      <button
-                        onClick={() => setSelectedItemForModal(item)}
-                        className="px-3 py-1 rounded-xl bg-brand-50 hover:bg-brand-500 text-brand-700 hover:text-white text-xs font-bold border border-brand-200 transition-all active:scale-95 shadow-sm"
-                      >
-                        + Add
-                      </button>
-                    ) : (
-                      <span className="text-[10px] font-bold text-slate-400">Unavailable</span>
-                    )}
-                  </div>
+                <div className="text-right">
+                  <span className="text-[10px] text-slate-400 block uppercase font-bold">Total Table Spend</span>
+                  <strong className="text-base font-black text-slate-900">
+                    ₹{tableOrders.reduce((sum, o) => sum + Number(o.total || 0), 0).toFixed(2)}
+                  </strong>
                 </div>
               </div>
-            ))
-          )}
-        </div>
+
+              <button
+                onClick={() => setActiveTab('MENU')}
+                className="w-full py-2.5 px-4 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-xs font-bold transition-all flex items-center justify-center space-x-1.5 shadow-sm"
+              >
+                <span>➕ Add More Dishes to Table</span>
+              </button>
+
+              {tableOrders.length > 0 && (
+                <div className="space-y-2 pt-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setIsPayModalOpen(true)}
+                    className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-slate-900 hover:opacity-95 text-white font-black text-xs flex items-center justify-center gap-2 shadow-md shadow-purple-500/25 transition-all active:scale-98"
+                  >
+                    <CreditCard size={15} />
+                    <span>Pay Table Bill (₹{tableOrders.reduce((sum, o) => sum + Number(o.total || 0), 0).toFixed(2)}) • Split & Gateways</span>
+                  </button>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsPayModalOpen(true)}
+                      className="py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-black text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all active:scale-95"
+                    >
+                      <Calculator size={14} /> Split Bill
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedOrderForFeedback(tableOrders[0]);
+                        setIsFeedbackReceiptOpen(true);
+                      }}
+                      className="py-2.5 px-3 rounded-xl bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-700 font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all active:scale-95"
+                    >
+                      <Receipt size={14} /> Receipt & Review
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {tableOrders.length === 0 ? (
+              <div className="p-8 text-center text-slate-400 bg-white rounded-2xl border border-slate-200">
+                <p className="text-xs font-medium">No orders placed at this table yet.</p>
+                <button onClick={() => setActiveTab('MENU')} className="mt-2 text-xs font-bold text-brand-600 underline">
+                  Browse Menu & Place First Order
+                </button>
+              </div>
+            ) : (
+              tableOrders.map(ord => (
+                <div key={ord.orderId} className="p-4 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                    <div>
+                      <strong className="text-xs text-slate-900">Order #{ord.orderNumber}</strong>
+                      <p className="text-[10px] text-slate-400">
+                        {new Date(ord.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </div>
+                    <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                      ord.status === 'READY' ? 'bg-purple-100 text-purple-800' :
+                      ord.status === 'DELIVERED' ? 'bg-emerald-100 text-emerald-800' :
+                      ord.status === 'PREPARING' || ord.status === 'ACCEPTED' ? 'bg-amber-100 text-amber-800' :
+                      ord.status === 'PENDING_CONFIRMATION' ? 'bg-rose-100 text-rose-800' :
+                      'bg-blue-100 text-blue-800'
+                    }`}>
+                      {ord.status.replaceAll('_', ' ')}
+                    </span>
+                  </div>
+
+                  <div className="space-y-1">
+                    {(ord.items || []).map((itm, i) => (
+                      <div key={itm.orderItemId || i} className="flex justify-between text-xs text-slate-700">
+                        <span><strong>{itm.quantity}×</strong> {itm.name || itm.itemName}</span>
+                        <span className="font-semibold text-slate-900">₹{Number(itm.lineTotal || itm.price * itm.quantity).toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center justify-between border-t border-slate-100 pt-2 text-xs">
+                    <span className="text-slate-500">
+                      {['NEW', 'ACCEPTED', 'PREPARING'].includes(ord.status) && ord.estimatedPrepTimeMinutes ? (
+                        <span className="text-amber-700 font-medium">⏱️ Est. ~{ord.estimatedPrepTimeMinutes} mins</span>
+                      ) : (
+                        <span>Subtotal</span>
+                      )}
+                    </span>
+                    <strong className="text-slate-900">₹{Number(ord.total).toFixed(2)}</strong>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {/* Tab 3: Entertainment & Wi-Fi Information (Feature 5) */}
+        {activeTab === 'ENTERTAINMENT' && (
+          <div className="space-y-3">
+            <button
+              type="button"
+              onClick={() => setActiveTab('MENU')}
+              className="px-3.5 py-2 rounded-2xl bg-white border border-slate-200 text-slate-800 text-xs font-bold flex items-center gap-1.5 shadow-2xs hover:bg-slate-50 transition-all"
+            >
+              <span>← Back to Food Menu</span>
+            </button>
+            <WifiAndEntertainmentCard 
+              isOpen={true} 
+              onClose={() => setActiveTab('MENU')} 
+              tableNumber={tableTitle(table)} 
+              lang={lang} 
+            />
+          </div>
+        )}
+
+        {/* Tab 2: Menu & Ordering (Feature 1 & Feature 9) */}
+        {activeTab === 'MENU' && (
+          <>
+            {/* AI Recommendations Rail (Feature 9) */}
+            <AiRecommendationsRail menuItems={menuItems} cartItems={items} lang={lang} />
+
+            {/* Search & Filters matching screenshot */}
+            <div className="space-y-2.5">
+              {/* Search Bar */}
+              <div className="relative">
+                <Search className="w-4 h-4 absolute left-3.5 top-3.5 text-slate-400" />
+                <input
+                  type="text"
+                  aria-label="Search dishes, ingredients"
+                  placeholder="Search dishes, ingredients (e.g. Paneer, Pizza, Dosa)..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full text-xs pl-10 pr-4 py-3 rounded-2xl border border-slate-200 bg-white shadow-xs focus:outline-none focus:ring-2 focus:ring-slate-300 placeholder:text-slate-400 text-slate-800"
+                />
+              </div>
+
+              {/* Veg / Non-Veg Bar */}
+              <div className="bg-[#f1f3f9] p-1 rounded-2xl flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDietaryFilter('ALL')}
+                  className={`px-4 py-1.5 rounded-xl font-bold text-xs transition-all ${
+                    dietaryFilter === 'ALL'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  All
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDietaryFilter(dietaryFilter === 'VEG' ? 'ALL' : 'VEG')}
+                  className={`px-3.5 py-1.5 rounded-xl font-bold text-xs transition-all flex items-center gap-1.5 ${
+                    dietaryFilter === 'VEG'
+                      ? 'bg-white text-[#047857] shadow-xs ring-1 ring-emerald-300'
+                      : 'text-[#047857] hover:text-emerald-950'
+                  }`}
+                >
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#10b981] inline-block shrink-0 shadow-2xs" />
+                  <span>Pure Veg</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDietaryFilter(dietaryFilter === 'NON_VEG' ? 'ALL' : 'NON_VEG')}
+                  className={`px-3.5 py-1.5 rounded-xl font-bold text-xs transition-all flex items-center gap-1.5 ${
+                    dietaryFilter === 'NON_VEG'
+                      ? 'bg-white text-[#9f1239] shadow-xs ring-1 ring-rose-300'
+                      : 'text-[#9f1239] hover:text-rose-950'
+                  }`}
+                >
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#f43f5e] inline-block shrink-0 shadow-2xs" />
+                  <span>Non-Veg</span>
+                </button>
+              </div>
+
+              {/* Dietary & Spice Pills Row (Horizontal Scroll) */}
+              <div className="flex items-center space-x-2 overflow-x-auto no-scrollbar py-0.5">
+                {/* Daily Specials Pill */}
+                <button
+                  type="button"
+                  onClick={() => setDietaryFilter(dietaryFilter === 'SPECIAL' ? 'ALL' : 'SPECIAL')}
+                  className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all border flex items-center gap-1.5 shadow-2xs shrink-0 ${
+                    dietaryFilter === 'SPECIAL'
+                      ? 'bg-amber-100 border-amber-400 text-amber-900 ring-1 ring-amber-400'
+                      : 'bg-[#fffbeb] border-amber-200/80 text-[#92400e] hover:bg-amber-100/70'
+                  }`}
+                >
+                  <span className="text-amber-600 font-black text-[11px]">%</span>
+                  <span>⭐ Daily Specials</span>
+                </button>
+
+                {/* Vegan Pill */}
+                <button
+                  type="button"
+                  onClick={() => setDietaryFilter(dietaryFilter === 'VEGAN' ? 'ALL' : 'VEGAN')}
+                  className={`px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all border flex items-center gap-1.5 shadow-2xs shrink-0 ${
+                    dietaryFilter === 'VEGAN'
+                      ? 'bg-emerald-50 border-emerald-400 text-emerald-800 ring-1 ring-emerald-300 font-bold'
+                      : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <span>🌱</span>
+                  <span>Vegan</span>
+                </button>
+
+                {/* Gluten-Free Pill */}
+                <button
+                  type="button"
+                  onClick={() => setDietaryFilter(dietaryFilter === 'GLUTEN_FREE' ? 'ALL' : 'GLUTEN_FREE')}
+                  className={`px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all border flex items-center gap-1.5 shadow-2xs shrink-0 ${
+                    dietaryFilter === 'GLUTEN_FREE'
+                      ? 'bg-amber-50 border-amber-400 text-amber-800 ring-1 ring-amber-300 font-bold'
+                      : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <span>🌾</span>
+                  <span>Gluten-Free</span>
+                </button>
+
+                {/* Any Spice Level Dropdown Pill */}
+                <div className="relative shrink-0">
+                  <select
+                    value={spiceFilter}
+                    onChange={(e) => setSpiceFilter(e.target.value)}
+                    className="px-3.5 py-1.5 rounded-full text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 shadow-2xs cursor-pointer focus:outline-none appearance-none pr-6 font-sans"
+                    style={{
+                      backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
+                      backgroundRepeat: 'no-repeat',
+                      backgroundPosition: 'right 8px center'
+                    }}
+                    aria-label="Spice level filter"
+                  >
+                    <option value="ALL">🌶️ Any Spice Level</option>
+                    <option value="MILD">🌶️ Mild</option>
+                    <option value="MEDIUM">🌶️🌶️ Medium</option>
+                    <option value="HOT">🌶️🌶️🌶️ Hot</option>
+                    <option value="EXTRA_HOT">🔥 Extra Hot</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Horizontal Category Pill Scroll */}
+              <div className="flex items-center space-x-2 overflow-x-auto no-scrollbar py-0.5">
+                <button
+                  type="button"
+                  onClick={() => setActiveCategory('ALL')}
+                  className={`px-4 py-2 rounded-2xl text-xs font-bold whitespace-nowrap transition-all shrink-0 ${
+                    activeCategory === 'ALL'
+                      ? 'bg-[#0f172a] text-white shadow-xs'
+                      : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  All Items
+                </button>
+                {categories.map((cat) => {
+                  const icon = cat.icon || getCategoryIcon(cat.name);
+                  const isActive = activeCategory === cat.categoryId;
+                  return (
+                    <button
+                      key={cat.categoryId}
+                      type="button"
+                      onClick={() => setActiveCategory(cat.categoryId)}
+                      className={`px-3.5 py-2 rounded-2xl text-xs font-bold whitespace-nowrap transition-all flex items-center space-x-1.5 shrink-0 shadow-2xs ${
+                        isActive
+                          ? 'bg-[#0f172a] text-white shadow-xs'
+                          : 'bg-white border border-slate-200 text-slate-800 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span>{icon}</span>
+                      <span>{cat.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Food Item Grid (Section 4) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+              {filteredItems.length === 0 ? (
+                <div className="col-span-full py-12 text-center text-slate-400">
+                  <Utensils className="w-12 h-12 mx-auto mb-2 text-slate-300" />
+                  <p className="text-sm font-bold text-slate-600">No dishes found</p>
+                  <p className="text-xs text-slate-400">Try adjusting your filters or search keywords.</p>
+                </div>
+              ) : (
+                filteredItems.map((item) => (
+                  <div
+                    key={item.menuItemId}
+                    className={`bg-white rounded-2xl border p-3 flex gap-3 shadow-sm transition-all hover:shadow-md ${
+                      !item.availability ? 'opacity-60 bg-slate-50/80 border-slate-200' : 'border-slate-200/80'
+                    }`}
+                  >
+                    {/* Image */}
+                    <div className="relative w-24 h-24 rounded-xl overflow-hidden bg-slate-100 flex-shrink-0">
+                      <img
+                        src={item.image}
+                        alt={item.name}
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                      />
+                      {!item.availability && (
+                        <div className="absolute inset-0 bg-black/60 flex items-center justify-center p-1 text-center">
+                          <span className="text-[10px] font-black text-white uppercase tracking-wider">Sold Out</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Details */}
+                    <div className="flex-1 min-w-0 flex flex-col justify-between">
+                      <div>
+                        <div className="flex items-center space-x-1.5 mb-0.5">
+                          <span className={`inline-block w-3 h-3 rounded-sm border flex items-center justify-center ${
+                            item.vegNonveg === 'VEG' ? 'border-emerald-600' : 'border-rose-600'
+                          }`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${
+                              item.vegNonveg === 'VEG' ? 'bg-emerald-600' : 'bg-rose-600'
+                            }`} />
+                          </span>
+                          <h3 className="text-xs font-bold text-slate-900 truncate leading-tight">
+                            {item.name}
+                          </h3>
+                          {item.isSpecial && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-amber-500 text-white shrink-0">
+                              ⭐ Special
+                            </span>
+                          )}
+                        </div>
+
+                        <p className="text-[11px] text-slate-500 line-clamp-2 leading-relaxed">
+                          {item.description}
+                        </p>
+
+                        <div className="flex flex-wrap items-center gap-1 mt-1">
+                          {item.isSweet && (
+                            <span className="text-[9px] text-pink-600 bg-pink-50 px-1 py-0.5 rounded font-bold">Sweet</span>
+                          )}
+                          {item.spiceLevel && item.spiceLevel !== 'NONE' && (
+                            <span className="text-[9px] text-red-600 bg-red-50 px-1 py-0.5 rounded font-bold">
+                              {item.spiceLevel === 'MILD' && '🌶️ Mild'}
+                              {item.spiceLevel === 'MEDIUM' && '🌶️🌶️ Med'}
+                              {item.spiceLevel === 'HOT' && '🌶️🌶️🌶️ Hot'}
+                              {(item.spiceLevel === 'EXTRA_HOT' || item.spiceLevel === 'EXTRA HOT') && '🔥 Extra Hot'}
+                              {!['MILD', 'MEDIUM', 'HOT', 'EXTRA_HOT', 'EXTRA HOT'].includes(item.spiceLevel) && item.spiceLevel}
+                            </span>
+                          )}
+                          {(item.dietaryTags || []).map((t, idx) => (
+                            <span key={idx} className="text-[9px] text-emerald-700 bg-emerald-50 px-1 py-0.5 rounded font-bold">
+                              {t}
+                            </span>
+                          ))}
+                        </div>
+
+                        {item.allergens && item.allergens.length > 0 && (
+                          <p className="text-[9px] text-amber-800 bg-amber-50/70 border border-amber-200/50 px-1.5 py-0.5 rounded mt-1 font-medium">
+                            ⚠️ Contains: {item.allergens.join(', ')}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Price & Add Button */}
+                      <div className="flex items-center justify-between pt-2">
+                        {item.portions && item.portions.length > 0 ? (
+                          <div>
+                            <span className="text-xs font-black text-slate-900">from ₹{item.portions[0].price}</span>
+                            <span className="text-[9px] text-slate-400 block">{item.portions.map(p => `${p.name} ₹${p.price}`).join(' • ')}</span>
+                          </div>
+                        ) : (
+                          <span className="text-xs font-black text-slate-900">₹{item.price}</span>
+                        )}
+
+                        {item.availability ? (
+                          <button
+                            onClick={() => setSelectedItemForModal(item)}
+                            className="px-3 py-1 rounded-xl bg-brand-50 hover:bg-brand-500 text-brand-700 hover:text-white text-xs font-bold border border-brand-200 transition-all active:scale-95 shadow-sm"
+                          >
+                            + Add
+                          </button>
+                        ) : (
+                          <span className="text-[10px] font-bold text-slate-400">Unavailable</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </>
+        )}
       </main>
 
       {/* Floating Bottom Bar: Cart Summary (Section 4) */}
@@ -509,8 +1079,12 @@ export default function QrDineInPage() {
                 {itemCount}
               </span>
               <div>
-                <p className="text-xs font-bold leading-tight">{tableTitle(table)} Cart</p>
-                <p className="text-[11px] text-slate-400">Tap to review & order</p>
+                <p className="text-xs font-bold leading-tight">
+                  {activeOrder ? `Add to Table ${table?.tableNumber || ''} Bill` : `${tableTitle(table)} Cart`}
+                </p>
+                <p className="text-[11px] text-slate-400">
+                  {activeOrder ? `Will add to Order #${activeOrder.orderNumber}` : `Tap to review & order`}
+                </p>
               </div>
             </div>
 
@@ -522,14 +1096,123 @@ export default function QrDineInPage() {
         </div>
       )}
 
+      {/* Floating Bottom Bar: Table Pay Bar when cart is empty & orders exist */}
+      {itemCount === 0 && tableOrders.length > 0 && (
+        <div className="fixed bottom-3 left-4 right-4 max-w-md mx-auto z-40 animate-slide-up">
+          <button
+            onClick={() => setIsPayModalOpen(true)}
+            className="w-full bg-gradient-to-r from-purple-700 via-indigo-700 to-slate-900 hover:opacity-95 text-white p-3.5 rounded-2xl shadow-2xl flex items-center justify-between transition-all"
+          >
+            <div className="flex items-center space-x-3 text-left">
+              <span className="w-8 h-8 rounded-xl bg-white/20 text-white font-black text-sm flex items-center justify-center shadow-inner">
+                <CreditCard size={17} />
+              </span>
+              <div>
+                <p className="text-xs font-bold leading-tight">{tableTitle(table)} Bill</p>
+                <p className="text-[11px] text-purple-200">Tap to pay • Split bill & UPI / Cards / Cash</p>
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <span className="text-sm font-black text-amber-300">
+                ₹{tableOrders.reduce((sum, o) => sum + Number(o.total || 0), 0).toFixed(2)}
+              </span>
+              <ChevronRight className="w-4 h-4 text-purple-200" />
+            </div>
+          </button>
+        </div>
+      )}
+
+      {/* Guest Identification Modal (Name & Phone required before placing) */}
+      {isGuestModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div role="dialog" aria-modal="true" className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-sm font-black text-slate-900 leading-tight">
+                  Guest Details · {tableTitle(table)}
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Please enter your name and mobile number before placing your order.
+                </p>
+              </div>
+              <button onClick={() => setIsGuestModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1">
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            {guestError && (
+              <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-xs text-red-600 font-semibold">
+                {guestError}
+              </div>
+            )}
+
+            <form onSubmit={handleGuestSubmit} className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Your Name <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <User className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+                  <input
+                    type="text"
+                    required
+                    maxLength={100}
+                    placeholder="e.g. Rahul Sharma"
+                    value={guestName}
+                    onChange={e => setGuestName(e.target.value)}
+                    className="w-full text-xs pl-9 pr-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Mobile Number <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <Phone className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+                  <input
+                    type="tel"
+                    required
+                    maxLength={10}
+                    placeholder="10-digit mobile number"
+                    value={guestPhone}
+                    onChange={e => setGuestPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                    className="w-full text-xs pl-9 pr-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setIsGuestModalOpen(false)}
+                  className="flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold hover:bg-slate-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isPlacing}
+                  className="flex-1 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-xs font-black shadow-md shadow-brand-500/20"
+                >
+                  {isPlacing ? 'Placing...' : 'Confirm & Order'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Customization Modal */}
       <ItemCustomizationModal
         isOpen={Boolean(selectedItemForModal)}
         onClose={() => setSelectedItemForModal(null)}
         item={selectedItemForModal}
-        onAddToCart={(item, qty, cust, addons, note) => {
-          addItem(item, qty, cust, addons, note);
-          addToast(`Added ${item.name} to cart.`, 'success');
+        onAddToCart={(item, qty, cust, addons, note, portion) => {
+          addItem(item, qty, cust, addons, note, portion);
+          addToast(`Added ${item.name}${portion ? ` (${portion.name})` : ''} to cart.`, 'success');
         }}
       />
 
@@ -553,11 +1236,57 @@ export default function QrDineInPage() {
         }}
       />
 
+      {/* User Request: QR Menu Pay Table Bill & Split Bill Modal with All Gateways */}
+      <QrTablePaymentModal
+        isOpen={isPayModalOpen}
+        onClose={() => setIsPayModalOpen(false)}
+        table={table}
+        tableOrders={tableOrders}
+        tableSession={tableSession}
+        restaurant={restaurant}
+        onPaymentSuccess={(payResult) => {
+          setTableOrders(prev => prev.map(o => ({ ...o, paymentStatus: 'PAID' })));
+          if (activeOrder) setActiveOrder(prev => prev ? ({ ...prev, paymentStatus: 'PAID' }) : null);
+          setSelectedOrderForFeedback(tableOrders[0] || activeOrder);
+          setIsFeedbackReceiptOpen(true);
+        }}
+      />
+
+      {/* Feature 5: Entertainment & Table Lounge Modal (Matches User Screenshots) */}
+      <WifiAndEntertainmentCard
+        isOpen={isEntertainmentOpen}
+        onClose={() => setIsEntertainmentOpen(false)}
+        tableNumber={tableTitle(table)}
+        lang={lang}
+      />
+
+      {/* Feature 7: Bill Split & Tip Modal */}
+      <BillSplitAndTipModal
+        isOpen={isSplitModalOpen}
+        onClose={() => setIsSplitModalOpen(false)}
+        items={tableOrders.flatMap(o => o.items || [])}
+        subtotal={tableOrders.reduce((acc, o) => acc + (Number(o.total || 0) - Number(o.tax || 0)), 0)}
+        tax={tableOrders.reduce((acc, o) => acc + Number(o.tax || 0), 0)}
+        tableNumber={tableTitle(table)}
+        onPaymentSuccess={(data) => {
+          addToast(`Split calculation saved for ${data.splitCount} diners.`, 'success');
+        }}
+      />
+
+      {/* Feature 8: Digital Receipt & Customer Feedback Modal */}
+      <DigitalReceiptAndFeedbackModal
+        isOpen={isFeedbackReceiptOpen}
+        onClose={() => setIsFeedbackReceiptOpen(false)}
+        order={selectedOrderForFeedback || tableOrders[0] || activeOrder}
+        restaurantName={restaurant?.name || 'BistroPOS'}
+        tableNumber={tableTitle(table)}
+      />
+
       {/* Slide-over Cart Drawer */}
       <CartDrawer
         isOpen={isCartOpen}
         onClose={() => setIsCartOpen(false)}
-        onCheckout={handlePlaceOrder}
+        onCheckout={handleCheckoutClick}
       />
     </div>
   );

@@ -112,7 +112,7 @@ function normalizeOrder(order) {
     sessionId: order.sessionId ?? null,
     items: (order.items || []).map(item => ({
       ...item,
-      name: item.name || item.itemName,
+      name: item.name || item.itemName || item.itemNameSnapshot || 'Menu item',
       price: Number(item.price ?? item.priceSnapshot ?? 0),
       quantity: Number(item.quantity),
       lineTotal: Number(item.lineTotal),
@@ -197,26 +197,26 @@ async function pollUpdates() {
     const jobs = [
       api.getMenuItems().then(items => diffRecords('menu', items, 'menuItemId', null, (item, old) => {
         if (item.availability !== old.availability) broadcastEvent('FOOD_AVAILABILITY_CHANGED', { menuItemId: item.menuItemId, availability: item.availability });
-      }, generation)),
+      }, generation)).catch(() => {}),
       api.getOrders().then(orders => diffRecords('orders', orders, 'orderId', order => broadcastEvent('NEW_ORDER', order), (order, old) => {
         if (order.status !== old.status) {
           const payload = { orderId: order.orderId, orderNumber: order.orderNumber, tableId: order.tableId, tableNumber: order.tableNumber, newStatus: order.status, order };
           broadcastEvent('ORDER_STATUS_CHANGED', payload);
           if (order.source === 'DINE_IN_QR' && order.status === 'READY') broadcastEvent('TABLE_ORDER_READY', payload);
         }
-      }, generation)),
+      }, generation)).catch(() => {}),
       api.getTables().then(tables => diffRecords('tables', tables, 'tableId', null, (table, old) => {
         if (table.status !== old.status || table.currentCustomerName !== old.currentCustomerName) {
           broadcastEvent('TABLE_STATUS_UPDATED', { tableId: table.tableId, tableNumber: table.tableNumber, status: table.status, customerName: table.currentCustomerName, table });
         }
-      }, generation))
+      }, generation)).catch(() => {})
     ];
     if (['SUPER_ADMIN', 'RECEPTIONIST', 'WAITER'].includes(jwtRole()) || (!isStaff() && stored(HELP_KEY).length)) jobs.push(api.getHelpRequests().then(requests => diffRecords('help', requests, 'requestId', help => broadcastEvent('CUSTOMER_HELP_REQUEST', help), (help, old) => {
       if (help.status !== old.status) broadcastEvent(help.status === 'ASSIGNED' ? 'WAITER_HELP_ACCEPTED' : 'HELP_REQUEST_RESOLVED', { ...help, waiterName: help.assignedWaiterName });
-    }, generation)));
+    }, generation)).catch(() => {}));
     if (isStaff()) {
-      jobs.push(api.getReservations().then(reservations => diffRecords('reservations', reservations, 'reservationId', reservation => broadcastEvent('NEW_TABLE_RESERVATION', reservation), reservation => broadcastEvent('RESERVATION_STATUS_CHANGED', reservation), generation)));
-      jobs.push(api.getIssues().then(issues => diffRecords('issues', issues, 'issueId', issue => broadcastEvent('CUSTOMER_ORDER_NOT_RECEIVED', { ...issue, message: issue.description }), null, generation)));
+      jobs.push(api.getReservations().then(reservations => diffRecords('reservations', reservations, 'reservationId', reservation => broadcastEvent('NEW_TABLE_RESERVATION', reservation), reservation => broadcastEvent('RESERVATION_STATUS_CHANGED', reservation), generation)).catch(() => {}));
+      jobs.push(api.getIssues().then(issues => diffRecords('issues', issues, 'issueId', issue => broadcastEvent('CUSTOMER_ORDER_NOT_RECEIVED', { ...issue, message: issue.description }), null, generation)).catch(() => {}));
     }
     await Promise.allSettled(jobs);
   } finally { pollBusy = false; }
@@ -261,8 +261,26 @@ export const api = {
     if (/^\d+$/.test(String(tableId))) return (await api.getTables()).find(table => table.tableNumber === Number(tableId)) || null;
     return request(`/tables/${encodeURIComponent(tableId)}`);
   },
-  getTableSession: tableId => request(`/tables/${encodeURIComponent(tableId)}/session`),
+  getTableSession: async tableId => {
+    const data = await request(`/tables/${encodeURIComponent(tableId)}/session`);
+    if (data && Array.isArray(data.orders)) {
+      data.orders = data.orders.map(normalizeOrder);
+    }
+    return data;
+  },
+  getTableOrders: async tableId => {
+    try {
+      const sess = await api.getTableSession(tableId);
+      return Array.isArray(sess?.orders) ? sess.orders : [];
+    } catch {
+      return [];
+    }
+  },
   closeTableSession: tableId => request(`/tables/${encodeURIComponent(tableId)}/session/close`, { method: 'POST' }),
+  updateTablePosition: (tableId, positionX, positionY, shape = 'SQUARE', diningArea = 'everyday') => request(`/tables/${encodeURIComponent(tableId)}/position`, { method: 'PATCH', body: { positionX, positionY, shape, diningArea } }).then(result => {
+    broadcastEvent('TABLE_POSITION_UPDATED', { tableId, positionX, positionY, shape, diningArea });
+    return result;
+  }),
   updateTableStatus: (tableId, status, customerName = null, assignedWaiterId = null) => request(`/tables/${tableId}/status`, { method: 'PUT', body: { status, customerName, assignedWaiterId } }).then(result => {
     broadcastEvent('TABLE_STATUS_UPDATED', { tableId, status, customerName });
     return result;
@@ -443,5 +461,16 @@ export const api = {
   initiatePayment: details => request(`/payments/initiate${query({ accessToken: orderAccess(details.orderId) })}`, { method: 'POST', accessToken: orderAccess(details.orderId), body: { restaurantId: details.restaurantId || restaurantId, method: details.method || 'UPI', ...details, idempotencyKey: details.idempotencyKey || uniqueKey() } }),
   recordPayment: details => request('/payments/record', { method: 'POST', body: { restaurantId: details.restaurantId || restaurantId, method: details.method || 'CASH', ...details, idempotencyKey: details.idempotencyKey || uniqueKey() } }),
   recordCashPayment: details => api.recordPayment({ ...details, method: 'CASH' }),
-  getPayments: () => request(`/payments${query({ restaurantId })}`)
+  getPayments: () => request(`/payments${query({ restaurantId })}`),
+  getInventory: () => request(`/inventory${query({ restaurantId })}`),
+  createInventoryItem: body => request('/inventory', { method: 'POST', body: { restaurantId, ...body } }),
+  updateInventoryStock: (itemId, quantityChange, reason = '') => request(`/inventory/${encodeURIComponent(itemId)}/stock`, { method: 'PATCH', body: { quantityChange, reason } }),
+  reportShortage: body => request('/inventory/shortage', { method: 'POST', body: { restaurantId, ...body } }),
+  getRestaurantWifi: (customRestId) => request(`/restaurants/${customRestId || restaurantId}/wifi`),
+  updateRestaurantWifi: (customRestId, body) => request(`/restaurants/${customRestId || restaurantId}/wifi`, { method: 'PATCH', body }),
+  getLoyaltyBalance: phone => request(`/loyalty/balance${query({ restaurantId, phone })}`),
+  earnLoyaltyPoints: body => request('/loyalty/earn', { method: 'POST', body: { restaurantId, ...body } }),
+  redeemLoyaltyPoints: body => request('/loyalty/redeem', { method: 'POST', body: { restaurantId, ...body } }),
+  submitFeedback: body => request('/feedback', { method: 'POST', body: { restaurantId, ...body } }),
+  getFeedbacks: () => request(`/feedback${query({ restaurantId })}`)
 };
