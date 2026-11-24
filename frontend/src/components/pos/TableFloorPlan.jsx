@@ -11,7 +11,7 @@ function seatingLayout(table) {
   const capacity = Number(table.capacity);
   const number = Number(table.tableNumber);
   if (diningAreaForTable(table) === 'family') {
-    const seatingStyle = table.seatingStyle || (tableLabel(table) === 'C3' ? 'sofas' : tableLabel(table) === 'C4' ? 'mixed' : 'chairs');
+    const seatingStyle = table.seatingStyle || (['C3', '103', '3'].includes(String(table.tableNumber || tableLabel(table))) ? 'sofas' : ['C4', '104', '4'].includes(String(table.tableNumber || tableLabel(table))) ? 'mixed' : 'chairs');
     return { kind: 'family', shape: 'long', seatingStyle, sofa: seatingStyle !== 'chairs', caption: seatingStyle === 'sofas' ? 'Family table · sofa seating' : seatingStyle === 'mixed' ? 'Family table · sofas + chairs' : 'Family table · chairs' };
   }
   if (capacity <= 4) {

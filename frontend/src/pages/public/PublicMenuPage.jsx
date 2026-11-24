@@ -14,7 +14,6 @@ export default function PublicMenuPage({ onOpenCart }) {
   const [menuItems, setMenuItems] = useState([]);
   const [activeCategory, setActiveCategory] = useState(searchParams.get('category') || 'ALL');
   const [dietaryFilter, setDietaryFilter] = useState('ALL'); // ALL, VEG, NON_VEG, VEGAN, GLUTEN_FREE, SPECIAL
-  const [spiceFilter, setSpiceFilter] = useState('ALL'); // ALL, MILD, MEDIUM, HOT, EXTRA_HOT
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedItemForModal, setSelectedItemForModal] = useState(null);
   const [lang, setLang] = useState('en');
@@ -58,15 +57,12 @@ export default function PublicMenuPage({ onOpenCart }) {
       (dietaryFilter === 'VEGAN' && (item.dietaryTags || []).some(t => /vegan/i.test(t))) ||
       (dietaryFilter === 'GLUTEN_FREE' && (item.dietaryTags || []).some(t => /gluten/i.test(t))) ||
       (dietaryFilter === 'SPECIAL' && Boolean(item.isSpecial));
-    const matchesSpice =
-      spiceFilter === 'ALL' ||
-      (item.spiceLevel || '').toUpperCase().replace(/\s+/g, '_') === spiceFilter;
     const matchesSearch = !searchQuery ||
       item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (item.description || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (item.ingredients || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (item.allergens || []).some(a => a.toLowerCase().includes(searchQuery.toLowerCase()));
-    return matchesCat && matchesDietary && matchesSpice && matchesSearch;
+    return matchesCat && matchesDietary && matchesSearch;
   });
 
   return (
@@ -143,20 +139,6 @@ export default function PublicMenuPage({ onOpenCart }) {
                 </button>
               ))}
             </div>
-
-            {/* Spice Filter Select */}
-            <select
-              value={spiceFilter}
-              onChange={e => setSpiceFilter(e.target.value)}
-              className="pos-select text-xs py-1.5 px-3 rounded-xl border border-[#E8D1CE] bg-white text-[#75666B] font-semibold outline-none"
-              aria-label="Filter by spice level"
-            >
-              <option value="ALL">All Spice Levels</option>
-              <option value="MILD">🌶️ Mild</option>
-              <option value="MEDIUM">🌶️🌶️ Medium</option>
-              <option value="HOT">🌶️🌶️🌶️ Hot</option>
-              <option value="EXTRA_HOT">🔥 Extra Hot</option>
-            </select>
           </div>
         </div>
 
@@ -237,29 +219,10 @@ export default function PublicMenuPage({ onOpenCart }) {
                 <p className="text-xs text-[#75666B] line-clamp-2 mt-1 leading-relaxed">
                   {item.description}
                 </p>
-                <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                  {item.isSweet && (
+                {item.isSweet && (
+                  <div className="flex flex-wrap items-center gap-1.5 mt-2">
                     <span className="text-[10px] text-pink-700 bg-pink-50 border border-pink-200 px-2 py-0.5 rounded font-medium">Sweet</span>
-                  )}
-                  {item.spiceLevel && item.spiceLevel !== 'NONE' && (
-                    <span className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded font-medium">
-                      {item.spiceLevel === 'MILD' && '🌶️ Mild'}
-                      {item.spiceLevel === 'MEDIUM' && '🌶️🌶️ Medium'}
-                      {item.spiceLevel === 'HOT' && '🌶️🌶️🌶️ Hot'}
-                      {(item.spiceLevel === 'EXTRA_HOT' || item.spiceLevel === 'EXTRA HOT') && '🔥 Extra Hot'}
-                      {!['MILD', 'MEDIUM', 'HOT', 'EXTRA_HOT', 'EXTRA HOT'].includes(item.spiceLevel) && item.spiceLevel}
-                    </span>
-                  )}
-                  {(item.dietaryTags || []).map((tag, i) => (
-                    <span key={i} className="text-[10px] text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded font-medium">
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-                {item.allergens && item.allergens.length > 0 && (
-                  <p className="text-[10px] text-amber-800 bg-amber-50/70 border border-amber-200/60 px-2 py-0.5 rounded mt-2 font-medium">
-                    ⚠️ Allergens: {item.allergens.join(', ')}
-                  </p>
+                  </div>
                 )}
               </div>
             </div>
@@ -267,14 +230,9 @@ export default function PublicMenuPage({ onOpenCart }) {
             <div className="flex items-center justify-between pt-3 mt-3 border-t border-[#E8D1CE]">
               <div>
                 <span className="text-[10px] uppercase font-bold tracking-wider text-[#75666B]">Price</span>
-                {item.portions && item.portions.length > 0 ? (
-                  <div>
-                    <p className="text-base font-bold text-[#11164B]">from ₹{item.portions[0].price}</p>
-                    <p className="text-[10px] text-[#75666B]">{item.portions.map(p => `${p.name}: ₹${p.price}`).join(' • ')}</p>
-                  </div>
-                ) : (
-                  <p className="text-base font-bold text-[#11164B]">₹{item.price}</p>
-                )}
+                <p className="text-base font-bold text-[#11164B]">
+                  ₹{item.portions && item.portions.length > 0 ? item.portions[0].price : item.price}
+                </p>
               </div>
 
               {item.availability ? (

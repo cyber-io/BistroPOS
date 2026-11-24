@@ -13,6 +13,8 @@ const listeners = new Set();
 let pollTimer;
 let pollBusy = false;
 let pollingGeneration = 0;
+let pollCycle = 0;
+let rateLimitBackoffUntil = 0;
 const snapshots = new Map();
 const pendingOrderKeys = new Map();
 const PURGED_ORDERS = new Set(['ORD-0D10DC7FC6', 'ORD-66A6B8C8CB']);
@@ -91,6 +93,9 @@ async function request(path, { method = 'GET', body, accessToken, signal } = {})
   let data;
   try { data = text ? JSON.parse(text) : null; } catch { data = null; }
   if (!response.ok) {
+    if (response.status === 429) {
+      rateLimitBackoffUntil = Date.now() + 15000;
+    }
     if (response.status === 401 && token) {
       setAuthToken(null);
       window.dispatchEvent(new Event('rs_session_expired'));
@@ -190,27 +195,40 @@ function diffRecords(key, records, idField, onNew, onChange, generation) {
   }
 }
 async function pollUpdates() {
-  if (pollBusy || !listeners.size) return;
+  if (pollBusy || !listeners.size || Date.now() < rateLimitBackoffUntil) return;
   pollBusy = true;
+  pollCycle++;
   const generation = pollingGeneration;
   try {
-    const jobs = [
-      api.getMenuItems().then(items => diffRecords('menu', items, 'menuItemId', null, (item, old) => {
+    const jobs = [];
+
+    // Poll menu items only every 10th cycle (~40s) since menu rarely changes mid-service
+    if (pollCycle % 10 === 1) {
+      jobs.push(api.getMenuItems().then(items => diffRecords('menu', items, 'menuItemId', null, (item, old) => {
         if (item.availability !== old.availability) broadcastEvent('FOOD_AVAILABILITY_CHANGED', { menuItemId: item.menuItemId, availability: item.availability });
-      }, generation)).catch(() => {}),
+      }, generation)).catch(err => {
+        if (err?.status === 429) rateLimitBackoffUntil = Date.now() + 20000;
+      }));
+    }
+
+    jobs.push(
       api.getOrders().then(orders => diffRecords('orders', orders, 'orderId', order => broadcastEvent('NEW_ORDER', order), (order, old) => {
         if (order.status !== old.status) {
           const payload = { orderId: order.orderId, orderNumber: order.orderNumber, tableId: order.tableId, tableNumber: order.tableNumber, newStatus: order.status, order };
           broadcastEvent('ORDER_STATUS_CHANGED', payload);
           if (order.source === 'DINE_IN_QR' && order.status === 'READY') broadcastEvent('TABLE_ORDER_READY', payload);
         }
-      }, generation)).catch(() => {}),
+      }, generation)).catch(err => {
+        if (err?.status === 429) rateLimitBackoffUntil = Date.now() + 20000;
+      }),
       api.getTables().then(tables => diffRecords('tables', tables, 'tableId', null, (table, old) => {
         if (table.status !== old.status || table.currentCustomerName !== old.currentCustomerName) {
           broadcastEvent('TABLE_STATUS_UPDATED', { tableId: table.tableId, tableNumber: table.tableNumber, status: table.status, customerName: table.currentCustomerName, table });
         }
-      }, generation)).catch(() => {})
-    ];
+      }, generation)).catch(err => {
+        if (err?.status === 429) rateLimitBackoffUntil = Date.now() + 20000;
+      })
+    );
     if (['SUPER_ADMIN', 'RECEPTIONIST', 'WAITER'].includes(jwtRole()) || (!isStaff() && stored(HELP_KEY).length)) jobs.push(api.getHelpRequests().then(requests => diffRecords('help', requests, 'requestId', help => broadcastEvent('CUSTOMER_HELP_REQUEST', help), (help, old) => {
       if (help.status !== old.status) broadcastEvent(help.status === 'ASSIGNED' ? 'WAITER_HELP_ACCEPTED' : 'HELP_REQUEST_RESOLVED', { ...help, waiterName: help.assignedWaiterName });
     }, generation)).catch(() => {}));
@@ -225,7 +243,7 @@ export function subscribeRealtimeEvents(callback) {
   listeners.add(callback);
   if (!pollTimer) {
     pollUpdates();
-    pollTimer = setInterval(pollUpdates, 3000);
+    pollTimer = setInterval(pollUpdates, 4000);
   }
   return () => {
     listeners.delete(callback);
@@ -245,9 +263,18 @@ export const api = {
   updateProfile: body => request('/auth/profile', { method: 'PATCH', body }),
   register: ({ name, email, phone, password }) => request('/auth/register', { method: 'POST', body: { name, email, phone, password, restaurantId, role: 'CUSTOMER' } }),
 
-  getRestaurant: async () => {
-    const data = await request(`/restaurants/${restaurantId}`);
-    restaurantId = data.restaurantId;
+  getRestaurant: async (targetId) => {
+    let reqId = targetId || restaurantId;
+    if (typeof reqId === 'string') {
+      const match = reqId.match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);
+      if (match) reqId = match[0];
+      else if (!/^[0-9a-fA-F-]{36}$/.test(reqId)) reqId = DEFAULT_RESTAURANT_ID;
+    }
+    const data = await request(`/restaurants/${reqId}`).catch(async () => {
+      return await request(`/restaurants/${DEFAULT_RESTAURANT_ID}`).catch(() => null);
+    });
+    if (!data) return null;
+    if (data?.restaurantId) restaurantId = data.restaurantId;
     restaurantCache = {
       ...data,
       logo: data.logo || '/favicon.svg',
@@ -256,17 +283,44 @@ export const api = {
     };
     return restaurantCache;
   },
-  getTables: () => request(`/tables${query({ restaurantId })}`),
-  getTableById: async tableId => {
-    if (/^\d+$/.test(String(tableId))) return (await api.getTables()).find(table => table.tableNumber === Number(tableId)) || null;
-    return request(`/tables/${encodeURIComponent(tableId)}`);
+  getTables: (targetRestaurantId) => request(`/tables${query({ restaurantId: targetRestaurantId || restaurantId })}`),
+  getTableById: async (tableId, targetRestaurantId) => {
+    if (!tableId) return null;
+    const resId = targetRestaurantId || restaurantId;
+    if (/^\d+$/.test(String(tableId))) {
+      try {
+        const tables = await api.getTables(resId);
+        const found = tables.find(t => t.tableNumber === Number(tableId) || String(t.tableId).toLowerCase() === String(tableId).toLowerCase());
+        if (found) return found;
+      } catch {}
+    }
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(tableId))) {
+      try {
+        const table = await request(`/tables/${encodeURIComponent(tableId)}`);
+        if (table) return table;
+      } catch {}
+    }
+    try {
+      const tables = await api.getTables(resId);
+      return tables.find(t =>
+        String(t.tableId).toLowerCase() === String(tableId).toLowerCase() ||
+        String(t.tableNumber) === String(tableId) ||
+        String(t.qrIdentifier).toLowerCase() === String(tableId).toLowerCase()
+      ) || null;
+    } catch {
+      return null;
+    }
   },
   getTableSession: async tableId => {
-    const data = await request(`/tables/${encodeURIComponent(tableId)}/session`);
-    if (data && Array.isArray(data.orders)) {
-      data.orders = data.orders.map(normalizeOrder);
+    try {
+      const data = await request(`/tables/${encodeURIComponent(tableId)}/session`);
+      if (data && Array.isArray(data.orders)) {
+        data.orders = data.orders.map(normalizeOrder);
+      }
+      return data;
+    } catch {
+      return null;
     }
-    return data;
   },
   getTableOrders: async tableId => {
     try {
@@ -295,9 +349,19 @@ export const api = {
     addOns: parseJson(item.addOnsJson ?? item.addOns, []),
     customizationOptions: parseJson(item.customizationOptionsJson ?? item.customizationOptions, []),
     allergens: parseJson(item.allergensJson ?? item.allergens, []),
-    ingredients: item.ingredients || '',
+    ingredients: (() => {
+      const raw = item.ingredients || '';
+      if (Array.isArray(raw)) return raw.join(', ');
+      if (typeof raw === 'string' && raw.trim().startsWith('[') && raw.trim().endsWith(']')) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) return parsed.join(', ');
+        } catch {}
+      }
+      return raw;
+    })(),
     portions: parseJson(item.portionsJson ?? item.portions, []),
-    dietaryTags: parseJson(item.dietaryTagsJson ?? item.dietaryTags, []),
+    dietaryTags: parseJson(item.dietaryTagsJson ?? item.dietaryTags, []).filter(t => !/^(vegetarian|non-vegetarian|veg|non-veg)$/i.test(String(t).trim())),
     isSpecial: Boolean(item.isSpecial),
     prepTimeMinutes: Number(item.prepTimeMinutes || 15)
   })),
@@ -366,16 +430,37 @@ export const api = {
         deliveryAddressJson: details.deliveryAddress ? JSON.stringify({ ...details.deliveryAddress, customerName: details.customerName, customerPhone: details.customerPhone }) : null,
         takeawayPickupTime: details.takeawayPickupTime ? new Date(details.takeawayPickupTime).toISOString() : null,
         idempotencyKey,
-        items: items.map(item => ({
-          menuItemId: item.menuItemId,
-          quantity: Number(item.quantity),
-          customizationJson: JSON.stringify({
-            ...(item.customization || {}),
-            ...(item.portion ? { portion: item.portion } : {}),
-            ...(item.addOns?.length ? { addOns: item.addOns.map(addOn => addOn.name) } : {})
-          }),
-          specialInstruction: item.specialInstruction || ''
-        }))
+        items: items.map(item => {
+          // Send only valid option choices (e.g. Crust, Bun, Style) and addOns in customizationJson
+          // Portion must NOT be included as a top-level customization key to avoid backend option validator failure
+          const validCustomization = {};
+          if (item.customization && typeof item.customization === 'object') {
+            for (const [key, val] of Object.entries(item.customization)) {
+              if (key !== 'portion' && key !== 'addOns' && typeof val === 'string' && val.trim()) {
+                validCustomization[key] = val.trim();
+              }
+            }
+          }
+          if (Array.isArray(item.addOns) && item.addOns.length) {
+            validCustomization.addOns = item.addOns.map(addOn => addOn?.name || addOn);
+          }
+
+          const notes = [];
+          if (item.portion?.name) {
+            notes.push(`Portion: ${item.portion.name}`);
+          }
+          if (item.specialInstruction && item.specialInstruction.trim()) {
+            notes.push(item.specialInstruction.trim());
+          }
+
+          return {
+            menuItemId: item.menuItemId,
+            quantity: Number(item.quantity),
+            customizationJson: JSON.stringify(validCustomization),
+            specialInstruction: notes.join(' | '),
+            course: item.course || 'MAIN'
+          };
+        })
       }
     });
     } catch (error) {
@@ -472,5 +557,20 @@ export const api = {
   earnLoyaltyPoints: body => request('/loyalty/earn', { method: 'POST', body: { restaurantId, ...body } }),
   redeemLoyaltyPoints: body => request('/loyalty/redeem', { method: 'POST', body: { restaurantId, ...body } }),
   submitFeedback: body => request('/feedback', { method: 'POST', body: { restaurantId, ...body } }),
-  getFeedbacks: () => request(`/feedback${query({ restaurantId })}`)
+  getFeedbacks: () => request(`/feedback${query({ restaurantId })}`),
+  verifyPayment: details => request('/payments/verify', { method: 'POST', body: details }),
+  calculateSplit: details => request('/payments/calculate-split', { method: 'POST', body: { restaurantId, ...details } }),
+  confirmCashPayment: (paymentId, staffUserId) => request(`/payments/${paymentId}/confirm-cash`, { method: 'POST', body: { staffUserId } }),
+  updateOrderItemStatus: (orderItemId, status) => request(`/orders/items/${orderItemId}/status`, { method: 'PATCH', body: { status } }),
+  emailReceipt: (orderId, email) => request(`/orders/${orderId}/email-receipt`, { method: 'POST', body: { email } }),
+  getTimeBudgetMenu: (customRestId, minutes = 25) => request(`/menu/time-budget${query({ restaurantId: customRestId || restaurantId, minutes })}`),
+  getPortionsRemaining: (customRestId) => request(`/menu/portions-remaining${query({ restaurantId: customRestId || restaurantId })}`),
+  planEvent: (reservationId, plan) => request(`/reservations/${reservationId}/event-plan`, { method: 'POST', body: plan }),
+  getKitchenPrepSheet: (reservationId) => request(`/reservations/${reservationId}/prep-sheet`),
+  getWaitlist: (customRestId) => request(`/waitlist${query({ restaurantId: customRestId || restaurantId })}`),
+  addWalkIn: details => request('/waitlist', { method: 'POST', body: { restaurantId: details.restaurantId || restaurantId, ...details } }),
+  notifyWaitlistGuest: waitlistId => request(`/waitlist/${waitlistId}/notify`, { method: 'POST' }),
+  seatWaitlistGuest: (waitlistId, tableId) => request(`/waitlist/${waitlistId}/seat${query({ tableId })}`, { method: 'POST' }),
+  cancelWaitlistGuest: waitlistId => request(`/waitlist/${waitlistId}/cancel`, { method: 'POST' }),
+  getWaitEstimate: (customRestId, partySize = 2) => request(`/waitlist/estimate${query({ restaurantId: customRestId || restaurantId, partySize })}`)
 };

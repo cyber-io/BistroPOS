@@ -1406,7 +1406,9 @@ export default function PosWorkspace() {
                         <p>{i.description}</p>
                         <footer>
                           <span>{time(i.createdAt)} · {i.orderNumber || i.orderId?.slice(0, 8)}</span>
-                          <button className="pos-button small" onClick={() => { setSelected(i); setDialog('resolve-issue'); }}>Resolve issue</button>
+                          {currentUser?.role !== 'RECEPTIONIST' && (
+                            <button className="pos-button small" onClick={() => { setSelected(i); setDialog('resolve-issue'); }}>Resolve issue</button>
+                          )}
                         </footer>
                       </article>
                     ))}
@@ -1807,7 +1809,7 @@ function PaymentDialog({ order, restaurant, onClose, onPaid }) {
   const [key, setKey] = useState(() => uniqueKey());
 
   const upiId = 'bistroandbloom@okaxis';
-  const billRef = order?.sessionId || order?.orderNumber || (order?.tableNumber ? `Table A${order.tableNumber}` : 'Order');
+  const billRef = order?.sessionId || order?.orderNumber || (order?.tableNumber ? `Table ${order.tableNumber}` : 'Order');
   const upiUri = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(restaurant?.name || 'Bistro & Bloom')}&am=${due.toFixed(2)}&cu=INR&tn=${encodeURIComponent(`Bill ${billRef}`)}`;
 
   useEffect(() => {
@@ -2215,7 +2217,7 @@ function TableDialog({ restaurant, table, orders, reservations, onClose, busy, r
                   gap: 4,
                   whiteSpace: 'nowrap'
                 }}
-                href={qrUrl}
+                href={`/qr/${table.restaurantId || restaurant?.restaurantId || 'a0000000-0000-0000-0000-000000000001'}/${table.tableId}`}
                 target="_blank"
                 rel="noreferrer"
               >

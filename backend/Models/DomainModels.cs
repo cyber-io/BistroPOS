@@ -301,6 +301,9 @@ public class MenuItem
     public string DietaryTags { get; set; } = "[]"; // e.g. ["Vegan","Gluten-Free"]
     public bool IsSpecial { get; set; } = false;
     public int PrepTimeMinutes { get; set; } = 15;
+    [MaxLength(50)]
+    public string KitchenStation { get; set; } = "MAIN"; // MAIN, GRILL, BEVERAGES, DESSERTS
+    public string Recipe { get; set; } = "[]"; // e.g. [{"itemId":"...","name":"Paneer","quantity":0.15,"unit":"kg"}]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
@@ -316,12 +319,14 @@ public class DiningSession
     public Guid TableId { get; set; }
     [ForeignKey(nameof(TableId))]
     public TableEntity? Table { get; set; }
-    [Required, MaxLength(50)]
+    [NotMapped]
     public string SessionCode { get; set; } = string.Empty;
     [Required, MaxLength(50)]
     public string Status { get; set; } = "ACTIVE"; // ACTIVE, CLOSED
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? ClosedAt { get; set; }
+    [NotMapped]
+    public DateTime? ExpiresAt { get; set; }
 }
 
 [Table("orders")]
@@ -398,6 +403,13 @@ public class OrderItem
     public string? SpecialInstruction { get; set; }
     [Column(TypeName = "numeric(10,2)")]
     public decimal LineTotal { get; set; }
+    [MaxLength(50)]
+    public string Course { get; set; } = "MAIN"; // STARTER, MAIN, DESSERT, BEVERAGE
+    [MaxLength(50)]
+    public string Station { get; set; } = "MAIN"; // MAIN, GRILL, BEVERAGES, DESSERTS
+    [MaxLength(50)]
+    public string PreparationStatus { get; set; } = "PENDING"; // PENDING, PREPARING, READY
+    public DateTime? PreparedAt { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
@@ -427,6 +439,16 @@ public class Reservation
     public string Status { get; set; } = ReservationStatuses.Pending;
     public int GracePeriodMinutes { get; set; } = 10;
     public string? SpecialRequest { get; set; }
+    public int? ConfirmedHeadcount { get; set; }
+    public string EventMealChoices { get; set; } = "{}";
+    public string? DietaryRequests { get; set; }
+    [Column(TypeName = "numeric(10,2)")]
+    public decimal DepositAmount { get; set; } = 0;
+    [Column(TypeName = "numeric(10,2)")]
+    public decimal DepositPaid { get; set; } = 0;
+    [Column(TypeName = "numeric(10,2)")]
+    public decimal EstimatedTotalCost { get; set; } = 0;
+    public string? PrepSheetNotes { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
@@ -638,3 +660,50 @@ public class CustomerFeedback
     public bool GoogleReviewClicked { get; set; } = false;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
+
+[Table("walk_in_waitlist")]
+public class WalkInWaitlist
+{
+    [Key]
+    public Guid WaitlistId { get; set; } = Guid.NewGuid();
+    [Required]
+    public Guid RestaurantId { get; set; }
+    [ForeignKey(nameof(RestaurantId))]
+    public Restaurant? Restaurant { get; set; }
+    [Required, MaxLength(150)]
+    public string CustomerName { get; set; } = string.Empty;
+    [Required, MaxLength(30)]
+    public string CustomerPhone { get; set; } = string.Empty;
+    public int PartySize { get; set; } = 2;
+    [Required, MaxLength(50)]
+    public string Status { get; set; } = "WAITING"; // WAITING, NOTIFIED, SEATED, CANCELLED
+    public int EstimatedWaitMinutes { get; set; } = 15;
+    public DateTime? EstimatedReadyAt { get; set; }
+    public DateTime? NotifiedAt { get; set; }
+    public Guid? SeatedTableId { get; set; }
+    [ForeignKey(nameof(SeatedTableId))]
+    public TableEntity? SeatedTable { get; set; }
+    public string? Notes { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+[Table("receipt_deliveries")]
+public class ReceiptDelivery
+{
+    [Key]
+    public Guid DeliveryId { get; set; } = Guid.NewGuid();
+    [Required]
+    public Guid OrderId { get; set; }
+    [ForeignKey(nameof(OrderId))]
+    public Order? Order { get; set; }
+    [Required, MaxLength(255)]
+    public string Email { get; set; } = string.Empty;
+    [Required, MaxLength(50)]
+    public string Status { get; set; } = "DELIVERED"; // PENDING, DELIVERED, FAILED
+    public string? ErrorMessage { get; set; }
+    public int Attempts { get; set; } = 1;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? DeliveredAt { get; set; }
+}
+

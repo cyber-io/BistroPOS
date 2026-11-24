@@ -21,6 +21,9 @@ public interface IOrderService
     Task<(bool Success, string Message)> CancelOrderAsync(Guid orderId, Guid? userId, string userRole, string? reason);
     Task<bool> DeleteOrderAsync(string idOrNumber);
     Task<bool> ConfirmCustomerOrderReceiptAsync(Guid orderId, bool confirmed);
+    Task<bool> UpdateOrderItemStatusAsync(Guid orderItemId, string status);
+    Task<List<TimeBudgetMenuDto>> GetTimeBudgetMenuAsync(Guid restaurantId, int maxMinutes);
+    Task<List<PortionAvailabilityDto>> GetPortionsRemainingAsync(Guid restaurantId);
 }
 
 public interface IReservationService
@@ -30,6 +33,8 @@ public interface IReservationService
     Task<List<ReservationDto>> GetReservationsAsync(Guid restaurantId, DateOnly? date, string? status);
     Task<bool> UpdateReservationStatusAsync(Guid reservationId, string newStatus, Guid? assignedTableId);
     Task<bool> RescheduleReservationAsync(Guid reservationId, RescheduleReservationRequest request);
+    Task<ReservationDto> PlanEventAsync(Guid reservationId, EventPlanDto dto);
+    Task<KitchenPrepSheetDto> GetKitchenPrepSheetAsync(Guid reservationId);
 }
 
 public interface ITableService
@@ -65,6 +70,23 @@ public interface IPaymentService
     Task<PaymentDto> RecordPaymentAsync(InitiatePaymentRequest request);
     Task<bool> VerifyPaymentAsync(VerifyPaymentRequest request);
     Task<bool> ProcessWebhookAsync(WebhookPayloadDto payload);
+    Task<SplitCalculationDto> CalculateSplitAsync(CalculateSplitRequest request);
+    Task<bool> ConfirmCashPaymentAsync(Guid paymentId, Guid? staffUserId);
+}
+
+public interface IEmailReceiptService
+{
+    Task<(bool Success, string Message)> SendReceiptEmailAsync(Guid orderId, string email);
+}
+
+public interface IWaitlistService
+{
+    Task<List<WalkInWaitlistDto>> GetWaitlistAsync(Guid restaurantId);
+    Task<WalkInWaitlistDto> AddWalkInAsync(AddWalkInDto dto);
+    Task<bool> NotifyGuestAsync(Guid waitlistId);
+    Task<bool> SeatGuestAsync(Guid waitlistId, Guid tableId);
+    Task<bool> CancelWaitlistEntryAsync(Guid waitlistId);
+    Task<WaitEstimateDto> GetWaitEstimateAsync(Guid restaurantId, int partySize);
 }
 
 public interface INotificationService

@@ -115,8 +115,8 @@ public class MemoryRateLimitingMiddleware
 {
     private readonly RequestDelegate _next;
     private static readonly ConcurrentDictionary<string, (int Count, DateTime WindowStart)> RequestCounters = new();
-    private const int MaxRequestsPerMinute = 120;
-    private const int MaxAuthRequestsPerMinute = 20;
+    private const int MaxRequestsPerMinute = 1200;
+    private const int MaxAuthRequestsPerMinute = 60;
 
     public MemoryRateLimitingMiddleware(RequestDelegate next)
     {
@@ -125,10 +125,30 @@ public class MemoryRateLimitingMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
-        var ip = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
         var path = context.Request.Path.Value?.ToLowerInvariant() ?? "";
-        var key = $"{ip}:{path}";
 
+        // Determine client IP, accounting for reverse proxies (like Vite dev server)
+        string ip = "unknown";
+        if (context.Request.Headers.TryGetValue("X-Forwarded-For", out var forwardedFor) && !string.IsNullOrWhiteSpace(forwardedFor))
+        {
+            ip = forwardedFor.ToString().Split(',')[0].Trim();
+        }
+        else
+        {
+            ip = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        }
+
+        // Exclude loopback/internal dev proxy or health checks from aggressive rate limiting
+        var isLoopback = ip == "127.0.0.1" || ip == "::1" || ip == "localhost";
+        var isReadPollingEndpoint = path.Contains("/api/menu/items") || path.Contains("/api/tables") || path.Contains("/api/health");
+
+        if (isLoopback && isReadPollingEndpoint)
+        {
+            await _next(context);
+            return;
+        }
+
+        var key = $"{ip}:{path}";
         var limit = path.Contains("/api/auth") ? MaxAuthRequestsPerMinute : MaxRequestsPerMinute;
         var now = DateTime.UtcNow;
 
@@ -148,7 +168,7 @@ public class MemoryRateLimitingMiddleware
         if (entry.Count > limit)
         {
             context.Response.StatusCode = (int)HttpStatusCode.TooManyRequests;
-            context.Response.Headers.RetryAfter = "60";
+            context.Response.Headers.RetryAfter = "30";
             await context.Response.WriteAsJsonAsync(new ProblemDetails
             {
                 Status = 429,

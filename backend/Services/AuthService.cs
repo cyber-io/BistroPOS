@@ -136,6 +136,9 @@ public class AuthService(RestaurantDbContext db, IOptions<JwtOptions> jwt, IOpti
 
     public async Task<AuthResponse> DemoLoginAsync(string role)
     {
+        if (!environment.IsDevelopment() && environment.EnvironmentName != "Demo")
+            return new(false, "", null, "Demo sign-in is disabled outside isolated development and demo environments.");
+
         if (role is not (UserRoles.SuperAdmin or UserRoles.Receptionist or UserRoles.Kitchen or UserRoles.Waiter or UserRoles.Customer))
             return new(false, "", null, "Unknown demo role.");
         var user = await db.Users.FirstOrDefaultAsync(u => u.Role == role);

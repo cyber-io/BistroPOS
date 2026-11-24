@@ -27,6 +27,36 @@ export default function ItemCustomizationModal({ isOpen, onClose, item, onAddToC
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [isOpen, onClose]);
+
+  const formattedIngredients = React.useMemo(() => {
+    if (!item?.ingredients) return '';
+    if (Array.isArray(item.ingredients)) return item.ingredients.join(', ');
+    if (typeof item.ingredients === 'string') {
+      const trimmed = item.ingredients.trim();
+      if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (Array.isArray(parsed)) return parsed.join(', ');
+        } catch {}
+      }
+      return item.ingredients;
+    }
+    return String(item.ingredients);
+  }, [item?.ingredients]);
+
+  const formattedAllergens = React.useMemo(() => {
+    if (!item?.allergens) return [];
+    if (Array.isArray(item.allergens)) return item.allergens;
+    if (typeof item.allergens === 'string') {
+      try {
+        const parsed = JSON.parse(item.allergens);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {}
+      return [item.allergens];
+    }
+    return [];
+  }, [item?.allergens]);
+
   if (!isOpen || !item) return null;
 
   const toggleAddOn = (addon) => {
@@ -92,16 +122,6 @@ export default function ItemCustomizationModal({ isOpen, onClose, item, onAddToC
                   <Candy className="w-3 h-3 mr-0.5" /> Sweet
                 </span>
               )}
-              {item.spiceLevel && item.spiceLevel !== 'NONE' && (
-                <span className="inline-flex items-center text-[10px] bg-red-500/80 px-1.5 py-0.5 rounded text-white font-bold">
-                  <Flame className="w-3 h-3 mr-0.5" /> {item.spiceLevel}
-                </span>
-              )}
-              {(item.dietaryTags || []).map((tag, i) => (
-                <span key={i} className="inline-flex items-center text-[10px] bg-emerald-600/90 px-1.5 py-0.5 rounded text-white font-semibold">
-                  {tag}
-                </span>
-              ))}
             </div>
             <h3 className="text-lg font-black leading-snug">{item.name}</h3>
             <p className="text-xs text-slate-300 line-clamp-1">{item.description}</p>
@@ -111,22 +131,25 @@ export default function ItemCustomizationModal({ isOpen, onClose, item, onAddToC
         {/* Scrollable Customization Content */}
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
           {/* Ingredients & Allergens Information */}
-          {(item.ingredients || (item.allergens && item.allergens.length > 0)) && (
-            <div className="p-3 bg-amber-50/70 rounded-xl border border-amber-200/80 space-y-1.5 text-xs">
-              {item.ingredients && (
-                <div className="text-slate-700">
-                  <strong className="text-slate-900 font-semibold">Ingredients: </strong>
-                  <span>{item.ingredients}</span>
+          {(formattedIngredients || formattedAllergens.length > 0) && (
+            <div className="p-3.5 bg-amber-50 rounded-2xl border border-amber-300 shadow-xs space-y-2.5 text-xs text-slate-900">
+              {formattedIngredients && (
+                <div className="flex items-start gap-2 leading-relaxed">
+                  <span className="font-extrabold text-amber-950 uppercase text-[11px] tracking-wide shrink-0">Ingredients:</span>
+                  <span className="font-bold text-slate-900 text-xs">{formattedIngredients}</span>
                 </div>
               )}
-              {item.allergens && item.allergens.length > 0 && (
-                <div className="flex items-start gap-1.5 text-amber-950">
-                  <span className="font-bold shrink-0 text-amber-800 flex items-center gap-1">
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600" /> Allergens:
+              {formattedAllergens.length > 0 && (
+                <div className="flex items-center gap-2 pt-1 border-t border-amber-200">
+                  <span className="font-extrabold text-amber-950 uppercase text-[11px] tracking-wide shrink-0 flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-700 shrink-0" /> Allergens:
                   </span>
-                  <div className="flex flex-wrap gap-1">
-                    {item.allergens.map((alg, i) => (
-                      <span key={i} className="inline-block px-1.5 py-0.5 rounded bg-amber-200/80 font-bold text-[10px] text-amber-950">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {formattedAllergens.map((alg, i) => (
+                      <span
+                        key={i}
+                        className="inline-block px-2.5 py-0.5 rounded-lg bg-amber-200 border border-amber-400 font-black text-[11px] text-amber-950 shadow-2xs"
+                      >
                         {alg}
                       </span>
                     ))}

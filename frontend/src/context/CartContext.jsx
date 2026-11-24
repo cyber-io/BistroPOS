@@ -59,10 +59,15 @@ export function CartProvider({ children }) {
     setItems(previous => {
       const existing = previous.find(item=>item.itemKey === itemKey);
       if (existing) return previous.map(item=>item.itemKey === itemKey ? { ...item, quantity:Math.min(99,item.quantity + count), lineTotal:Math.min(99,item.quantity + count)*price } : item);
-      return [...previous, { itemKey, menuItemId:menuItem.menuItemId, name:menuItem.name + (portion ? ` (${portion.name || portion.label})` : ''), image:menuItem.image, vegNonveg:menuItem.vegNonveg, basePrice:effectiveBasePrice, price, quantity:count, customization, portion, addOns, specialInstruction, lineTotal:count*price }];
+      const cat = (menuItem.categoryName || '').toLowerCase();
+      let defaultCourse = 'MAIN';
+      if (/starter|appetizer|soup|salad|chaat/i.test(cat) || /tikka|kebab|fries|nachos/i.test(menuItem.name)) defaultCourse = 'STARTERS';
+      else if (/dessert|ice cream|sweet/i.test(cat) || /brownie|jamun|halwa|kulfi/i.test(menuItem.name)) defaultCourse = 'DESSERTS';
+      return [...previous, { itemKey, menuItemId:menuItem.menuItemId, name:menuItem.name + (portion ? ` (${portion.name || portion.label})` : ''), image:menuItem.image, vegNonveg:menuItem.vegNonveg, basePrice:effectiveBasePrice, price, quantity:count, customization, portion, addOns, specialInstruction, course: defaultCourse, lineTotal:count*price }];
     });
   }, []);
   const updateQuantity = useCallback((itemKey, delta) => setItems(previous=>previous.map(item=>item.itemKey === itemKey ? { ...item, quantity:Math.min(99,item.quantity+delta), lineTotal:Math.min(99,item.quantity+delta)*item.price } : item).filter(item=>item.quantity>0)), []);
+  const updateItemCourse = useCallback((itemKey, course) => setItems(previous => previous.map(item => item.itemKey === itemKey ? { ...item, course } : item)), []);
   const removeItem = useCallback(itemKey => setItems(previous=>previous.filter(item=>item.itemKey!==itemKey)), []);
   const clearCart = useCallback(() => setItems([]), []);
   const subtotal = items.reduce((sum,item)=>sum+item.lineTotal,0);
@@ -70,7 +75,7 @@ export function CartProvider({ children }) {
   const deliveryFee = orderSource==='DELIVERY' && items.length ? 40 : 0;
   const total = subtotal + tax + deliveryFee;
   const itemCount = items.reduce((sum,item)=>sum+item.quantity,0);
-  return <CartContext.Provider value={{ items, itemCount, subtotal, tax, deliveryFee, total, tableInfo, setTableInfo, orderSource, setOrderSource, switchOrderContext, addItem, updateQuantity, removeItem, clearCart }}>{children}</CartContext.Provider>;
+  return <CartContext.Provider value={{ items, itemCount, subtotal, tax, deliveryFee, total, tableInfo, setTableInfo, orderSource, setOrderSource, switchOrderContext, addItem, updateQuantity, updateItemCourse, removeItem, clearCart }}>{children}</CartContext.Provider>;
 }
 export function useCart() {
   const context = useContext(CartContext);

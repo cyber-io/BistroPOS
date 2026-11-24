@@ -14,20 +14,19 @@ export function tableLabel(table) {
   if (!table) return 'Table';
   if (table.displayName) return table.displayName;
   if (table.tableDisplayName) return table.tableDisplayName;
-  const family = String(table.qrIdentifier || '').match(/_FAMILY_(C[1-4])$/)
-    || String(table.tableId || '').match(/^c1000000-0000-0000-0000-00000000000([1-4])$/);
-  if (family) return family[1].startsWith('C') ? family[1] : `C${family[1]}`;
-  if (String(table.qrIdentifier || '').endsWith('_PARTY_HALL') || table.tableId === 'c2000000-0000-0000-0000-000000000001') return 'Party hall';
-  if (table.restaurantId === defaultRestaurantId) {
-    if (Number(table.tableNumber) >= 101 && Number(table.tableNumber) <= 104) return `C${Number(table.tableNumber) - 100}`;
-    if (Number(table.tableNumber) === 201) return 'Party hall';
+  if (String(table.qrIdentifier || '').endsWith('_PARTY_HALL') || table.tableId === 'c2000000-0000-0000-0000-000000000001' || Number(table.tableNumber) === 201) {
+    return 'Party Hall';
   }
-  return table.tableNumber ? `A${table.tableNumber}` : 'Table';
+  const num = Number(table.tableNumber);
+  if (!isNaN(num) && num > 0) {
+    return String(num);
+  }
+  return 'Table';
 }
 
 export function tableTitle(table) {
   const name = tableLabel(table);
-  return name === 'Party hall' || name === 'Table' ? name : `Table ${name}`;
+  return name === 'Party Hall' || name === 'Party hall' || name === 'Table' ? name : `Table ${name}`;
 }
 
 export function getPublicOrigin(restaurant) {

@@ -45,7 +45,8 @@ public record CreateOrderItemRequest(
     Guid MenuItemId,
     int Quantity,
     string? CustomizationJson,
-    string? SpecialInstruction
+    string? SpecialInstruction,
+    string? Course = "MAIN"
 );
 
 public record CreateOrderRequest(
@@ -71,7 +72,10 @@ public record OrderItemDto(
     int Quantity,
     decimal LineTotal,
     string? CustomizationJson,
-    string? SpecialInstruction
+    string? SpecialInstruction,
+    string Course = "MAIN",
+    string Station = "MAIN",
+    string PreparationStatus = "PENDING"
 );
 
 public record OrderDto(
@@ -463,3 +467,146 @@ public record UpdateRestaurantWifiDto(
     bool? WifiEnabled,
     string? GoogleReviewUrl
 );
+
+// --- PHASE 1 & 2 EXTENDED DTOS ---
+
+public record CalculateSplitRequest(
+    Guid RestaurantId,
+    Guid? OrderId,
+    Guid? TableId,
+    int SplitCount = 1,
+    string SplitType = "EQUAL",
+    decimal TipAmount = 0,
+    int TipPercent = 0,
+    decimal LoyaltyDiscount = 0,
+    List<ItemizedShareRequest>? ItemShares = null
+);
+
+public record ItemizedShareRequest(
+    Guid OrderItemId,
+    int DinerIndex,
+    int Quantity = 1
+);
+
+public record SplitCalculationDto(
+    Guid? OrderId,
+    Guid? TableId,
+    decimal Subtotal,
+    decimal Tax,
+    decimal TipAmount,
+    decimal LoyaltyDiscount,
+    decimal TotalBill,
+    decimal TotalPaid,
+    decimal RemainingBalance,
+    int SplitCount,
+    string SplitType,
+    List<DinerShareDto> Shares
+);
+
+public record DinerShareDto(
+    int DinerIndex,
+    string DinerLabel,
+    decimal Amount,
+    string PaymentStatus,
+    Guid? PaymentId
+);
+
+public record ConfirmCashPaymentRequest(
+    Guid? StaffUserId
+);
+
+public record EmailReceiptRequest(
+    [Required, EmailAddress] string Email
+);
+
+public record UpdateOrderItemStatusRequest(
+    [Required] string Status
+);
+
+public record PortionAvailabilityDto(
+    Guid MenuItemId,
+    string Name,
+    int PortionsRemaining,
+    bool IsAvailable,
+    string Status
+);
+
+public record TimeBudgetMenuDto(
+    Guid MenuItemId,
+    string Name,
+    string? Description,
+    decimal Price,
+    string CategoryName,
+    int PrepTimeMinutes,
+    int EstimatedTotalPrepMinutes,
+    int EstimatedMinMinutes,
+    int EstimatedMaxMinutes,
+    string KitchenStation,
+    string? Image,
+    string? VegNonVeg
+);
+
+public record EventPlanDto(
+    int ConfirmedHeadcount,
+    List<string>? MealChoices,
+    string? DietaryRequests,
+    decimal DepositAmount,
+    decimal DepositPaid,
+    decimal EstimatedTotalCost,
+    string? PrepSheetNotes
+);
+
+public record KitchenPrepSheetDto(
+    Guid ReservationId,
+    string BookingId,
+    string CustomerName,
+    int Headcount,
+    DateOnly ReservationDate,
+    TimeOnly ReservationTime,
+    decimal DepositPaid,
+    decimal OutstandingBalance,
+    string? DietaryRequests,
+    List<PrepTaskDto> Timeline
+);
+
+public record PrepTaskDto(
+    string TimeOffset,
+    string Course,
+    string Description,
+    string Station,
+    string Status
+);
+
+public record WalkInWaitlistDto(
+    Guid WaitlistId,
+    Guid RestaurantId,
+    string CustomerName,
+    string CustomerPhone,
+    int PartySize,
+    string Status,
+    int EstimatedWaitMinutes,
+    DateTime? EstimatedReadyAt,
+    DateTime? NotifiedAt,
+    Guid? SeatedTableId,
+    int? SeatedTableNumber,
+    string? Notes,
+    DateTime CreatedAt
+);
+
+public record AddWalkInDto(
+    Guid RestaurantId,
+    [Required] string CustomerName,
+    [Required] string CustomerPhone,
+    int PartySize = 2,
+    string? Notes = null
+);
+
+public record WaitEstimateDto(
+    int PartySize,
+    int EstimatedWaitMinutesMin,
+    int EstimatedWaitMinutesMax,
+    int WaitingPartiesCount,
+    int SuitableTablesCount,
+    string Message
+);
+
