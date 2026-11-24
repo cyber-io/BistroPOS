@@ -4,7 +4,7 @@ import { tableTitle } from '../../services/tablePresentation';
 import { useNotification } from '../../context/NotificationContext';
 import { soundEffects } from '../../services/soundEffects';
 import { Badge, Empty, Modal, Spinner, label, money, time } from '../../components/pos/PosUI';
-import { ChefHat, Clock, Bell, RefreshCw, Search, Check, Ban, AlertCircle, Package } from 'lucide-react';
+import { ChefHat, Clock, Bell, RefreshCw, Search, Check, Ban, AlertCircle } from 'lucide-react';
 
 const tabs = [
   ['NEW', 'New orders', ['NEW', 'ACCEPTED']],
@@ -13,15 +13,6 @@ const tabs = [
   ['SERVICE', 'In service', ['PENDING_CONFIRMATION', 'CONFIRMATION_TIMEOUT', 'OUT_FOR_DELIVERY']],
   ['DELIVERED', 'Completed', ['DELIVERED', 'PICKED_UP']], ['CANCELLED', 'Cancelled', ['CANCELLED']]
 ];
-function getItemStation(item) {
-  const name = (item.name || item.itemName || '').toLowerCase();
-  const cat = (item.categoryName || '').toLowerCase();
-  if (cat.includes('beverage') || /coffee|mojito|shake|tea|drink|juice|soda/i.test(name)) return 'BEVERAGES';
-  if (cat.includes('dessert') || /ice cream|brownie|jamun|cake|dessert/i.test(name)) return 'DESSERTS';
-  if (/grill|tikka|bbq|tandoor|roast|kebab/i.test(name)) return 'GRILL';
-  return 'MAIN';
-}
-
 export default function KitchenDashboard() {
   const { addToast } = useNotification();
   const [orders, setOrders] = useState([]);
@@ -80,45 +71,6 @@ export default function KitchenDashboard() {
   const [busy, setBusy] = useState(null);
   const [rejectOrder, setRejectOrder] = useState(null);
   const [reason, setReason] = useState('Ingredients out of stock');
-  const [stockModal, setStockModal] = useState(false);
-  const [stockItemType, setStockItemType] = useState('DISH');
-  const [selectedMenuItemId, setSelectedMenuItemId] = useState('');
-  const [customItemName, setCustomItemName] = useState('');
-  const [shortageReason, setShortageReason] = useState('Out of stock');
-  const [urgency, setUrgency] = useState('HIGH');
-  const [markSoldOut, setMarkSoldOut] = useState(true);
-  const [stockSubmitting, setStockSubmitting] = useState(false);
-
-  const handleReportShortage = async (e) => {
-    e.preventDefault();
-    if (stockSubmitting) return;
-
-    const itemName = stockItemType === 'DISH'
-      ? menu.find(m => m.menuItemId === selectedMenuItemId)?.name || 'Dish'
-      : customItemName.trim();
-
-    if (!itemName) return;
-
-    setStockSubmitting(true);
-    try {
-      if (stockItemType === 'DISH' && markSoldOut && selectedMenuItemId) {
-        const item = menu.find(m => m.menuItemId === selectedMenuItemId);
-        if (item && item.availability) {
-          await api.updateItemAvailability(item.menuItemId, false);
-          setMenu(previous => previous.map(entry => entry.menuItemId === item.menuItemId ? { ...entry, availability: false } : entry));
-        }
-      }
-
-      addToast(`Stock shortage reported: ${itemName} (${shortageReason}). Management alerted.`, 'warning');
-      setStockModal(false);
-      setSelectedMenuItemId('');
-      setCustomItemName('');
-    } catch (err) {
-      addToast(err.message || 'Failed to report stock shortage.', 'error');
-    } finally {
-      setStockSubmitting(false);
-    }
-  };
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
@@ -202,7 +154,26 @@ export default function KitchenDashboard() {
     (!term || [order.orderNumber, order.tableNumber ? `${tableTitle(order)} table ${order.tableNumber}` : '', order.customerName, ...order.items.map(item => item.name)].join(' ').toLowerCase().includes(term));
   const filtered = orders.filter(matches);
   const statuses = tabs.find(([key]) => key === tab)?.[2] || [];
-  const tickets = filtered.filter(order => statuses.includes(order.status));
+
+  const isDateFilterTab = tab === 'DELIVERED';
+  const tickets = filtered.filter(order => {
+    if (!statuses.includes(order.status)) return false;
+    if (isDateFilterTab && dateFilterMode === 'DATE') {
+      return getLocalDateString(order.createdAt) === selectedDate;
+    }
+    return true;
+  });
+
+  const getTabCount = (key, states) => {
+    return filtered.filter(order => {
+      if (!states.includes(order.status)) return false;
+      if (key === 'DELIVERED' && dateFilterMode === 'DATE') {
+        return getLocalDateString(order.createdAt) === selectedDate;
+      }
+      return true;
+    }).length;
+  };
+
   const visibleMenu = menu.filter(item => !term || `${item.name} ${item.categoryName}`.toLowerCase().includes(term));
   return <section>
     <div className="pos-heading">
@@ -221,34 +192,7 @@ export default function KitchenDashboard() {
     </div>
 
     <div className="pos-toolbar" style={{ gap: 12, marginBottom: 19 }}>
-      <div className="pos-segment" style={{ flexWrap: 'wrap' }}>
-        {tabs.map(([key, title, states]) => {
-          const count = filtered.filter(order => states.includes(order.status)).length;
-          return (
-            <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>
-              {title}
-              {count > 0 && <span className="pos-count" style={{ marginLeft: 7 }}>{count}</span>}
-            </button>
-          );
-        })}
-        {(() => {
-          const soldOutCount = menu.filter(item => !item.availability).length;
-          return (
-            <button className={tab === 'AVAILABILITY' ? 'active' : ''} onClick={() => setTab('AVAILABILITY')}>
-              Dish availability
-              {soldOutCount > 0 && <span className="pos-count" style={{ marginLeft: 7 }}>{soldOutCount}</span>}
-            </button>
-          );
-        })()}
-        <button className={tab === 'INVENTORY' ? 'active' : ''} onClick={() => setTab('INVENTORY')}>
-          Raw inventory
-          {inventory.filter(i => i.status !== 'IN_STOCK').length > 0 && (
-            <span className="pos-count" style={{ marginLeft: 7 }}>
-              {inventory.filter(i => i.status !== 'IN_STOCK').length}
-            </span>
-          )}
-        </button>
-      </div>
+      <div className="pos-segment" style={{ flexWrap: 'wrap' }}>{tabs.map(([key, title, states]) => { const count = filtered.filter(order => states.includes(order.status)).length; return <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{title}{count > 0 && <span className="pos-count" style={{ marginLeft: 7 }}>{count}</span>}</button>; })}<button className={tab === 'AVAILABILITY' ? 'active' : ''} onClick={() => setTab('AVAILABILITY')}>Dish availability</button></div>
       <div className="pos-toolbar-actions" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <div className="pos-search" style={{ minWidth: 260 }}>
           <Search size={15} />
@@ -291,137 +235,129 @@ export default function KitchenDashboard() {
         )}
       </div>
     </div>
-    {error && <div className="pos-info-box" role="alert" style={{ color: '#ce626a', marginBottom: 18 }}><AlertCircle size={16} /><span>{error}</span><button className="pos-button small" style={{ marginLeft: 'auto' }} onClick={() => load()}>Try again</button></div>}
-    {loading ? <Spinner /> : tab === 'INVENTORY' ? (
-      <div className="pos-panel">
-        <div className="pos-panel-header">
-          <div>
-            <h2>Raw Ingredient Inventory</h2>
-            <p style={{ color: 'var(--p-muted)', fontSize: 11 }}>Track and restock pantry supplies, produce, dairy, and spices.</p>
+
+    {tab === 'DELIVERED' && (
+      <div
+        className="pos-panel"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: 12,
+          padding: '10px 16px',
+          marginBottom: 19,
+          background: 'var(--p-card)',
+          borderRadius: 10,
+          border: '1px solid var(--p-border)'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 11, color: 'var(--p-muted)', letterSpacing: '0.4px' }}>
+            <Calendar size={15} style={{ color: 'var(--p-blue)' }} />
+            <span>COMPLETED DATE:</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <button className="pos-button small" onClick={() => setStockModal(true)}>
-              <Package size={13} /> Report Shortage
+
+          <div className="pos-segment" style={{ padding: 2, background: 'var(--p-elevated)', borderRadius: 8 }}>
+            <button
+              type="button"
+              className={dateFilterMode === 'DATE' && selectedDate === todayStr ? 'active' : ''}
+              style={{ padding: '5px 12px', fontSize: 11, borderRadius: 6 }}
+              onClick={() => { setSelectedDate(todayStr); setDateFilterMode('DATE'); }}
+            >
+              Today
             </button>
-            <span className="pos-count">{inventory.length} ingredients</span>
+            <button
+              type="button"
+              className={dateFilterMode === 'DATE' && selectedDate === yesterdayStr ? 'active' : ''}
+              style={{ padding: '5px 12px', fontSize: 11, borderRadius: 6 }}
+              onClick={() => { setSelectedDate(yesterdayStr); setDateFilterMode('DATE'); }}
+            >
+              Yesterday
+            </button>
+            <button
+              type="button"
+              className={dateFilterMode === 'ALL' ? 'active' : ''}
+              style={{ padding: '5px 12px', fontSize: 11, borderRadius: 6 }}
+              onClick={() => setDateFilterMode('ALL')}
+            >
+              All Dates
+            </button>
           </div>
+
+          {dateFilterMode === 'DATE' && (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'var(--p-elevated)', padding: '2px 6px', borderRadius: 8, border: '1px solid var(--p-border)' }}>
+              <button
+                type="button"
+                className="pos-icon-button"
+                style={{ width: 26, height: 26, border: 0, padding: 0, background: 'transparent' }}
+                title="Previous day"
+                onClick={() => setSelectedDate(prev => getShiftedDate(prev, -1))}
+              >
+                <ChevronLeft size={14} />
+              </button>
+
+              <label style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer', margin: 0, gap: 5, padding: '0 4px' }}>
+                <input
+                  type="date"
+                  aria-label="Filter completed orders by date"
+                  value={selectedDate}
+                  max={todayStr}
+                  onChange={e => {
+                    if (e.target.value) {
+                      setSelectedDate(e.target.value);
+                      setDateFilterMode('DATE');
+                    }
+                  }}
+                  style={{
+                    height: 26,
+                    fontSize: 11,
+                    padding: '2px 8px',
+                    border: '1px solid var(--p-border)',
+                    borderRadius: 6,
+                    background: 'var(--p-card)',
+                    color: 'var(--p-text)',
+                    fontWeight: 600,
+                    cursor: 'pointer'
+                  }}
+                />
+              </label>
+
+              <button
+                type="button"
+                className="pos-icon-button"
+                style={{ width: 26, height: 26, border: 0, padding: 0, background: 'transparent' }}
+                title="Next day"
+                disabled={selectedDate >= todayStr}
+                onClick={() => setSelectedDate(prev => getShiftedDate(prev, 1))}
+              >
+                <ChevronRight size={14} />
+              </button>
+            </div>
+          )}
         </div>
 
-        <div style={{ padding: 16 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
-            {inventory.filter(i => !term || `${i.name} ${i.category}`.toLowerCase().includes(term)).map(item => {
-              const isLow = Number(item.currentStock) <= Number(item.minThreshold);
-              const isOut = Number(item.currentStock) <= 0;
-              return (
-                <div key={item.itemId} className="pos-panel" style={{ padding: 14, borderColor: isOut ? '#fca5a5' : isLow ? '#fde047' : undefined }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                    <div>
-                      <strong style={{ fontSize: 13, display: 'block' }}>{item.name}</strong>
-                      <small style={{ color: 'var(--p-muted)', fontSize: 10, textTransform: 'uppercase', fontWeight: 700 }}>{item.category}</small>
-                    </div>
-                    <span style={{
-                      fontSize: 10,
-                      fontWeight: 800,
-                      padding: '2px 7px',
-                      borderRadius: 6,
-                      background: isOut ? '#fee2e2' : isLow ? '#fef9c3' : '#dcfce7',
-                      color: isOut ? '#b91c1c' : isLow ? '#854d0e' : '#15803d'
-                    }}>
-                      {isOut ? 'OUT OF STOCK' : isLow ? 'LOW STOCK' : 'IN STOCK'}
-                    </span>
-                  </div>
-
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                    <div>
-                      <span style={{ fontSize: 20, fontWeight: 900 }}>{Number(item.currentStock).toFixed(1)}</span>
-                      <span style={{ fontSize: 11, color: 'var(--p-muted)', marginLeft: 4 }}>{item.unit}</span>
-                    </div>
-                    <span style={{ fontSize: 10, color: 'var(--p-muted)' }}>Min: {item.minThreshold} {item.unit}</span>
-                  </div>
-
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                    <button
-                      className="pos-button small"
-                      style={{ flex: 1 }}
-                      disabled={Boolean(busy) || Number(item.currentStock) <= 0}
-                      onClick={() => handleAdjustStock(item, -1)}
-                    >
-                      -1 {item.unit}
-                    </button>
-                    <button
-                      className="pos-button small"
-                      style={{ flex: 1 }}
-                      disabled={Boolean(busy)}
-                      onClick={() => handleAdjustStock(item, 1)}
-                    >
-                      +1 {item.unit}
-                    </button>
-                    <button
-                      className="pos-button small primary"
-                      style={{ flex: 1 }}
-                      disabled={Boolean(busy)}
-                      onClick={() => handleAdjustStock(item, 5)}
-                    >
-                      +5 {item.unit}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 11, color: 'var(--p-muted)' }}>
+          <span>
+            Orders for:{' '}
+            <strong style={{ color: 'var(--p-text)' }}>
+              {dateFilterMode === 'ALL' ? 'All historical records' : `${formatDisplayDate(selectedDate)} (${selectedDate})`}
+            </strong>
+          </span>
+          <span className="pos-count" style={{ background: 'var(--p-blue-soft)', color: 'var(--p-blue)', fontWeight: 700, padding: '3px 8px', borderRadius: 6 }}>
+            {tickets.length} {tickets.length === 1 ? 'ticket' : 'tickets'}
+          </span>
         </div>
       </div>
-    ) : tab === 'AVAILABILITY' ? <div className="pos-panel"><div className="pos-panel-header"><h2>Menu availability</h2><div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><button className="pos-button small" onClick={() => setStockModal(true)}><Package size={13} /> Report Stock Shortage</button><span className="pos-count">{menu.filter(item => !item.availability).length} sold out</span></div></div>{!visibleMenu.length ? <Empty icon={ChefHat} title="No dishes found">Try a different dish name.</Empty> : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(270px,1fr))' }}>{visibleMenu.map(item => <div className="pos-stock-item" key={item.menuItemId} style={{ padding: 16 }}><img src={item.image} alt="" /><div style={{ minWidth: 0 }}><b>{item.name}</b><small>{item.categoryName}</small></div><button className={`pos-button small ${item.availability ? '' : 'danger'}`} disabled={Boolean(busy)} aria-label={`${item.availability ? 'Mark sold out' : 'Mark available'}: ${item.name}`} onClick={() => toggle(item)} style={{ marginLeft: 'auto' }}>{item.availability ? <Check size={13} /> : <Ban size={13} />}{busy === item.menuItemId ? 'Saving…' : item.availability ? 'Available' : 'Sold out'}</button></div>)}</div>}</div> : !tickets.length ? <div className="pos-panel"><Empty icon={ChefHat} title={error ? 'Orders could not be loaded' : 'The pass is clear'}>{error ? 'Retry when your connection is restored.' : search || source !== 'ALL' || stationFilter !== 'ALL' ? 'No orders match these filters.' : `No ${tabs.find(([key]) => key === tab)?.[1].toLowerCase()} orders right now.`}</Empty></div> : <div className="pos-orders-grid">
-      {tickets.map(order => <article className="pos-panel" key={order.orderId} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <header className="pos-panel-header" style={{ alignItems: 'flex-start' }}>
-          <div>
-            <strong style={{ fontSize: 12 }}>{order.orderNumber}</strong>
-            <p style={{ color: 'var(--p-muted)', fontSize: 9, marginTop: 7 }}>{order.source === 'DINE_IN_QR' ? tableTitle(order) : label(order.source)} · {time(order.createdAt)}</p>
-          </div>
-          <Badge status={order.status} />
-        </header>
-        <div style={{ padding: 15, flex: 1, display: 'flex', flexDirection: 'column' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--p-muted)', fontSize: 9, marginBottom: 13 }}>
-            <Clock size={12} />
-            {Math.max(0, Math.floor((Date.now() - new Date(order.createdAt).getTime()) / 60000))} min ago
-            {order.customerName && !order.customerName.startsWith('Table ') && <span style={{ marginLeft: 'auto' }}>{order.customerName}</span>}
-          </div>
+    )}
 
-          <div style={{ flex: 1 }}>
-            {order.items.map((item, index) => {
-              const station = item.station || getItemStation(item);
-              return (
-                <div key={item.orderItemId || index} className="pos-line-item" style={{ padding: '10px 0', alignItems: 'flex-start' }}>
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <b>{item.name || item.itemName}</b>
-                      {station && (
-                        <span style={{
-                          fontSize: 9,
-                          fontWeight: 700,
-                          padding: '1px 4px',
-                          borderRadius: 4,
-                          background: station === 'GRILL' ? '#ffedd5' : station === 'BEVERAGES' ? '#e0f2fe' : station === 'DESSERTS' ? '#fce7f3' : '#f1f5f9',
-                          color: station === 'GRILL' ? '#c2410c' : station === 'BEVERAGES' ? '#0369a1' : station === 'DESSERTS' ? '#be185d' : '#475569'
-                        }}>
-                          {station}
-                        </span>
-                      )}
-                    </div>
-                    {item.customization && Object.keys(item.customization).length > 0 && (
-                      <small style={{ display: 'block', color: '#64748b' }}>
-                        {Object.entries(item.customization).map(([key, value]) => `${label(key)}: ${Array.isArray(value) ? value.join(', ') : value}`).join(' · ')}
-                      </small>
-                    )}
-                    {item.specialInstruction && <small style={{ color: '#d59b37', display: 'block' }}>Note: {item.specialInstruction}</small>}
-                  </div>
-                  <b style={{ color: 'var(--p-blue)' }}>×{item.quantity}</b>
-                </div>
-              );
-            })}
-            {order.specialInstructions && <div className="pos-info-box" style={{ color: '#b58b3e' }}>{order.specialInstructions}</div>}
-            {(order.rejectionReason || order.cancellationReason) && <div className="pos-info-box" style={{ color: '#ce626a' }}>{order.rejectionReason || order.cancellationReason}</div>}
-          </div>
+    {error && <div className="pos-info-box" role="alert" style={{ color: '#ce626a', marginBottom: 18 }}><AlertCircle size={16} /><span>{error}</span><button className="pos-button small" style={{ marginLeft: 'auto' }} onClick={() => load()}>Try again</button></div>}
+    {loading ? <Spinner /> : tab === 'AVAILABILITY' ? <div className="pos-panel"><div className="pos-panel-header"><h2>Menu availability</h2><span className="pos-count">{menu.filter(item => !item.availability).length} sold out</span></div>{!visibleMenu.length ? <Empty icon={ChefHat} title="No dishes found">Try a different dish name.</Empty> : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(270px,1fr))' }}>{visibleMenu.map(item => <div className="pos-stock-item" key={item.menuItemId} style={{ padding: 16 }}><img src={item.image} alt="" /><div style={{ minWidth: 0 }}><b>{item.name}</b><small>{item.categoryName}</small></div><button className={`pos-button small ${item.availability ? '' : 'danger'}`} disabled={Boolean(busy)} aria-label={`${item.availability ? 'Mark sold out' : 'Mark available'}: ${item.name}`} onClick={() => toggle(item)} style={{ marginLeft: 'auto' }}>{item.availability ? <Check size={13} /> : <Ban size={13} />}{busy === item.menuItemId ? 'Saving…' : item.availability ? 'Available' : 'Sold out'}</button></div>)}</div>}</div> : !tickets.length ? <div className="pos-panel"><Empty icon={ChefHat} title={error ? 'Orders could not be loaded' : 'The pass is clear'}>{error ? 'Retry when your connection is restored.' : search || source !== 'ALL' ? 'No orders match these filters.' : `No ${tabs.find(([key]) => key === tab)?.[1].toLowerCase()} orders right now.`}</Empty></div> : <div className="pos-orders-grid">
+      {tickets.map(order => <article className="pos-panel" key={order.orderId} style={{ display: 'flex', flexDirection: 'column' }}>
+        <header className="pos-panel-header" style={{ alignItems: 'flex-start' }}><div><strong style={{ fontSize: 12 }}>{order.orderNumber}</strong><p style={{ color: 'var(--p-muted)', fontSize: 9, marginTop: 7 }}>{order.source === 'DINE_IN_QR' ? tableTitle(order) : label(order.source)} · {time(order.createdAt)}</p></div><Badge status={order.status} /></header>
+        <div style={{ padding: 15, flex: 1 }}><div style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--p-muted)', fontSize: 9, marginBottom: 13 }}><Clock size={12} />{Math.max(0, Math.floor((Date.now() - new Date(order.createdAt).getTime()) / 60000))} min ago{order.customerName && !order.customerName.startsWith('Table ') && <span style={{ marginLeft: 'auto' }}>{order.customerName}</span>}</div>
+          {order.items.map((item, index) => <div key={item.orderItemId || index} className="pos-line-item" style={{ padding: '10px 0', alignItems: 'flex-start' }}><div><b>{item.name}</b>{item.customization && Object.keys(item.customization).length > 0 && <small>{Object.entries(item.customization).map(([key, value]) => `${label(key)}: ${Array.isArray(value) ? value.join(', ') : value}`).join(' · ')}</small>}{item.specialInstruction && <small style={{ color: '#d59b37' }}>Note: {item.specialInstruction}</small>}</div><b style={{ color: 'var(--p-blue)' }}>×{item.quantity}</b></div>)}
+          {order.specialInstructions && <div className="pos-info-box" style={{ color: '#b58b3e' }}>{order.specialInstructions}</div>}{(order.rejectionReason || order.cancellationReason) && <div className="pos-info-box" style={{ color: '#ce626a' }}>{order.rejectionReason || order.cancellationReason}</div>}
         </div>
         <footer style={{ borderTop: '1px solid var(--p-border)', padding: 12, marginTop: 'auto' }}>
           {order.status === 'NEW' || order.status === 'ACCEPTED' ? (

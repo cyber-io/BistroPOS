@@ -3,6 +3,7 @@ using System.Net;
 using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using RestaurantSystem.Api.Security;
 
 namespace RestaurantSystem.Api.Middleware;
 
@@ -36,6 +37,9 @@ public class ExceptionHandlingMiddleware
 
         var (statusCode, title, message) = exception switch
         {
+            TenantIsolationException =>
+                (HttpStatusCode.Forbidden, "Tenant Isolation Violation", exception.Message),
+
             ArgumentException or FormatException or JsonException =>
                 (HttpStatusCode.BadRequest, "Bad Request", exception.Message),
 
@@ -84,16 +88,46 @@ public class TenantSecurityMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
-        // Extract restaurant_id claim if user is authenticated staff
+        // 1. Check disabled status claim in token
+        var statusClaim = context.User?.FindFirst("status")?.Value;
+        if (string.Equals(statusClaim, "DISABLED", StringComparison.OrdinalIgnoreCase))
+        {
+            context.Response.StatusCode = (int)HttpStatusCode.Unauthorized;
+            await context.Response.WriteAsJsonAsync(new ProblemDetails
+            {
+                Status = 401,
+                Title = "Account Deactivated",
+                Detail = "Your staff account has been disabled by management."
+            });
+            return;
+        }
+
+        // 2. Extract restaurant_id claim if user is authenticated staff
         var restaurantClaim = context.User?.FindFirst("restaurant_id")?.Value;
         if (!string.IsNullOrEmpty(restaurantClaim) && Guid.TryParse(restaurantClaim, out var claimRestaurantId))
         {
             context.Items["TenantRestaurantId"] = claimRestaurantId;
 
-            // Check if route or header specifies another restaurant
+            // Check if header specifies another restaurant
             if (context.Request.Headers.TryGetValue("X-Restaurant-Id", out var headerResId) &&
-                Guid.TryParse(headerResId, out var requestedResId) &&
-                requestedResId != claimRestaurantId &&
+                Guid.TryParse(headerResId, out var requestedHeaderResId) &&
+                requestedHeaderResId != claimRestaurantId &&
+                !(context.User?.IsInRole("SUPER_ADMIN") ?? false))
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.Forbidden;
+                await context.Response.WriteAsJsonAsync(new ProblemDetails
+                {
+                    Status = 403,
+                    Title = "Tenant Isolation Violation",
+                    Detail = "Cross-restaurant access is strictly prohibited."
+                });
+                return;
+            }
+
+            // Check if query string specifies another restaurant
+            if (context.Request.Query.TryGetValue("restaurantId", out var queryResId) &&
+                Guid.TryParse(queryResId, out var requestedQueryResId) &&
+                requestedQueryResId != claimRestaurantId &&
                 !(context.User?.IsInRole("SUPER_ADMIN") ?? false))
             {
                 context.Response.StatusCode = (int)HttpStatusCode.Forbidden;

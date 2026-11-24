@@ -187,7 +187,7 @@ export default function WaiterDashboard() {
       <section className="pos-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 460 }}>
         <header className="pos-panel-header">
           <h2><Bell size={15} />Ready on the pass</h2>
-          <span className="pos-count">{orders.length} dine-in orders</span>
+          {orders.length > 0 && <span className="pos-count">{orders.length} dine-in orders</span>}
         </header>
         <div className="pos-panel-content" style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: orders.length ? 'flex-start' : 'center' }}>
           {!orders.length ? (
@@ -231,7 +231,7 @@ export default function WaiterDashboard() {
       <section className="pos-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 460 }}>
         <header className="pos-panel-header">
           <h2><HelpCircle size={15} />Floor assistance &amp; Cleaning</h2>
-          <span className="pos-count">{pending.length} waiting</span>
+          {pending.length > 0 && <span className="pos-count">{pending.length} waiting</span>}
         </header>
         <div style={{ padding: '12px 12px 0' }}>
           <div className="pos-segment" style={{ display: 'flex', width: '100%' }}>

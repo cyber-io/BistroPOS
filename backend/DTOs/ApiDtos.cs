@@ -304,6 +304,49 @@ public record UpdateItemAvailabilityRequest(
     bool Availability
 );
 
+public record CreateMenuCategoryRequest(
+    Guid? RestaurantId,
+    [Required] string Name,
+    string? Description,
+    int? SortOrder
+);
+
+public record UpdateMenuCategoryRequest(
+    [Required] string Name,
+    string? Description,
+    int? SortOrder,
+    string? Status
+);
+
+public record CreateMenuItemRequest(
+    Guid? RestaurantId,
+    [Required] Guid CategoryId,
+    [Required] string Name,
+    string? Description,
+    [Required] decimal Price,
+    string? Image,
+    string? VegNonVeg,
+    bool? Availability,
+    string? SpiceLevel,
+    bool? IsSweet,
+    string? CustomizationOptions,
+    string? AddOns
+);
+
+public record UpdateMenuItemRequest(
+    Guid? CategoryId,
+    [Required] string Name,
+    string? Description,
+    [Required] decimal Price,
+    string? Image,
+    string? VegNonVeg,
+    bool? Availability,
+    string? SpiceLevel,
+    bool? IsSweet,
+    string? CustomizationOptions,
+    string? AddOns
+);
+
 // --- PAYMENT DTOS ---
 public record InitiatePaymentRequest(
     Guid RestaurantId,
@@ -388,9 +431,9 @@ public record ResolveIssueDto(
     bool Escalate
 );
 
-public record DemoLoginRequest(string Role);
+public record DemoLoginRequest(string Role, Guid? RestaurantId = null);
 
-// --- RESTAURANT & STAFF MANAGEMENT DTOS ---
+// --- RESTAURANT & STAFF MANAGEMENT DTOS (PHASE 2 RBAC) ---
 public record UpdateRestaurantSettingsDto(
     string? Name,
     string? Phone,
@@ -400,6 +443,15 @@ public record UpdateRestaurantSettingsDto(
     string? Settings
 );
 
+public record CreateStaffRequest(
+    [Required, MaxLength(150)] string Name,
+    [Required, EmailAddress, MaxLength(255)] string Email,
+    [MaxLength(30)] string? Phone,
+    [Required, MaxLength(50)] string Role,
+    [Required, MinLength(6)] string Password,
+    Guid? RestaurantId = null
+);
+
 public record CreateStaffDto(
     [Required] string Name,
     [Required, EmailAddress] string Email,
@@ -407,206 +459,3 @@ public record CreateStaffDto(
     string? Role,
     string? Password
 );
-
-// --- LOYALTY, FEEDBACK & SAAS DTOS ---
-public record CustomerLoyaltyDto(
-    Guid LoyaltyId,
-    Guid RestaurantId,
-    string CustomerPhone,
-    string? CustomerName,
-    string? CustomerEmail,
-    int PointsBalance,
-    int LifetimePoints,
-    string Tier
-);
-
-public record EarnLoyaltyPointsDto(
-    Guid RestaurantId,
-    [Required] string CustomerPhone,
-    string? CustomerName,
-    decimal OrderAmount
-);
-
-public record RedeemLoyaltyPointsDto(
-    Guid RestaurantId,
-    [Required] string CustomerPhone,
-    int PointsToRedeem
-);
-
-public record CustomerFeedbackDto(
-    Guid FeedbackId,
-    Guid RestaurantId,
-    Guid? OrderId,
-    string? CustomerName,
-    string? CustomerPhone,
-    int Rating,
-    int FoodRating,
-    int ServiceRating,
-    int AmbianceRating,
-    string? Comment,
-    bool GoogleReviewClicked,
-    DateTime CreatedAt
-);
-
-public record CreateFeedbackDto(
-    Guid RestaurantId,
-    Guid? OrderId,
-    string? CustomerName,
-    string? CustomerPhone,
-    int Rating,
-    int? FoodRating,
-    int? ServiceRating,
-    int? AmbianceRating,
-    string? Comment,
-    bool? GoogleReviewClicked
-);
-
-public record UpdateRestaurantWifiDto(
-    string? WifiSsid,
-    string? WifiPassword,
-    bool? WifiEnabled,
-    string? GoogleReviewUrl
-);
-
-// --- PHASE 1 & 2 EXTENDED DTOS ---
-
-public record CalculateSplitRequest(
-    Guid RestaurantId,
-    Guid? OrderId,
-    Guid? TableId,
-    int SplitCount = 1,
-    string SplitType = "EQUAL",
-    decimal TipAmount = 0,
-    int TipPercent = 0,
-    decimal LoyaltyDiscount = 0,
-    List<ItemizedShareRequest>? ItemShares = null
-);
-
-public record ItemizedShareRequest(
-    Guid OrderItemId,
-    int DinerIndex,
-    int Quantity = 1
-);
-
-public record SplitCalculationDto(
-    Guid? OrderId,
-    Guid? TableId,
-    decimal Subtotal,
-    decimal Tax,
-    decimal TipAmount,
-    decimal LoyaltyDiscount,
-    decimal TotalBill,
-    decimal TotalPaid,
-    decimal RemainingBalance,
-    int SplitCount,
-    string SplitType,
-    List<DinerShareDto> Shares
-);
-
-public record DinerShareDto(
-    int DinerIndex,
-    string DinerLabel,
-    decimal Amount,
-    string PaymentStatus,
-    Guid? PaymentId
-);
-
-public record ConfirmCashPaymentRequest(
-    Guid? StaffUserId
-);
-
-public record EmailReceiptRequest(
-    [Required, EmailAddress] string Email
-);
-
-public record UpdateOrderItemStatusRequest(
-    [Required] string Status
-);
-
-public record PortionAvailabilityDto(
-    Guid MenuItemId,
-    string Name,
-    int PortionsRemaining,
-    bool IsAvailable,
-    string Status
-);
-
-public record TimeBudgetMenuDto(
-    Guid MenuItemId,
-    string Name,
-    string? Description,
-    decimal Price,
-    string CategoryName,
-    int PrepTimeMinutes,
-    int EstimatedTotalPrepMinutes,
-    int EstimatedMinMinutes,
-    int EstimatedMaxMinutes,
-    string KitchenStation,
-    string? Image,
-    string? VegNonVeg
-);
-
-public record EventPlanDto(
-    int ConfirmedHeadcount,
-    List<string>? MealChoices,
-    string? DietaryRequests,
-    decimal DepositAmount,
-    decimal DepositPaid,
-    decimal EstimatedTotalCost,
-    string? PrepSheetNotes
-);
-
-public record KitchenPrepSheetDto(
-    Guid ReservationId,
-    string BookingId,
-    string CustomerName,
-    int Headcount,
-    DateOnly ReservationDate,
-    TimeOnly ReservationTime,
-    decimal DepositPaid,
-    decimal OutstandingBalance,
-    string? DietaryRequests,
-    List<PrepTaskDto> Timeline
-);
-
-public record PrepTaskDto(
-    string TimeOffset,
-    string Course,
-    string Description,
-    string Station,
-    string Status
-);
-
-public record WalkInWaitlistDto(
-    Guid WaitlistId,
-    Guid RestaurantId,
-    string CustomerName,
-    string CustomerPhone,
-    int PartySize,
-    string Status,
-    int EstimatedWaitMinutes,
-    DateTime? EstimatedReadyAt,
-    DateTime? NotifiedAt,
-    Guid? SeatedTableId,
-    int? SeatedTableNumber,
-    string? Notes,
-    DateTime CreatedAt
-);
-
-public record AddWalkInDto(
-    Guid RestaurantId,
-    [Required] string CustomerName,
-    [Required] string CustomerPhone,
-    int PartySize = 2,
-    string? Notes = null
-);
-
-public record WaitEstimateDto(
-    int PartySize,
-    int EstimatedWaitMinutesMin,
-    int EstimatedWaitMinutesMax,
-    int WaitingPartiesCount,
-    int SuitableTablesCount,
-    string Message
-);
-

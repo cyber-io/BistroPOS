@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using RestaurantSystem.Api.DTOs;
 using RestaurantSystem.Api.Models;
 using RestaurantSystem.Api.Repositories;
+using RestaurantSystem.Api.Security;
 using RestaurantSystem.Api.Services;
 
 namespace RestaurantSystem.Api.Controllers;
@@ -31,7 +32,7 @@ public class AuthController : ControllerBase
     [HttpPost("demo-login")]
     public async Task<IActionResult> DemoLogin([FromBody] DemoLoginRequest request)
     {
-        var result = await _auth.DemoLoginAsync(request.Role);
+        var result = await _auth.DemoLoginAsync(request.Role, request.RestaurantId);
         return result.Success ? Ok(result) : BadRequest(result);
     }
 
@@ -59,6 +60,14 @@ public class AuthController : ControllerBase
     }
 
     [Authorize]
+    [HttpGet("context")]
+    public async Task<IActionResult> GetCurrentContext()
+    {
+        var context = await _auth.GetCurrentUserContextAsync();
+        return context != null ? Ok(context) : Unauthorized();
+    }
+
+    [Authorize]
     [HttpPatch("profile")]
     public async Task<IActionResult> UpdateProfile([FromBody] UpdateProfileRequest request)
     {
@@ -71,6 +80,41 @@ public class AuthController : ControllerBase
         var result = await _auth.UpdateProfileAsync(userId, request);
         if (!result.Success) return BadRequest(result);
         return Ok(result);
+    }
+
+    [Authorize(Policy = "ManagerOrAdmin")]
+    [HttpPost("staff")]
+    public async Task<IActionResult> CreateStaff([FromBody] CreateStaffRequest request)
+    {
+        var result = await _auth.CreateStaffAsync(request);
+        if (!result.Success) return BadRequest(new { message = result.Message });
+        return Created($"/api/auth/staff/{result.Staff!.UserId}", result.Staff);
+    }
+
+    [Authorize(Policy = "ManagerOrAdmin")]
+    [HttpGet("staff")]
+    public async Task<IActionResult> GetStaff([FromQuery] Guid? restaurantId)
+    {
+        var staffList = await _auth.GetStaffAsync(restaurantId);
+        return Ok(staffList);
+    }
+
+    [Authorize(Policy = "ManagerOrAdmin")]
+    [HttpPatch("staff/{id:guid}/status")]
+    public async Task<IActionResult> UpdateStaffStatus(Guid id, [FromBody] UpdateStaffStatusRequest request)
+    {
+        var result = await _auth.UpdateStaffStatusAsync(id, request.Status);
+        if (!result.Success) return BadRequest(new { message = result.Message });
+        return Ok(new { success = true, message = result.Message });
+    }
+
+    [Authorize(Policy = "SuperAdminOnly")]
+    [HttpPost("managers")]
+    public async Task<IActionResult> CreateManager([FromBody] CreateManagerRequest request)
+    {
+        var result = await _auth.CreateManagerAsync(request);
+        if (!result.Success) return BadRequest(new { message = result.Message });
+        return Created($"/api/auth/staff/{result.Manager!.UserId}", result.Manager);
     }
 }
 
@@ -122,7 +166,7 @@ public class RestaurantsController : ControllerBase
         return NotFound();
     }
 
-    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Receptionist}")]
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
     [HttpPatch("{id:guid}/settings")]
     public async Task<IActionResult> UpdateSettings(Guid id, [FromBody] UpdateRestaurantSettingsDto dto)
     {
@@ -202,7 +246,7 @@ public class TablesController : ControllerBase
         return Ok(table);
     }
 
-    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Receptionist}")]
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager},{UserRoles.Receptionist}")]
     [HttpPut("{id:guid}/status")]
     public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] UpdateTableStatusRequest request)
     {
@@ -286,13 +330,11 @@ public class MenuController : ControllerBase
 {
     private readonly RestaurantDbContext _db;
     private readonly INotificationService _notifications;
-    private readonly IOrderService _orders;
 
-    public MenuController(RestaurantDbContext db, INotificationService notifications, IOrderService orders)
+    public MenuController(RestaurantDbContext db, INotificationService notifications)
     {
         _db = db;
         _notifications = notifications;
-        _orders = orders;
     }
 
     [HttpGet("categories")]
@@ -303,6 +345,97 @@ public class MenuController : ControllerBase
             .OrderBy(c => c.SortOrder)
             .ToListAsync();
         return Ok(categories);
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
+    [HttpPost("categories")]
+    public async Task<IActionResult> CreateCategory([FromBody] CreateMenuCategoryRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name))
+            return BadRequest(new { message = "Category name is required." });
+
+        Guid targetRestaurantId;
+        if (_tenant.IsManager)
+        {
+            targetRestaurantId = _tenant.GetRequiredRestaurantId();
+        }
+        else if (_tenant.IsSuperAdmin)
+        {
+            targetRestaurantId = request.RestaurantId ?? _tenant.RestaurantId ?? UserProvisioning.DefaultRestaurantId;
+        }
+        else
+        {
+            return Forbid();
+        }
+
+        var maxSortOrder = await _db.MenuCategories
+            .Where(c => c.RestaurantId == targetRestaurantId)
+            .MaxAsync(c => (int?)c.SortOrder) ?? 0;
+
+        var category = new MenuCategory
+        {
+            CategoryId = Guid.NewGuid(),
+            RestaurantId = targetRestaurantId,
+            Name = request.Name.Trim(),
+            Description = request.Description?.Trim(),
+            SortOrder = request.SortOrder ?? (maxSortOrder + 1),
+            Status = "ACTIVE",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        _db.MenuCategories.Add(category);
+        await _db.SaveChangesAsync();
+
+        return Created($"/api/menu/categories/{category.CategoryId}", category);
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
+    [HttpPut("categories/{id:guid}")]
+    public async Task<IActionResult> UpdateCategory(Guid id, [FromBody] UpdateMenuCategoryRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name))
+            return BadRequest(new { message = "Category name is required." });
+
+        var category = await _db.MenuCategories.FindAsync(id);
+        if (category == null) return NotFound(new { message = "Category not found." });
+
+        if (_tenant.IsManager && category.RestaurantId != _tenant.GetRequiredRestaurantId())
+            return Forbid();
+
+        category.Name = request.Name.Trim();
+        if (request.Description != null) category.Description = request.Description.Trim();
+        if (request.SortOrder.HasValue) category.SortOrder = request.SortOrder.Value;
+        if (!string.IsNullOrWhiteSpace(request.Status)) category.Status = request.Status.Trim().ToUpperInvariant();
+        category.UpdatedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync();
+        return Ok(category);
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
+    [HttpDelete("categories/{id:guid}")]
+    public async Task<IActionResult> DeleteCategory(Guid id)
+    {
+        var category = await _db.MenuCategories.FindAsync(id);
+        if (category == null) return NotFound(new { message = "Category not found." });
+
+        if (_tenant.IsManager && category.RestaurantId != _tenant.GetRequiredRestaurantId())
+            return Forbid();
+
+        var hasItems = await _db.MenuItems.AnyAsync(m => m.CategoryId == id);
+        if (hasItems)
+        {
+            category.Status = "INACTIVE";
+            category.UpdatedAt = DateTime.UtcNow;
+        }
+        else
+        {
+            _db.MenuCategories.Remove(category);
+        }
+
+        await _db.SaveChangesAsync();
+        return Ok(new { success = true, message = "Category deleted successfully." });
     }
 
     [HttpGet("items")]
@@ -346,7 +479,7 @@ public class MenuController : ControllerBase
         return Ok(dtos);
     }
 
-    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Receptionist},{UserRoles.Kitchen}")]
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager},{UserRoles.Receptionist},{UserRoles.Kitchen}")]
     [HttpPatch("items/{id:guid}/availability")]
     public async Task<IActionResult> UpdateItemAvailability(Guid id, [FromBody] UpdateItemAvailabilityRequest request)
     {
@@ -368,20 +501,6 @@ public class MenuController : ControllerBase
         );
 
         return Ok(new { success = true, availability = request.Availability });
-    }
-
-    [HttpGet("time-budget")]
-    public async Task<IActionResult> GetTimeBudgetMenu([FromQuery] Guid restaurantId, [FromQuery] int minutes = 25)
-    {
-        var items = await _orders.GetTimeBudgetMenuAsync(restaurantId, minutes);
-        return Ok(items);
-    }
-
-    [HttpGet("portions-remaining")]
-    public async Task<IActionResult> GetPortionsRemaining([FromQuery] Guid restaurantId)
-    {
-        var portions = await _orders.GetPortionsRemainingAsync(restaurantId);
-        return Ok(portions);
     }
 }
 
@@ -439,7 +558,7 @@ public class OrdersController : ControllerBase
         return Ok(list);
     }
 
-    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Receptionist},{UserRoles.Kitchen},{UserRoles.Waiter}")]
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager},{UserRoles.Receptionist},{UserRoles.Kitchen},{UserRoles.Waiter}")]
     [HttpPatch("{id:guid}/status")]
     public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] UpdateOrderStatusRequest request)
     {
@@ -476,7 +595,7 @@ public class OrdersController : ControllerBase
         return Ok(new { success = true, confirmed });
     }
 
-    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Receptionist}")]
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager},{UserRoles.Receptionist}")]
     [HttpDelete("{idOrNumber}")]
     public async Task<IActionResult> DeleteOrder(string idOrNumber)
     {
@@ -521,6 +640,16 @@ public class ReservationsController : ControllerBase
         return Ok(slots);
     }
 
+    [AllowAnonymous]
+    [HttpGet("lookup")]
+    public async Task<IActionResult> LookupReservation([FromQuery] string query)
+    {
+        if (string.IsNullOrWhiteSpace(query)) return BadRequest(new { message = "Booking ID or phone number is required." });
+        var reservation = await _reservations.LookupReservationAsync(query);
+        if (reservation == null) return NotFound(new { message = "No reservation found matching this booking ID or phone number." });
+        return Ok(reservation);
+    }
+
     [HttpPost]
     public async Task<IActionResult> CreateReservation([FromBody] CreateReservationRequest request)
     {
@@ -531,7 +660,7 @@ public class ReservationsController : ControllerBase
         return Ok(reservation);
     }
 
-    [Authorize(Roles = "SUPER_ADMIN,RECEPTIONIST,WAITER,KITCHEN")]
+    [Authorize(Roles = "SUPER_ADMIN,MANAGER,RECEPTIONIST,WAITER,KITCHEN")]
     [HttpGet]
     public async Task<IActionResult> GetReservations([FromQuery] Guid restaurantId, [FromQuery] DateOnly? date, [FromQuery] string? status)
     {
@@ -539,7 +668,7 @@ public class ReservationsController : ControllerBase
         return Ok(list);
     }
 
-    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Receptionist}")]
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager},{UserRoles.Receptionist}")]
     [HttpPatch("{id:guid}/status")]
     public async Task<IActionResult> UpdateStatus(Guid id, [FromQuery] string newStatus, [FromQuery] Guid? tableId)
     {
@@ -548,13 +677,13 @@ public class ReservationsController : ControllerBase
         return Ok(new { success = true, status = newStatus });
     }
 
-    [Authorize(Roles = "SUPER_ADMIN,RECEPTIONIST")]
+    [Authorize(Roles = "SUPER_ADMIN,MANAGER,RECEPTIONIST")]
     [HttpPatch("{id:guid}/reschedule")]
     public async Task<IActionResult> Reschedule(Guid id, [FromBody] RescheduleReservationRequest request)
     {
-        var success = await _reservations.RescheduleReservationAsync(id, request);
-        if (!success) return NotFound();
-        return Ok(new { success = true, message = "Reservation rescheduled successfully." });
+        var reservation = await _reservations.RescheduleReservationAsync(id, request);
+        if (reservation == null) return NotFound();
+        return Ok(new { success = true, message = "Reservation rescheduled successfully.", reservation });
     }
 
     [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Receptionist}")]
@@ -581,10 +710,10 @@ public class PaymentsController : ControllerBase
     private readonly IPaymentService _payments;
     private readonly RestaurantDbContext _db;
     public PaymentsController(IPaymentService payments, RestaurantDbContext db) { _payments = payments; _db = db; }
-    [Authorize(Roles = "SUPER_ADMIN,RECEPTIONIST")]
+    [Authorize(Roles = "SUPER_ADMIN,MANAGER,RECEPTIONIST")]
     [HttpGet]
     public async Task<IActionResult> GetPayments([FromQuery] Guid restaurantId) => Ok((await _db.Payments.Where(p => p.RestaurantId == restaurantId).OrderByDescending(p => p.CreatedAt).ToListAsync()).Select(PaymentService.Map));
-    [Authorize(Roles = "SUPER_ADMIN,RECEPTIONIST")]
+    [Authorize(Roles = "SUPER_ADMIN,MANAGER,RECEPTIONIST")]
     [HttpPost("record")]
     public async Task<IActionResult> Record([FromBody] InitiatePaymentRequest request) => Ok(await _payments.RecordPaymentAsync(request));
 
@@ -704,7 +833,7 @@ public class HelpController : ControllerBase
         return Ok(result);
     }
 
-    [Authorize(Roles = "SUPER_ADMIN,RECEPTIONIST,WAITER")]
+    [Authorize(Roles = "SUPER_ADMIN,MANAGER,RECEPTIONIST,WAITER")]
     [HttpGet]
     public async Task<IActionResult> GetActiveHelpRequests([FromQuery] Guid restaurantId)
     {
@@ -712,7 +841,7 @@ public class HelpController : ControllerBase
         return Ok(list);
     }
 
-    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Waiter},{UserRoles.Receptionist}")]
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager},{UserRoles.Waiter},{UserRoles.Receptionist}")]
     [HttpPost("{id:guid}/assign")]
     public async Task<IActionResult> AssignHelp(Guid id, [FromBody] AssignHelpRequestDto dto)
     {
@@ -723,7 +852,7 @@ public class HelpController : ControllerBase
         return Ok(new { success = true, message = $"Assigned to {dto.WaiterName}" });
     }
 
-    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Waiter}")]
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Waiter},{UserRoles.Receptionist}")]
     [HttpPost("{id:guid}/resolve")]
     public async Task<IActionResult> ResolveHelp(Guid id)
     {
@@ -744,7 +873,7 @@ public class IssuesController : ControllerBase
         _db = db;
     }
 
-    [Authorize(Roles = "SUPER_ADMIN,RECEPTIONIST")]
+    [Authorize(Roles = "SUPER_ADMIN,MANAGER,RECEPTIONIST")]
     [HttpGet]
     public async Task<IActionResult> GetIssues([FromQuery] Guid restaurantId)
     {
@@ -755,7 +884,7 @@ public class IssuesController : ControllerBase
         return Ok(issues);
     }
 
-    [Authorize(Roles = "SUPER_ADMIN,RECEPTIONIST")]
+    [Authorize(Roles = "SUPER_ADMIN,MANAGER,RECEPTIONIST")]
     [HttpPost]
     public async Task<IActionResult> CreateIssue([FromBody] CreateIssueDto dto)
     {
@@ -773,7 +902,7 @@ public class IssuesController : ControllerBase
         return Ok(issue);
     }
 
-    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Receptionist}")]
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager},{UserRoles.Receptionist}")]
     [HttpPatch("{id:guid}/resolve")]
     public async Task<IActionResult> ResolveIssue(Guid id, [FromBody] ResolveIssueDto dto)
     {
@@ -820,7 +949,7 @@ public class UsersController : ControllerBase
         _db = db;
     }
 
-    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Receptionist}")]
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
     [HttpGet]
     public async Task<IActionResult> GetUsers([FromQuery] Guid restaurantId, [FromQuery] string? role)
     {
@@ -835,7 +964,7 @@ public class UsersController : ControllerBase
         return Ok(dtos);
     }
 
-    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Receptionist}")]
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
     [HttpPost]
     public async Task<IActionResult> CreateStaff([FromBody] CreateStaffDto dto, [FromQuery] Guid restaurantId)
     {
@@ -847,10 +976,14 @@ public class UsersController : ControllerBase
         if (existing)
             return BadRequest(new { message = "A user with this email address already exists." });
 
-        var validRoles = new[] { UserRoles.SuperAdmin, UserRoles.Receptionist, UserRoles.Kitchen, UserRoles.Waiter };
+        var isSuperAdmin = User.IsInRole(UserRoles.SuperAdmin);
         var role = (dto.Role ?? UserRoles.Waiter).ToUpperInvariant();
-        if (!validRoles.Contains(role))
-            role = UserRoles.Waiter;
+
+        // Manager cannot create another Manager or Super Admin
+        if (!isSuperAdmin && role is UserRoles.SuperAdmin or UserRoles.Manager)
+        {
+            return Forbid();
+        }
 
         var user = new User
         {
@@ -872,7 +1005,7 @@ public class UsersController : ControllerBase
         return Ok(new UserDto(user.UserId, user.RestaurantId, user.Name, user.Email, user.Phone, user.Role, user.Status));
     }
 
-    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Receptionist}")]
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> DeleteStaff(Guid id)
     {

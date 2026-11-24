@@ -1,15 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Plus, Search, RefreshCw, ArrowUpRight, CreditCard, Banknote, Timer, Check, ClipboardCheck, ClipboardList, Package, Armchair, CalendarDays, History, LayoutGrid, Info, AlertCircle, Bell, SlidersHorizontal, UtensilsCrossed, ShoppingBag, Truck, Minus, Trash2, Printer, QrCode, ArrowLeft, CheckCircle2, X, Users, HandPlatter, Coffee, MapPin, Download, Sparkles, ChevronLeft, ChevronRight, Calendar, ChevronDown, ChevronUp, Clock, Phone, User } from 'lucide-react';
+import { Plus, Search, RefreshCw, ArrowUpRight, CreditCard, Banknote, Timer, Check, ClipboardCheck, ClipboardList, Package, Armchair, CalendarDays, History, LayoutGrid, Info, AlertCircle, Bell, SlidersHorizontal, UtensilsCrossed, ShoppingBag, Truck, Minus, Trash2, Printer, QrCode, ArrowLeft, CheckCircle2, X, Users, HandPlatter, Coffee, MapPin, Download, Sparkles, ChevronLeft, ChevronRight, Calendar, ChevronDown, ChevronUp, Clock, Phone, User, UserPlus, ShieldCheck, FolderPlus, Pencil, Building2, Lock, Mail, Eye, EyeOff, ChefHat, UserCheck, Flame } from 'lucide-react';
 import QRCode from 'qrcode';
-import { api, subscribeRealtimeEvents, uniqueKey } from '../../services/api';
+import { api, subscribeRealtimeEvents, uniqueKey, getActiveRestaurantId } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useNotification } from '../../context/NotificationContext';
 import PosShell from '../../components/pos/PosShell';
 import TableFloorPlan, { FloorPlanTable, getDiningAreaTables } from '../../components/pos/TableFloorPlan';
 import { Badge, Empty, Spinner, Modal, money, time, label } from '../../components/pos/PosUI';
 import ErrorBoundary from '../../components/common/ErrorBoundary';
-import { tableLabel, tableTitle, getPublicOrigin, getTableQrUrl } from '../../services/tablePresentation';
+import { tableLabel, tableTitle } from '../../services/tablePresentation';
 import { cleanPhone, getRescheduleNotificationText, getWhatsAppUrl, getSmsUrl } from '../../services/notificationHelpers';
 
 const DONE = ['DELIVERED', 'PICKED_UP', 'CANCELLED', 'CONFIRMATION_TIMEOUT'];
@@ -33,6 +33,26 @@ const toLocalDate = (dateVal) => {
 };
 const clockValue = value => { const match = String(value || '').match(/^(\d{1,2}):(\d{2})(?:\:\d{2})?\s*(AM|PM)?$/i); if (!match) return ''; let hour = Number(match[1]); if (match[3]) hour = hour % 12 + (match[3].toUpperCase() === 'PM' ? 12 : 0); return `${String(hour).padStart(2, '0')}:${match[2]}`; };
 const shortDate = d => new Date(`${String(d).slice(0, 10)}T12:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+
+const isBookingDueIn10Min = (booking, now = new Date()) => {
+  if (!booking || !booking.reservationDate || !booking.reservationTime) return false;
+  if (['CANCELLED', 'NO_SHOW', 'COMPLETED'].includes(booking.status)) return false;
+
+  try {
+    const dateStr = String(booking.reservationDate).slice(0, 10);
+    const timeMatch = String(booking.reservationTime).match(/^(\d{1,2}):(\d{2})/);
+    if (!timeMatch) return false;
+
+    const bookingDate = new Date(`${dateStr}T${timeMatch[1].padStart(2, '0')}:${timeMatch[2]}:00`);
+    const diffMs = bookingDate.getTime() - now.getTime();
+    const diffMin = diffMs / 60000;
+
+    // Only within 10 minutes before arrival up to the grace period (15 minutes after scheduled time)
+    return diffMin <= 10 && diffMin >= -15;
+  } catch {
+    return false;
+  }
+};
 
 function PosDateFilter({
   value,
@@ -285,6 +305,11 @@ function createSessionObj(type, orders, tableInfo, paidIds) {
   const shortId = firstOrder?.orderNumber ? firstOrder.orderNumber.replace(/^ORD-/, '').slice(0, 8) : firstOrder?.orderId?.slice(0, 8);
   const sessionId = isDineIn ? `SES-T${tableNumber || 'X'}-${shortId}` : (firstOrder?.orderNumber || 'SES-ORDER');
 
+  const newOrders = orders.filter(o => !['DELIVERED', 'PICKED_UP', 'CANCELLED', 'CONFIRMATION_TIMEOUT'].includes(o.status));
+  const deliveredOrders = orders.filter(o => ['DELIVERED', 'PICKED_UP'].includes(o.status));
+  const newItems = items.filter(i => !['DELIVERED', 'PICKED_UP', 'CANCELLED', 'CONFIRMATION_TIMEOUT'].includes(i.itemStatus || i.orderStatus));
+  const deliveredItems = items.filter(i => ['DELIVERED', 'PICKED_UP'].includes(i.itemStatus || i.orderStatus));
+
   return {
     type,
     sessionId,
@@ -298,7 +323,11 @@ function createSessionObj(type, orders, tableInfo, paidIds) {
     latestAt: lastOrder?.createdAt,
     source: firstOrder?.source || 'DINE_IN_QR',
     orders,
+    newOrders,
+    deliveredOrders,
     items,
+    newItems,
+    deliveredItems,
     totalItemCount: items.reduce((sum, i) => sum + (Number(i.quantity) || 1), 0),
     subtotal: Math.round(subtotal * 100) / 100,
     tax: Math.round(tax * 100) / 100,
@@ -311,10 +340,10 @@ function createSessionObj(type, orders, tableInfo, paidIds) {
     isCancelled,
     isClosed,
     status: overallStatus,
-    hasNewItems: items.some(i => i.itemStatus === 'NEW' || i.orderStatus === 'NEW'),
+    hasNewItems: newItems.length > 0,
     hasPreparingItems: items.some(i => ['PREPARING', 'ACCEPTED'].includes(i.itemStatus || i.orderStatus)),
     hasReadyItems: items.some(i => ['READY', 'READY_FOR_PICKUP'].includes(i.itemStatus || i.orderStatus)),
-    hasDeliveredItems: items.some(i => ['DELIVERED', 'PICKED_UP'].includes(i.itemStatus || i.orderStatus)),
+    hasDeliveredItems: deliveredItems.length > 0,
   };
 }
 
@@ -431,8 +460,16 @@ function groupOrdersIntoSessions(orders, tables, paidIds, orderDate, payments = 
   });
 }
 
-function TableSessionCard({ session, onDetails, onPay, onAddItems }) {
+function TableSessionCard({ session, onDetails, onPay, onAddItems, onMarkDelivered }) {
   const [expanded, setExpanded] = useState(false);
+  const [itemTab, setItemTab] = useState(() => (session.hasNewItems ? 'NEW' : (session.hasDeliveredItems ? 'DELIVERED' : 'NEW')));
+
+  useEffect(() => {
+    if (session.hasNewItems && itemTab === 'DELIVERED' && !session.hasDeliveredItems) {
+      setItemTab('NEW');
+    }
+  }, [session.hasNewItems, session.hasDeliveredItems, itemTab]);
+
   const isDineIn = session.type === 'TABLE_SESSION' || session.source === 'DINE_IN_QR';
   const tableChipText = isDineIn ? (session.tableNumber ? `A${session.tableNumber}` : 'T') : (session.source === 'DELIVERY' ? <Truck size={14} /> : <ShoppingBag size={14} />);
   const elapsedMinutes = Math.max(0, Math.floor((Date.now() - new Date(session.startedAt).getTime()) / 60000));
@@ -491,21 +528,111 @@ function TableSessionCard({ session, onDetails, onPay, onAddItems }) {
         </div>
       </div>
 
+      <div className="pos-session-item-tabs">
+        <button
+          type="button"
+          className={`pos-session-tab ${itemTab === 'NEW' ? 'active' : ''}`}
+          onClick={() => setItemTab('NEW')}
+        >
+          <span className="pos-tab-dot pos-dot-new" />
+          New items
+          {session.newItems?.length > 0 && (
+            <span className="pos-badge-new">{session.newItems.length}</span>
+          )}
+        </button>
+        <button
+          type="button"
+          className={`pos-session-tab ${itemTab === 'DELIVERED' ? 'active' : ''}`}
+          onClick={() => setItemTab('DELIVERED')}
+        >
+          <span className="pos-tab-dot pos-dot-delivered" />
+          Delivered
+          {session.deliveredItems?.length > 0 && (
+            <span className="pos-badge-delivered">{session.deliveredItems.length}</span>
+          )}
+        </button>
+      </div>
+
       <div className="pos-session-items-preview">
-        {session.items.slice(0, 3).map((item, idx) => (
-          <div key={idx} className="pos-session-preview-row">
-            <span className="pos-item-qty">{item.quantity}×</span>
-            <span className="pos-item-name">{item.name || item.itemName}</span>
-            <span className={`pos-item-mini-badge status-${(item.itemStatus || item.orderStatus || 'new').toLowerCase()}`}>
-              {label(item.itemStatus || item.orderStatus || 'NEW')}
-            </span>
-            <span className="pos-item-price">{money(item.lineTotal)}</span>
-          </div>
-        ))}
-        {session.items.length > 3 && (
-          <div className="pos-session-more-items" onClick={() => setExpanded(!expanded)}>
-            <span>+{session.items.length - 3} more items across {session.orders.length} orders</span>
-          </div>
+        {itemTab === 'NEW' ? (
+          (!session.newOrders || session.newOrders.length === 0) ? (
+            <div className="pos-session-empty-tab">
+              <span>All items have been delivered to customer.</span>
+            </div>
+          ) : (
+            <div className="pos-session-orders-list">
+              {session.newOrders.map((ord, ordIdx) => (
+                <div key={ord.orderId || ordIdx} className="pos-ticket-entry">
+                  <div className="pos-ticket-entry-header">
+                    <div className="pos-ticket-entry-meta">
+                      <span className="pos-ticket-entry-tag">
+                        {session.orders.length > 1 ? `Order #${session.orders.findIndex(o => o.orderId === ord.orderId) + 1}` : 'Order'}
+                      </span>
+                      <b className="pos-ticket-entry-code">{ord.orderNumber}</b>
+                      <span className="pos-ticket-entry-time">{time(ord.createdAt)}</span>
+                    </div>
+                    <div className="pos-ticket-entry-actions">
+                      <Badge status={ord.status} />
+                      <button
+                        type="button"
+                        className="pos-mark-delivered-btn"
+                        title="Mark this order as delivered"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onMarkDelivered && onMarkDelivered(ord.orderId);
+                        }}
+                      >
+                        <Check size={11} /> Mark delivered
+                      </button>
+                    </div>
+                  </div>
+                  <div className="pos-ticket-entry-items">
+                    {(ord.items || []).map((it, itIdx) => (
+                      <div key={it.orderItemId || itIdx} className="pos-session-preview-row">
+                        <span className="pos-item-qty">{it.quantity}×</span>
+                        <span className="pos-item-name">{it.name || it.itemName}</span>
+                        <span className={`pos-item-mini-badge status-${(it.status || ord.status || 'new').toLowerCase()}`}>
+                          {label(it.status || ord.status || 'NEW')}
+                        </span>
+                        <span className="pos-item-price">{money(it.lineTotal)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        ) : (
+          (!session.deliveredOrders || session.deliveredOrders.length === 0) ? (
+            <div className="pos-session-empty-tab">
+              <span>No delivered orders yet. Delivered orders will appear here.</span>
+            </div>
+          ) : (
+            <div className="pos-session-orders-list">
+              {session.deliveredOrders.map((ord, ordIdx) => (
+                <div key={ord.orderId || ordIdx} className="pos-ticket-entry is-delivered">
+                  <div className="pos-ticket-entry-header">
+                    <div className="pos-ticket-entry-meta">
+                      <span className="pos-ticket-entry-tag tag-delivered">Delivered</span>
+                      <b className="pos-ticket-entry-code">{ord.orderNumber}</b>
+                      <span className="pos-ticket-entry-time">{time(ord.createdAt)}</span>
+                    </div>
+                    <Badge status="DELIVERED" />
+                  </div>
+                  <div className="pos-ticket-entry-items">
+                    {(ord.items || []).map((it, itIdx) => (
+                      <div key={it.orderItemId || itIdx} className="pos-session-preview-row">
+                        <span className="pos-item-qty">{it.quantity}×</span>
+                        <span className="pos-item-name">{it.name || it.itemName}</span>
+                        <span className="pos-item-mini-badge status-delivered">Delivered</span>
+                        <span className="pos-item-price">{money(it.lineTotal)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
         )}
       </div>
 
@@ -622,45 +749,32 @@ function TableSessionCard({ session, onDetails, onPay, onAddItems }) {
 export default function PosWorkspace() {
   const { currentUser } = useAuth();
   const { addToast } = useNotification();
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const navigate = useNavigate();
   const section = pathname.split('/')[2] || 'dashboard';
-  const [data, setData] = useState({ restaurant: null, tables: [], orders: [], reservations: [], menu: [], categories: [], payments: [], issues: [], help: [] });
+  const canManageStaff = ['SUPER_ADMIN', 'MANAGER'].includes(currentUser?.role);
+  const [data, setData] = useState({ restaurant: null, tables: [], orders: [], reservations: [], menu: [], categories: [], payments: [], issues: [], help: [], staff: [], allRestaurants: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState('');
-  const [filter, setFilterState] = useState(() => getSavedFilter(section));
-  const [tableArea, setTableAreaState] = useState(getSavedTableArea);
+  const [filter, setFilter] = useState('ALL');
+  const [tableArea, setTableArea] = useState('everyday');
   const [category, setCategory] = useState('ALL');
   const [dashboardDate, setDashboardDate] = useState(today());
   const [orderDate, setOrderDate] = useState(today());
-  const [reservationDate, setReservationDate] = useState(today());
+  const [reservationDate, setReservationDate] = useState('');
   const [historyDate, setHistoryDate] = useState(today());
   const [dialog, setDialog] = useState(null);
   const [selected, setSelected] = useState(null);
   const [reservationEdit, setReservationEdit] = useState(null);
 
-  const setFilter = useCallback((nextFilter) => {
-    setFilterState(prev => {
-      const val = typeof nextFilter === 'function' ? nextFilter(prev) : nextFilter;
-      saveFilter(section, val);
-      return val;
-    });
-  }, [section]);
-
-  const setTableArea = useCallback((nextArea) => {
-    setTableAreaState(prev => {
-      const val = typeof nextArea === 'function' ? nextArea(prev) : nextArea;
-      saveTableArea(val);
-      return val;
-    });
-  }, []);
-
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const [restaurant, tables, orders, reservations, menu, categories, payments, issues, help] = await Promise.all([
+      const canManageStaff = ['SUPER_ADMIN', 'MANAGER'].includes(currentUser?.role);
+      const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
+      const [restaurant, tables, orders, reservations, menu, categories, payments, issues, help, staff, allRestaurants] = await Promise.all([
         api.getRestaurant(),
         api.getTables(),
         api.getOrders(),
@@ -669,36 +783,60 @@ export default function PosWorkspace() {
         api.getCategories(),
         api.getPayments(),
         api.getIssues(),
-        api.getHelpRequests()
+        api.getHelpRequests(),
+        canManageStaff ? api.getStaff(getActiveRestaurantId()).catch(() => []) : Promise.resolve([]),
+        isSuperAdmin ? api.getRestaurants().catch(() => []) : Promise.resolve([])
       ]);
-      setData({ restaurant, tables, orders, reservations, menu, categories, payments, issues, help });
+      setData({
+        restaurant,
+        tables,
+        orders,
+        reservations,
+        menu,
+        categories,
+        payments,
+        issues,
+        help,
+        staff: Array.isArray(staff) ? staff : [],
+        allRestaurants: Array.isArray(allRestaurants) ? allRestaurants : []
+      });
       setError('');
     } catch (e) {
       setError(e.message);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [currentUser?.role]);
 
   useEffect(() => {
     load();
     const unsub = subscribeRealtimeEvents((type, payload) => {
-      if (type === 'NEW_TABLE_RESERVATION') {
+      if (type === 'NEW_ORDER') {
+        if (section !== 'orders') setNewOrderAlert(true);
+      } else if (type === 'NEW_TABLE_RESERVATION') {
+        if (section !== 'reservations') setNewReservationAlert(true);
         addToast(`New booking: ${payload?.bookingId || ''} (${payload?.customerName || 'Guest'}, ${tableTitle(payload)})`, 'info');
-      } else if (type === 'TABLE_STATUS_UPDATED' && payload?.status === 'RESERVED') {
-        addToast(`${tableTitle(payload?.table || payload)} is now RESERVED for ${payload?.customerName || 'guest'} (10m before arrival)`, 'warning');
+      } else if (type === 'TABLE_STATUS_UPDATED' || type === 'CUSTOMER_HELP_REQUEST') {
+        if (section !== 'tables') setNewTableAlert(true);
+        if (type === 'TABLE_STATUS_UPDATED' && payload?.status === 'RESERVED') {
+          addToast(`${tableTitle(payload?.table || payload)} is now RESERVED for ${payload?.customerName || 'guest'} (10m before arrival)`, 'warning');
+        }
       }
       load(true);
     });
     const id = setInterval(() => load(true), 10000);
-    return () => { unsub(); clearInterval(id); };
-  }, [load, addToast]);
+    const handleOutletChanged = () => {
+      load();
+    };
+    window.addEventListener('rs_outlet_changed', handleOutletChanged);
+    return () => {
+      unsub();
+      clearInterval(id);
+      window.removeEventListener('rs_outlet_changed', handleOutletChanged);
+    };
+  }, [load, addToast, section]);
 
-  useEffect(() => {
-    setFilterState(getSavedFilter(section));
-    setQuery('');
-    setCategory('ALL');
-  }, [section]);
+  useEffect(() => { setFilter('ALL'); setQuery(''); setCategory('ALL'); }, [section]);
 
   const paidIds = useMemo(() => new Set(data.orders.filter(o => o.paymentStatus === 'PAID' || data.payments.filter(p => p.orderId === o.orderId && p.status === 'PAID').reduce((n, p) => n + Number(p.amount), 0) >= Number(o.total)).map(o => o.orderId)), [data.orders, data.payments]);
   const active = data.orders.filter(o => !DONE.includes(o.status));
@@ -722,6 +860,36 @@ export default function PosWorkspace() {
     if (!dashboardDate) return data.reservations;
     return data.reservations.filter(r => r.reservationDate?.slice(0, 10) === dashboardDate);
   }, [data.reservations, dashboardDate]);
+
+  const visibleReservations = useMemo(() => {
+    return data.reservations
+      .filter(r => (!reservationDate || r.reservationDate?.slice(0, 10) === reservationDate))
+      .filter(r => filter === 'ALL' || (filter === 'CONFIRMED' ? ['CONFIRMED', 'RESCHEDULED', 'PENDING'].includes(r.status) : r.status === filter))
+      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  }, [data.reservations, reservationDate, filter]);
+
+  const resDateCounts = useMemo(() => {
+    const todayStr = today();
+    const tomorrowStr = tomorrow();
+    const todayCount = data.reservations.filter(r => r.reservationDate?.slice(0, 10) === todayStr).length;
+    const tomorrowCount = data.reservations.filter(r => r.reservationDate?.slice(0, 10) === tomorrowStr).length;
+    const totalCount = data.reservations.length;
+    return { todayCount, tomorrowCount, totalCount };
+  }, [data.reservations]);
+
+  const resStatusCounts = useMemo(() => {
+    const base = reservationDate
+      ? data.reservations.filter(r => r.reservationDate?.slice(0, 10) === reservationDate)
+      : data.reservations;
+    return {
+      ALL: base.length,
+      CONFIRMED: base.filter(r => ['CONFIRMED', 'RESCHEDULED', 'PENDING'].includes(r.status)).length,
+      ARRIVED: base.filter(r => r.status === 'ARRIVED').length,
+      SEATED: base.filter(r => r.status === 'SEATED').length,
+      COMPLETED: base.filter(r => r.status === 'COMPLETED').length,
+      CANCELLED: base.filter(r => r.status === 'CANCELLED').length,
+    };
+  }, [data.reservations, reservationDate]);
 
   const earning = dashboardPayments
     .filter(p => p.status === 'PAID')
@@ -754,14 +922,22 @@ export default function PosWorkspace() {
   const handleAddItems = session => {
     newOrder(session.tableInfo || { tableId: session.tableId, tableNumber: session.tableNumber });
   };
+  const handleMarkDelivered = async (orderId) => {
+    await run(
+      () => api.updateOrderStatus(orderId, 'DELIVERED'),
+      'Order marked as delivered to customer.'
+    );
+  };
   const newReservation = () => { setReservationEdit(null); setDialog('reservation'); };
   const tableOrders = t => data.orders.filter(o => o.tableId === t.tableId && !['CANCELLED', 'CONFIRMATION_TIMEOUT'].includes(o.status) && (!DONE.includes(o.status) || !paidIds.has(o.orderId)));
   const getTableInfo = t => {
-    const booking = data.reservations.find(r => r.tableId === t.tableId && !['CANCELLED', 'NO_SHOW', 'COMPLETED'].includes(r.status) && (r.reservationDate?.slice(0, 10) === today() || r.reservationDate?.slice(0, 10) === tomorrow()));
+    // Booking time and guest name only appear 10 minutes before arrival
+    const booking = data.reservations.find(r => r.tableId === t.tableId && isBookingDueIn10Min(r));
+    const effectiveStatus = (t.status === 'RESERVED' && !booking) ? 'AVAILABLE' : t.status;
     const orders = tableOrders(t);
     return {
-      guestName: t.status === 'RESERVED' ? t.currentCustomerName : null,
-      bookingLabel: t.status === 'AVAILABLE' && booking ? `Booked ${booking.reservationTime?.slice(0, 5)}` : null,
+      guestName: effectiveStatus === 'RESERVED' ? (t.currentCustomerName || booking?.customerName) : (booking ? booking.customerName : null),
+      bookingLabel: (effectiveStatus === 'AVAILABLE' && booking) ? `Booked ${booking.reservationTime?.slice(0, 5)}` : null,
       billTotal: orders.length ? money(orders.reduce((sum, order) => sum + order.total, 0)) : null,
     };
   };
@@ -772,7 +948,8 @@ export default function PosWorkspace() {
 
   const ORDER_TABS = useMemo(() => [
     { id: 'ALL', name: 'All orders' },
-    { id: 'NEW', name: 'New order' },
+    { id: 'NEW', name: 'New items' },
+    { id: 'DELIVERED', name: 'Delivered' },
     { id: 'IN_PROGRESS', name: 'In progress' },
     { id: 'READY', name: 'Ready to serve' },
     { id: 'COMPLETED', name: 'Completed' },
@@ -787,6 +964,7 @@ export default function PosWorkspace() {
     return {
       ALL: activeSessions.length > 0 ? activeSessions.length : orderSessions.length,
       NEW: activeSessions.filter(s => s.hasNewItems).length,
+      DELIVERED: orderSessions.filter(s => s.hasDeliveredItems).length,
       IN_PROGRESS: activeSessions.filter(s => s.hasPreparingItems).length,
       READY: activeSessions.filter(s => s.hasReadyItems).length,
       COMPLETED: orderSessions.filter(s => s.isPaid || (s.isClosed && !s.isCancelled)).length,
@@ -807,6 +985,8 @@ export default function PosWorkspace() {
       }
     } else if (filter === 'NEW') {
       list = list.filter(s => !s.isClosed && s.hasNewItems);
+    } else if (filter === 'DELIVERED') {
+      list = list.filter(s => s.hasDeliveredItems);
     } else if (filter === 'IN_PROGRESS') {
       list = list.filter(s => !s.isClosed && s.hasPreparingItems);
     } else if (filter === 'READY') {
@@ -921,30 +1101,8 @@ export default function PosWorkspace() {
     .filter(o => filter === 'ALL' || (filter === 'ACTIVE' ? !DONE.includes(o.status) : filter === 'COMPLETED' ? ['DELIVERED', 'PICKED_UP'].includes(o.status) : filter === 'CANCELLED' ? ['CANCELLED', 'CONFIRMATION_TIMEOUT'].includes(o.status) : o.source === filter || o.status === filter))
     .filter(o => `${o.orderNumber} ${o.customerName} ${o.customerPhone || ''} ${o.tableNumber ? `${tableLabel(o)} Table ${o.tableNumber}` : ''}`.toLowerCase().includes(query.toLowerCase()));
 
-  const getOrderTabCount = useCallback((id) => {
-    const list = orderDate ? data.orders.filter(o => toLocalDate(o.createdAt) === orderDate) : data.orders;
-    if (id === 'ALL') return list.length;
-    if (id === 'ACTIVE') return list.filter(o => !DONE.includes(o.status)).length;
-    if (id === 'READY') return list.filter(o => o.status === 'READY').length;
-    if (id === 'COMPLETED') return list.filter(o => ['DELIVERED', 'PICKED_UP'].includes(o.status)).length;
-    if (id === 'CANCELLED') return list.filter(o => ['CANCELLED', 'CONFIRMATION_TIMEOUT'].includes(o.status)).length;
-    return list.filter(o => o.source === id).length;
-  }, [data.orders, orderDate]);
-
-  const getHistoryTabCount = useCallback((id) => {
-    const list = data.orders.filter(o => DONE.includes(o.status) && (!historyDate || toLocalDate(o.createdAt) === historyDate));
-    if (id === 'ALL') return list.length;
-    if (id === 'COMPLETED') return list.filter(o => ['DELIVERED', 'PICKED_UP'].includes(o.status)).length;
-    if (id === 'CANCELLED') return list.filter(o => ['CANCELLED', 'CONFIRMATION_TIMEOUT'].includes(o.status)).length;
-    return list.filter(o => o.source === id).length;
-  }, [data.orders, historyDate]);
-
-  const getReservationTabCount = useCallback((id) => {
-    return data.reservations.filter(r => (!reservationDate || r.reservationDate?.slice(0, 10) === reservationDate) && (id === 'ALL' || r.status === id)).length;
-  }, [data.reservations, reservationDate]);
-
   return (
-    <PosShell alertCount={openIssues.length + openHelp.length} onAlerts={() => navigate('/pos/notifications')}>
+    <PosShell alertCount={openIssues.length + openHelp.length} onAlerts={() => navigate('/pos/notifications')} menuDots={menuDots}>
       {({ now }) => <>
         {error && <div className="pos-error" role="alert"><AlertCircle size={16} /><span>{error}</span><button onClick={() => load()}>Try again</button></div>}
         {section === 'dashboard' ? (
@@ -992,7 +1150,7 @@ export default function PosWorkspace() {
                     <div className="pos-panels">
                       <section className="pos-panel">
                         <div className="pos-panel-header">
-                          <h2>In progress <span className="pos-count">{dashboardActive.length}</span></h2>
+                          <h2>In progress {dashboardActive.length > 0 && <span className="pos-count">{dashboardActive.length}</span>}</h2>
                           <Link className="pos-text-link" to="/pos/orders">View all <ArrowUpRight size={11} /></Link>
                         </div>
                         <div className="pos-panel-content">
@@ -1009,7 +1167,7 @@ export default function PosWorkspace() {
 
                       <section className="pos-panel">
                         <div className="pos-panel-header">
-                          <h2>Waiting for payment <span className="pos-count">{unpaid.length}</span></h2>
+                          <h2>Waiting for payment {unpaid.length > 0 && <span className="pos-count">{unpaid.length}</span>}</h2>
                           <span style={{ fontSize: 10, color: 'var(--p-muted)' }}>{money(unpaid.reduce((n, o) => n + Number(o.total), 0))}</span>
                         </div>
                         <div className="pos-panel-content">
@@ -1024,7 +1182,7 @@ export default function PosWorkspace() {
 
                     <section className="pos-panel" style={{ marginTop: 20 }}>
                       <div className="pos-panel-header">
-                        <h2><CalendarDays size={16} style={{ display: 'inline', marginRight: 7, color: 'var(--p-blue)' }} /> Table reservations from website <span className="pos-count">{dashboardReservations.filter(r => !['CANCELLED', 'NO_SHOW', 'COMPLETED'].includes(r.status)).length}</span></h2>
+                        <h2><CalendarDays size={16} style={{ display: 'inline', marginRight: 7, color: 'var(--p-blue)' }} /> Table reservations from website {dashboardReservations.filter(r => !['CANCELLED', 'NO_SHOW', 'COMPLETED'].includes(r.status)).length > 0 && <span className="pos-count">{dashboardReservations.filter(r => !['CANCELLED', 'NO_SHOW', 'COMPLETED'].includes(r.status)).length}</span>}</h2>
                         <Link className="pos-text-link" to="/pos/reservations">View &amp; manage all <ArrowUpRight size={11} /></Link>
                       </div>
                       <div className="pos-panel-content">
@@ -1125,17 +1283,51 @@ export default function PosWorkspace() {
           <>
             <div className="pos-toolbar">
               <h1 className="pos-page-title">
-                {section === 'orders' ? <ClipboardList /> : section === 'tables' ? <Armchair /> : section === 'reservations' ? <CalendarDays /> : section === 'history' ? <History /> : section === 'inventory' ? <Package /> : <Bell />}
-                {({ orders: 'Orders', tables: 'Table overview', reservations: 'Reservations', history: 'Order history', inventory: 'Inventory', notifications: 'Notifications & assistance' })[section] || 'Workspace'}
+                {section === 'orders' ? <ClipboardList /> : section === 'tables' ? <Armchair /> : section === 'reservations' ? <CalendarDays /> : section === 'history' ? <History /> : section === 'inventory' ? <Package /> : section === 'staff' ? <Users /> : <Bell />}
+                {({ orders: 'Orders', tables: 'Table overview', reservations: 'Reservations', history: 'Order history', inventory: 'Inventory', staff: currentUser?.role === 'SUPER_ADMIN' ? 'Hotel Staff & Managers' : 'Restaurant Staff Roster', notifications: 'Notifications & assistance' })[section] || 'Workspace'}
               </h1>
               <div className="pos-toolbar-actions">
                 {section === 'orders' && <PosDateFilter value={orderDate} onChange={setOrderDate} labelText="Filter orders by date" showAllOption={false} />}
                 {section === 'history' && <PosDateFilter value={historyDate} onChange={setHistoryDate} labelText="Filter history by date" showAllOption={false} />}
                 {section === 'reservations' && <PosDateFilter value={reservationDate} onChange={setReservationDate} labelText="Filter reservations by date" allLabel="All history" showAllOption={true} />}
-                {['orders', 'history', 'inventory'].includes(section) && <SearchField value={query} onChange={setQuery} placeholder={section === 'inventory' ? 'Search menu items…' : 'Search order or customer…'} />}
+                {['orders', 'history', 'inventory', 'staff'].includes(section) && <SearchField value={query} onChange={setQuery} placeholder={section === 'inventory' ? 'Search menu items…' : section === 'staff' ? 'Search staff by name, email, phone…' : 'Search order or customer…'} />}
                 <button className="pos-icon-button" onClick={() => load()} aria-label="Refresh"><RefreshCw size={15} className={loading ? 'pos-spin' : ''} /></button>
                 {section === 'reservations' && <button className="pos-button primary" onClick={newReservation}><Plus /> Add new reservation</button>}
-                {!['history', 'notifications', 'inventory', 'reservations'].includes(section) && <button className="pos-button primary" onClick={() => newOrder()}><Plus /> Create new order</button>}
+                {section === 'inventory' && canManageStaff && (
+                  <>
+                    <button
+                      className="pos-button"
+                      onClick={() => setDialog('add-category')}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                    >
+                      <FolderPlus size={14} /> Add Category
+                    </button>
+                    <button
+                      className="pos-button primary"
+                      onClick={() => setDialog('add-menu-item')}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                    >
+                      <Plus size={14} /> Add Dish / Item
+                    </button>
+                  </>
+                )}
+                {section === 'staff' && (
+                  <>
+                    {currentUser?.role === 'SUPER_ADMIN' && (
+                      <button
+                        className="pos-button primary"
+                        onClick={() => setDialog('add-manager')}
+                        style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%)', color: '#fff', border: 0, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                      >
+                        <UserPlus size={14} /> Add Hotel Manager
+                      </button>
+                    )}
+                    <button className="pos-button" onClick={() => setDialog('add-staff')} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <Plus size={14} /> Add Staff Member
+                    </button>
+                  </>
+                )}
+                {!['history', 'notifications', 'inventory', 'reservations', 'staff'].includes(section) && <button className="pos-button primary" onClick={() => newOrder()}><Plus /> Create new order</button>}
               </div>
             </div>
 
@@ -1147,7 +1339,7 @@ export default function PosWorkspace() {
                     {orderDate && (
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'var(--p-card)', border: '1px solid var(--p-border)', borderRadius: 8, marginBottom: 16 }}>
                         <span style={{ fontSize: 11, fontWeight: 600 }}>
-                          📋 Showing orders for: <strong style={{ color: 'var(--p-blue)' }}>{orderDate === today() ? 'Today' : orderDate === yesterday() ? 'Yesterday' : orderDate === tomorrow() ? 'Tomorrow' : shortDate(orderDate)}</strong> ({filteredSessions.length} {filteredSessions.length === 1 ? 'table / order session' : 'table / order sessions'})
+                          📋 Showing orders for: <strong style={{ color: 'var(--p-blue)' }}>{orderDate === today() ? 'Today' : orderDate === yesterday() ? 'Yesterday' : orderDate === tomorrow() ? 'Tomorrow' : shortDate(orderDate)}</strong>{filteredSessions.length > 0 && ` (${filteredSessions.length} ${filteredSessions.length === 1 ? 'table / order session' : 'table / order sessions'})`}
                         </span>
                         {orderDate !== today() && (
                           <button className="pos-button small" onClick={() => setOrderDate(today())}>Jump to today</button>
@@ -1162,7 +1354,7 @@ export default function PosWorkspace() {
                           onClick={() => setFilter(id)}
                         >
                           {name}
-                          {typeof tabCounts[id] === 'number' && (
+                          {typeof tabCounts[id] === 'number' && tabCounts[id] > 0 && (
                             <span className="pos-count">{tabCounts[id]}</span>
                           )}
                         </button>
@@ -1177,6 +1369,7 @@ export default function PosWorkspace() {
                             onDetails={openOrder}
                             onPay={pay}
                             onAddItems={handleAddItems}
+                            onMarkDelivered={handleMarkDelivered}
                           />
                         ))}
                       </div>
@@ -1195,7 +1388,7 @@ export default function PosWorkspace() {
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'var(--p-card)', border: '1px solid var(--p-border)', borderRadius: 8, marginBottom: 16 }}>
                       <div>
                         <span style={{ fontSize: 11, fontWeight: 650 }}>
-                          📜 {historyDate ? (historyDate === today() ? 'Today’s closed sessions' : historyDate === yesterday() ? 'Yesterday’s closed sessions' : `Closed sessions for ${shortDate(historyDate)}`) : 'All historical dining sessions'} ({filteredHistorySessions.length} {filteredHistorySessions.length === 1 ? 'session' : 'sessions'})
+                          📜 {historyDate ? (historyDate === today() ? 'Today’s closed sessions' : historyDate === yesterday() ? 'Yesterday’s closed sessions' : `Closed sessions for ${shortDate(historyDate)}`) : 'All historical dining sessions'}{filteredHistorySessions.length > 0 && ` (${filteredHistorySessions.length} ${filteredHistorySessions.length === 1 ? 'session' : 'sessions'})`}
                         </span>
                         <span style={{ display: 'block', fontSize: 10, color: 'var(--p-muted)', marginTop: 2 }}>
                           Total closed revenue: <b style={{ color: 'var(--p-text)' }}>{money(totalHistoryRevenue)}</b>
@@ -1211,7 +1404,7 @@ export default function PosWorkspace() {
                           onClick={() => setFilter(id)}
                         >
                           {name}
-                          {typeof historyTabCounts[id] === 'number' && (
+                          {typeof historyTabCounts[id] === 'number' && historyTabCounts[id] > 0 && (
                             <span className="pos-count">{historyTabCounts[id]}</span>
                           )}
                         </button>
@@ -1226,6 +1419,7 @@ export default function PosWorkspace() {
                             onDetails={openOrder}
                             onPay={pay}
                             onAddItems={handleAddItems}
+                            onMarkDelivered={handleMarkDelivered}
                           />
                         ))}
                       </div>
@@ -1245,11 +1439,15 @@ export default function PosWorkspace() {
                       <div className="pos-table-status-controls">
                         <span className="pos-table-status-label">Live table status</span>
                         <div className="pos-tabs" style={{ margin: 0 }}>
-                          {[['ALL', 'All tables'], ['AVAILABLE', 'Available'], ['OCCUPIED', 'Occupied'], ['RESERVED', 'Reserved'], ['WAITING_FOR_CLEANING', 'Cleaning']].map(([id, name]) => (
-                            <button type="button" className={`pos-tab ${filter === id ? 'active' : ''}`} aria-pressed={filter === id} onClick={() => setFilter(id)} key={id}>
-                              {name}<span>{id === 'ALL' ? diningAreaTables.length : id === 'WAITING_FOR_CLEANING' ? diningAreaTables.filter(t => ['WAITING_FOR_CLEANING', 'CLEANING'].includes(t.status)).length : diningAreaTables.filter(t => t.status === id).length}</span>
-                            </button>
-                          ))}
+                          {[['ALL', 'All tables'], ['AVAILABLE', 'Available'], ['OCCUPIED', 'Occupied'], ['RESERVED', 'Reserved'], ['WAITING_FOR_CLEANING', 'Cleaning']].map(([id, name]) => {
+                            const count = id === 'ALL' ? diningAreaTables.length : id === 'WAITING_FOR_CLEANING' ? diningAreaTables.filter(t => ['WAITING_FOR_CLEANING', 'CLEANING'].includes(t.status)).length : diningAreaTables.filter(t => t.status === id).length;
+                            return (
+                              <button type="button" className={`pos-tab ${filter === id ? 'active' : ''}`} aria-pressed={filter === id} onClick={() => setFilter(id)} key={id}>
+                                {name}
+                                {count > 0 && <span>{count}</span>}
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
                       <div className="pos-floor-header">
@@ -1270,17 +1468,29 @@ export default function PosWorkspace() {
                       getTableInfo={getTableInfo}
                       empty={<Empty icon={Armchair} title="No tables in this view">Select another table status.</Empty>}
                       renderTable={(t, layout) => {
-                          const activeBooking = data.reservations.find(r => r.tableId === t.tableId && !['CANCELLED', 'NO_SHOW', 'COMPLETED'].includes(r.status) && (r.reservationDate?.slice(0, 10) === today() || r.reservationDate?.slice(0, 10) === tomorrow()));
+                          // Booking only appears 10 minutes before scheduled reservation time
+                          const activeBooking = data.reservations.find(r => r.tableId === t.tableId && isBookingDueIn10Min(r));
+                          const effectiveStatus = (t.status === 'RESERVED' && !activeBooking) ? 'AVAILABLE' : t.status;
+                          const guestName = effectiveStatus === 'RESERVED' ? (t.currentCustomerName || activeBooking?.customerName) : null;
                           return (
                             <FloorPlanTable
                               key={t.tableId}
-                              table={t}
+                              table={{ ...t, status: effectiveStatus }}
                               layout={layout}
                               onClick={() => { setSelected(t); setDialog('table'); }}
-                              aria-label={`${tableTitle(t)}, ${t.capacity} seats, ${label(t.status)}`}
+                              aria-label={`${tableTitle(t)}, ${t.capacity} seats, ${label(effectiveStatus)}`}
                             >
-                              {t.status !== 'AVAILABLE' && <span className="pos-table-status" title={t.status === 'RESERVED' && t.currentCustomerName ? `Reserved · ${t.currentCustomerName}` : label(t.status)}>{t.status === 'RESERVED' && t.currentCustomerName ? `Reserved · ${t.currentCustomerName}` : label(t.status)}</span>}
-                              {t.status === 'AVAILABLE' && activeBooking && <span className="pos-table-status pos-plan-booking">Booked {activeBooking.reservationTime?.slice(0, 5)}</span>}
+                              {effectiveStatus !== 'AVAILABLE' && (
+                                <span className="pos-table-status" title={guestName ? `Reserved · ${guestName}` : label(effectiveStatus)}>
+                                  {guestName ? `Reserved · ${guestName}` : label(effectiveStatus)}
+                                </span>
+                              )}
+                              {effectiveStatus === 'AVAILABLE' && activeBooking && (
+                                <span className="pos-table-status pos-plan-booking">
+                                  Booked {activeBooking.reservationTime?.slice(0, 5)}
+                                  {activeBooking.customerName ? ` · ${activeBooking.customerName.split(' ')[0]}` : ''}
+                                </span>
+                              )}
                               {tableOrders(t).length > 0 && <small>{money(tableOrders(t).reduce((s, o) => s + o.total, 0))}</small>}
                             </FloorPlanTable>
                           );
@@ -1295,7 +1505,8 @@ export default function PosWorkspace() {
                     <p className="pos-section-note">Table availability is calculated for your selected date, time and party size. Tables are assigned automatically to prevent booking conflicts.</p>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'var(--p-card)', border: '1px solid var(--p-border)', borderRadius: 8, marginBottom: 16 }}>
                       <span style={{ fontSize: 11, fontWeight: 600 }}>
-                        📅 Showing: <strong style={{ color: 'var(--p-blue)' }}>{reservationDate ? (reservationDate === today() ? 'Today’s reservations' : reservationDate === yesterday() ? 'Yesterday’s reservations' : reservationDate === tomorrow() ? 'Tomorrow’s reservations' : `Reservations for ${shortDate(reservationDate)}`) : 'All reservation history'}</strong> ({data.reservations.filter(r => (!reservationDate || r.reservationDate?.slice(0, 10) === reservationDate) && (filter === 'ALL' || r.status === filter)).length} bookings)
+                        📅 Showing: <strong style={{ color: 'var(--p-blue)' }}>{reservationDate ? (reservationDate === today() ? 'Today’s reservations' : reservationDate === yesterday() ? 'Yesterday’s reservations' : reservationDate === tomorrow() ? 'Tomorrow’s reservations' : `Reservations for ${shortDate(reservationDate)}`) : 'All reservation history'}</strong>
+                        {visibleReservations.length > 0 ? ` (${visibleReservations.length} bookings)` : ''}
                       </span>
                       {reservationDate ? (
                         <button className="pos-button small" onClick={() => setReservationDate('')}>View all history</button>
@@ -1303,15 +1514,23 @@ export default function PosWorkspace() {
                         <button className="pos-button small" onClick={() => setReservationDate(today())}>Show today only</button>
                       )}
                     </div>
-                    <div className="pos-tabs">{['ALL', 'CONFIRMED', 'ARRIVED', 'SEATED', 'COMPLETED', 'CANCELLED'].map(id => { const count = getReservationTabCount(id); return <button key={id} className={`pos-tab ${filter === id ? 'active' : ''}`} onClick={() => setFilter(id)}>{id === 'ALL' ? 'All reservations' : label(id)}{count > 0 && <span>{count}</span>}</button>; })}</div>
+                    <div className="pos-tabs">{['ALL', 'CONFIRMED', 'ARRIVED', 'SEATED', 'COMPLETED', 'CANCELLED'].map(id => <button key={id} className={`pos-tab ${filter === id ? 'active' : ''}`} onClick={() => setFilter(id)}>{id === 'ALL' ? 'All reservations' : label(id)}</button>)}</div>
                     {data.reservations.filter(r => (!reservationDate || r.reservationDate?.slice(0, 10) === reservationDate) && (filter === 'ALL' || r.status === filter)).length ? (
                       <div className="pos-data-wrap">
                         <table className="pos-data-table">
                           <thead><tr><th>Reservation</th><th>Guest</th><th>Date & time</th><th>Table / party</th><th>Status</th><th>Actions</th></tr></thead>
                           <tbody>
-                            {data.reservations.filter(r => (!reservationDate || r.reservationDate?.slice(0, 10) === reservationDate) && (filter === 'ALL' || r.status === filter)).map(r => (
+                            {visibleReservations.map(r => (
                               <tr key={r.reservationId}>
-                                <td><b>{r.bookingId}</b><small>{r.specialRequest || 'No special requests'}</small></td>
+                                <td>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    <b>{r.bookingId}</b>
+                                    {r.createdAt && (Date.now() - new Date(r.createdAt).getTime()) < 1000 * 60 * 30 && (
+                                      <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: '#dcfce7', color: '#15803d', border: '1px solid #bbf7d0' }}>NEW</span>
+                                    )}
+                                  </div>
+                                  <small>{r.specialRequest || 'No special requests'}</small>
+                                </td>
                                 <td>{r.customerName}<small>{r.customerPhone}</small></td>
                                 <td>{shortDate(r.reservationDate)}<small>{r.reservationTime?.slice(0, 5)}</small></td>
                                 <td>{tableTitle(r)}<small>{r.guestCount} guests</small></td>
@@ -1350,13 +1569,51 @@ export default function PosWorkspace() {
                 {section === 'inventory' && (
                   <div className="pos-inventory-layout">
                     <aside className="pos-filter-card">
-                      <h3>Menu categories</h3>
-                      <div className="pos-category-list">
-                        {[{ categoryId: 'ALL', name: 'All items' }, ...data.categories].map(c => (
-                          <button key={c.categoryId} className={category === c.categoryId ? 'active' : ''} onClick={() => setCategory(c.categoryId)}>
-                            {c.name}<span>{data.menu.filter(m => c.categoryId === 'ALL' || m.categoryId === c.categoryId).length}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                        <h3 style={{ margin: 0, fontSize: 13, fontWeight: 700 }}>Menu categories</h3>
+                        {canManageStaff && (
+                          <button
+                            type="button"
+                            className="pos-icon-button"
+                            style={{ width: 26, height: 26, border: '1px solid var(--p-border)', borderRadius: 6, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                            title="Add new category"
+                            onClick={() => setDialog('add-category')}
+                          >
+                            <Plus size={14} />
                           </button>
-                        ))}
+                        )}
+                      </div>
+                      <div className="pos-category-list">
+                        {[{ categoryId: 'ALL', name: 'All items' }, ...data.categories].map(c => {
+                          const count = data.menu.filter(m => c.categoryId === 'ALL' || m.categoryId === c.categoryId).length;
+                          return (
+                            <div key={c.categoryId} style={{ display: 'flex', alignItems: 'center', gap: 4, width: '100%' }}>
+                              <button
+                                style={{ flex: 1, textAlign: 'left', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                                className={category === c.categoryId ? 'active' : ''}
+                                onClick={() => setCategory(c.categoryId)}
+                              >
+                                <span>{c.name}</span>
+                                {count > 0 && <span>{count}</span>}
+                              </button>
+                              {canManageStaff && c.categoryId !== 'ALL' && (
+                                <button
+                                  type="button"
+                                  className="pos-icon-button"
+                                  style={{ width: 24, height: 24, border: 0, opacity: 0.6, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent' }}
+                                  title={`Edit category ${c.name}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditingCategory(c);
+                                    setDialog('edit-category');
+                                  }}
+                                >
+                                  <Pencil size={12} />
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                       <hr style={{ border: 0, borderTop: '1px solid var(--p-border)', margin: '15px 0' }} />
                       <label className="pos-field">
@@ -1369,31 +1626,83 @@ export default function PosWorkspace() {
                       </label>
                     </aside>
                     <div>
-                      <p className="pos-section-note">Availability changes appear on the website, QR menu and every ordering channel.</p>
-                      <div className="pos-menu-grid">
-                        {data.menu.filter(m => (category === 'ALL' || m.categoryId === category) && (filter === 'ALL' || (filter === 'AVAILABLE' ? m.availability : !m.availability)) && m.name.toLowerCase().includes(query.toLowerCase())).map(m => (
-                          <article className="pos-menu-card" key={m.menuItemId}>
-                            <div className="pos-menu-image">
-                              <FoodImage item={m} />
-                              <Badge status={m.availability ? 'AVAILABLE' : 'UNAVAILABLE'}>{m.availability ? 'Available' : 'Sold out'}</Badge>
-                            </div>
-                            <h3><span className={`pos-food-type ${m.vegNonveg === 'VEG' ? '' : 'nonveg'}`} />{m.name}</h3>
-                            <p>{m.description}</p>
-                            <div className="pos-menu-card-bottom">
-                              <strong>{money(m.price)}</strong>
-                              <button
-                                className={`pos-toggle ${m.availability ? 'on' : ''}`}
-                                disabled={busy}
-                                aria-label={`${m.availability ? 'Mark unavailable' : 'Mark available'}: ${m.name}`}
-                                aria-pressed={m.availability}
-                                onClick={() => run(() => api.updateItemAvailability(m.menuItemId, !m.availability), `${m.name} is ${m.availability ? 'sold out' : 'available'}`)}
-                              >
-                                <i />
-                              </button>
-                            </div>
-                          </article>
-                        ))}
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+                        <p className="pos-section-note" style={{ margin: 0 }}>Availability changes appear live on customer QR, website, and kitchen panels.</p>
+                        {canManageStaff && (
+                          <button
+                            type="button"
+                            className="pos-button small primary"
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                            onClick={() => setDialog('add-menu-item')}
+                          >
+                            <Plus size={13} /> Add Dish
+                          </button>
+                        )}
                       </div>
+                      {(() => {
+                        const visibleItems = data.menu.filter(m => (category === 'ALL' || m.categoryId === category) && (filter === 'ALL' || (filter === 'AVAILABLE' ? m.availability : !m.availability)) && m.name.toLowerCase().includes(query.toLowerCase()));
+                        if (!visibleItems.length) {
+                          return (
+                            <div className="pos-panel" style={{ padding: '40px 20px', textAlign: 'center' }}>
+                              <Empty icon={Package} title="No dishes found">
+                                {query ? 'Try a different search keyword.' : 'No dishes found in this category.'}
+                              </Empty>
+                              {canManageStaff && !query && (
+                                <button
+                                  type="button"
+                                  className="pos-button primary"
+                                  style={{ marginTop: 16, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                                  onClick={() => setDialog('add-menu-item')}
+                                >
+                                  <Plus size={14} /> Add First Dish to this Category
+                                </button>
+                              )}
+                            </div>
+                          );
+                        }
+                        return (
+                          <div className="pos-menu-grid">
+                            {visibleItems.map(m => (
+                              <article className="pos-menu-card" key={m.menuItemId}>
+                                <div className="pos-menu-image">
+                                  <FoodImage item={m} />
+                                  <Badge status={m.availability ? 'AVAILABLE' : 'UNAVAILABLE'}>{m.availability ? 'Available' : 'Sold out'}</Badge>
+                                </div>
+                                <h3><span className={`pos-food-type ${m.vegNonveg === 'VEG' ? '' : 'nonveg'}`} />{m.name}</h3>
+                                <p>{m.description}</p>
+                                <div className="pos-menu-card-bottom" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                                  <strong>{money(m.price)}</strong>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    {canManageStaff && (
+                                      <button
+                                        type="button"
+                                        className="pos-icon-button"
+                                        style={{ width: 26, height: 26, borderRadius: 6, border: '1px solid var(--p-border)', background: 'var(--p-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                                        title={`Edit ${m.name}`}
+                                        onClick={() => {
+                                          setEditingItem(m);
+                                          setDialog('edit-menu-item');
+                                        }}
+                                      >
+                                        <Pencil size={12} />
+                                      </button>
+                                    )}
+                                    <button
+                                      className={`pos-toggle ${m.availability ? 'on' : ''}`}
+                                      disabled={busy}
+                                      aria-label={`${m.availability ? 'Mark unavailable' : 'Mark available'}: ${m.name}`}
+                                      aria-pressed={m.availability}
+                                      onClick={() => run(() => api.updateItemAvailability(m.menuItemId, !m.availability), `${m.name} is ${m.availability ? 'sold out' : 'available'}`)}
+                                    >
+                                      <i />
+                                    </button>
+                                  </div>
+                                </div>
+                              </article>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 )}
@@ -1428,6 +1737,203 @@ export default function PosWorkspace() {
                       <section className="pos-panel"><Empty icon={Bell} title="You're all caught up">Customer requests and order issues will appear here.</Empty></section>
                     )}
                   </>
+                )}
+
+                {section === 'staff' && (
+                  <div className="pos-staff-management">
+                    {/* Active outlet context banner */}
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      flexWrap: 'wrap',
+                      gap: 12,
+                      padding: '12px 16px',
+                      background: 'var(--p-card)',
+                      border: '1px solid var(--p-border)',
+                      borderRadius: 10,
+                      marginBottom: 16
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{
+                          width: 38,
+                          height: 38,
+                          borderRadius: 8,
+                          background: 'rgba(79, 70, 229, 0.1)',
+                          color: '#4f46e5',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: 18
+                        }}>
+                          🏨
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--p-text)' }}>
+                            Outlet: {data.restaurant?.name || 'Active Hotel'}
+                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--p-muted)' }}>
+                            {data.restaurant?.address || 'Hotel Branch'} · {filteredStaff.length} staff member{filteredStaff.length === 1 ? '' : 's'} assigned
+                          </div>
+                        </div>
+                      </div>
+                      {currentUser?.role === 'SUPER_ADMIN' && (
+                        <div style={{ fontSize: 11, color: '#4f46e5', fontWeight: 600, background: '#eff6ff', padding: '6px 12px', borderRadius: 8 }}>
+                          💡 Tip: To view/add managers for another hotel, switch outlets from the topbar dropdown.
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Role Filter tabs */}
+                    <div className="pos-tabs" style={{ marginBottom: 16 }}>
+                      {[
+                        { id: 'ALL', name: 'All Staff' },
+                        { id: 'MANAGER', name: 'Managers (👔)' },
+                        { id: 'RECEPTIONIST', name: 'Receptionists (👩‍💼)' },
+                        { id: 'KITCHEN', name: 'Kitchen Staff (👨‍🍳)' },
+                        { id: 'WAITER', name: 'Waiters (🤵)' },
+                      ].map(tab => (
+                        <button
+                          key={tab.id}
+                          className={`pos-tab ${staffRoleFilter === tab.id ? 'active' : ''}`}
+                          onClick={() => setStaffRoleFilter(tab.id)}
+                        >
+                          {tab.name}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Staff List Cards / Grid */}
+                    {filteredStaff.length === 0 ? (
+                      <section className="pos-panel">
+                        <Empty icon={Users} title="No staff members found">
+                          {query ? 'No staff matched your search query.' : 'No staff profiles created for this hotel yet. Use the buttons above to add managers or staff.'}
+                        </Empty>
+                      </section>
+                    ) : (
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+                        gap: 16
+                      }}>
+                        {filteredStaff.map(member => {
+                          const isSelf = member.userId === currentUser?.userId;
+                          const roleBadgeConfig = {
+                            SUPER_ADMIN: { bg: '#fef3c7', text: '#92400e', emoji: '🛡️', label: 'Super Admin' },
+                            MANAGER: { bg: '#ede9fe', text: '#5b21b6', emoji: '👔', label: 'Hotel Manager' },
+                            RECEPTIONIST: { bg: '#e0f2fe', text: '#0369a1', emoji: '👩‍💼', label: 'Receptionist' },
+                            KITCHEN: { bg: '#fef2f2', text: '#b91c1c', emoji: '👨‍🍳', label: 'Kitchen Chef' },
+                            WAITER: { bg: '#ecfdf5', text: '#047857', emoji: '🤵', label: 'Floor Waiter' },
+                          }[member.role] || { bg: '#f1f5f9', text: '#475569', emoji: '👤', label: member.role };
+
+                          const isActive = member.status === 'ACTIVE';
+
+                          return (
+                            <div
+                              key={member.userId}
+                              style={{
+                                background: 'var(--p-card)',
+                                border: '1px solid var(--p-border)',
+                                borderRadius: 12,
+                                padding: 18,
+                                display: 'flex',
+                                flexDirection: 'column',
+                                justifyContent: 'space-between',
+                                transition: 'all 0.15s ease',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                              }}
+                            >
+                              <div>
+                                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12 }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                    <div style={{
+                                      width: 44,
+                                      height: 44,
+                                      borderRadius: 12,
+                                      background: roleBadgeConfig.bg,
+                                      color: roleBadgeConfig.text,
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      fontSize: 20,
+                                      fontWeight: 700
+                                    }}>
+                                      {roleBadgeConfig.emoji}
+                                    </div>
+                                    <div>
+                                      <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0, color: 'var(--p-text)' }}>
+                                        {member.name} {isSelf && <span style={{ fontSize: 10, color: 'var(--p-muted)', fontWeight: 500 }}>(You)</span>}
+                                      </h3>
+                                      <p style={{ fontSize: 11, color: 'var(--p-muted)', margin: '2px 0 0 0' }}>
+                                        {member.email}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <span style={{
+                                    fontSize: 10,
+                                    fontWeight: 700,
+                                    padding: '3px 8px',
+                                    borderRadius: 6,
+                                    background: isActive ? '#dcfce7' : '#fee2e2',
+                                    color: isActive ? '#15803d' : '#b91c1c',
+                                    textTransform: 'uppercase'
+                                  }}>
+                                    {member.status || 'ACTIVE'}
+                                  </span>
+                                </div>
+
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '12px 0', flexWrap: 'wrap' }}>
+                                  <span style={{
+                                    fontSize: 11,
+                                    fontWeight: 700,
+                                    padding: '3px 8px',
+                                    borderRadius: 6,
+                                    background: roleBadgeConfig.bg,
+                                    color: roleBadgeConfig.text,
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4
+                                  }}>
+                                    {roleBadgeConfig.emoji} {roleBadgeConfig.label}
+                                  </span>
+                                  {member.phone && (
+                                    <span style={{ fontSize: 11, color: 'var(--p-muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                      <Phone size={12} /> {member.phone}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div style={{
+                                borderTop: '1px solid var(--p-border)',
+                                paddingTop: 12,
+                                marginTop: 6,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between'
+                              }}>
+                                <span style={{ fontSize: 10, color: 'var(--p-muted)' }}>
+                                  Joined {member.createdAt ? new Date(member.createdAt).toLocaleDateString() : 'N/A'}
+                                </span>
+
+                                {!isSelf && (currentUser?.role === 'SUPER_ADMIN' || (currentUser?.role === 'MANAGER' && !['SUPER_ADMIN', 'MANAGER'].includes(member.role))) && (
+                                  <button
+                                    type="button"
+                                    className={`pos-button small ${isActive ? 'danger' : 'primary'}`}
+                                    disabled={busy}
+                                    onClick={() => handleToggleStaffStatus(member)}
+                                    style={{ height: 26, fontSize: 10, padding: '0 10px' }}
+                                  >
+                                    {isActive ? 'Deactivate' : 'Activate'}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 )}
               </>
             )}
@@ -1468,25 +1974,1846 @@ export default function PosWorkspace() {
         )}
         {dialog === 'reservation' && (
           <ErrorBoundary onReset={close}>
-            <ReservationDialog reservation={reservationEdit} onClose={close} onSaved={async () => { close(); addToast(reservationEdit ? 'Reservation rescheduled' : 'Reservation confirmed', 'success'); await load(true); }} />
+            <ReservationDialog
+              reservation={reservationEdit}
+              onClose={close}
+              onSaved={async (isRescheduled) => {
+                addToast(isRescheduled ? 'Reservation rescheduled' : 'Reservation confirmed', 'success');
+                await load(true);
+                if (!isRescheduled) close();
+              }}
+            />
           </ErrorBoundary>
         )}
-        {dialog === 'cancel-reservation' && (
-          <Modal title="Cancel reservation" onClose={close}>
-            <div className="pos-modal-body">
-              <p style={{ lineHeight: 1.9 }}>Cancel <b>{selected.bookingId}</b> for {selected.customerName}? The assigned table will be released for this time.</p>
-            </div>
-            <div className="pos-modal-footer">
-              <button className="pos-button" onClick={close}>Keep reservation</button>
-              <button className="pos-button danger" disabled={busy} onClick={async () => { if (await run(() => api.updateReservationStatus(selected.reservationId, 'CANCELLED'), 'Reservation cancelled')) close(); }}>Cancel reservation</button>
-            </div>
-          </Modal>
+        {dialog === 'cancel-reservation' && selected && (
+          <ErrorBoundary onReset={close}>
+            <CancelReservationDialog
+              reservation={selected}
+              onClose={close}
+              onCancelled={async () => {
+                await load(true);
+              }}
+            />
+          </ErrorBoundary>
         )}
         {dialog === 'resolve-issue' && (
           <ResolveIssue issue={selected} onClose={close} onResolved={async () => { close(); await load(true); }} />
         )}
+        {dialog === 'add-manager' && (
+          <ErrorBoundary onReset={close}>
+            <AddManagerModal
+              restaurants={data.allRestaurants.length ? data.allRestaurants : (data.restaurant ? [data.restaurant] : [])}
+              defaultRestaurantId={getActiveRestaurantId()}
+              onClose={close}
+              onSuccess={async (msg) => {
+                addToast(msg, 'success');
+                await load(true);
+              }}
+            />
+          </ErrorBoundary>
+        )}
+        {dialog === 'add-staff' && (
+          <ErrorBoundary onReset={close}>
+            <AddStaffModal
+              currentRestaurant={data.restaurant}
+              currentUserRole={currentUser?.role}
+              restaurants={data.allRestaurants.length ? data.allRestaurants : (data.restaurant ? [data.restaurant] : [])}
+              onClose={close}
+              onSuccess={async (msg) => {
+                addToast(msg, 'success');
+                await load(true);
+              }}
+            />
+          </ErrorBoundary>
+        )}
+        {dialog === 'add-category' && (
+          <ErrorBoundary onReset={close}>
+            <AddCategoryModal
+              onClose={close}
+              onSuccess={async () => {
+                close();
+                await load(true);
+              }}
+            />
+          </ErrorBoundary>
+        )}
+        {dialog === 'edit-category' && editingCategory && (
+          <ErrorBoundary onReset={() => { setEditingCategory(null); close(); }}>
+            <EditCategoryModal
+              category={editingCategory}
+              onClose={() => { setEditingCategory(null); close(); }}
+              onSuccess={async () => {
+                setEditingCategory(null);
+                close();
+                await load(true);
+              }}
+            />
+          </ErrorBoundary>
+        )}
+        {dialog === 'add-menu-item' && (
+          <ErrorBoundary onReset={close}>
+            <AddMenuItemModal
+              categories={data.categories}
+              defaultCategoryId={category !== 'ALL' ? category : (data.categories[0]?.categoryId || '')}
+              onClose={close}
+              onSuccess={async () => {
+                close();
+                await load(true);
+              }}
+            />
+          </ErrorBoundary>
+        )}
+        {dialog === 'edit-menu-item' && editingItem && (
+          <ErrorBoundary onReset={() => { setEditingItem(null); close(); }}>
+            <EditMenuItemModal
+              item={editingItem}
+              categories={data.categories}
+              onClose={() => { setEditingItem(null); close(); }}
+              onSuccess={async () => {
+                setEditingItem(null);
+                close();
+                await load(true);
+              }}
+            />
+          </ErrorBoundary>
+        )}
       </>}
     </PosShell>
+  );
+}
+
+function AddManagerModal({ restaurants = [], defaultRestaurantId, onClose, onSuccess }) {
+  const [form, setForm] = useState({
+    restaurantId: defaultRestaurantId || (restaurants[0]?.restaurantId || ''),
+    name: '',
+    email: '',
+    phone: '',
+    password: ''
+  });
+  const [showPassword, setShowPassword] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!form.restaurantId) {
+      setError('Please select a hotel/restaurant.');
+      return;
+    }
+    if (!form.name.trim() || !form.email.trim() || !form.password) {
+      setError('Name, email, and password are required.');
+      return;
+    }
+    if (form.password.length < 6) {
+      setError('Password must be at least 6 characters.');
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+    try {
+      await api.createManager({
+        restaurantId: form.restaurantId,
+        name: form.name.trim(),
+        email: form.email.trim(),
+        phone: form.phone.trim() || null,
+        password: form.password
+      });
+      const hotel = restaurants.find(r => r.restaurantId === form.restaurantId);
+      onSuccess(`Hotel Manager "${form.name}" successfully assigned to ${hotel?.name || 'hotel'}!`);
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Failed to create hotel manager.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title="Assign Hotel General Manager" wide={true} onClose={onClose}>
+      <form onSubmit={handleSubmit} style={{ padding: '24px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 16, borderBottom: '1px solid var(--p-border)', marginBottom: 18 }}>
+          <div style={{ width: 44, height: 44, borderRadius: 12, background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <ShieldCheck size={22} />
+          </div>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>Hotel Executive Assignment</h3>
+            <p style={{ margin: '3px 0 0', fontSize: 11, color: 'var(--p-muted)', lineHeight: 1.4 }}>
+              Assign a dedicated General Manager with full operational authority over menus, orders, tables, and staff.
+            </p>
+          </div>
+        </div>
+
+        {error && (
+          <div className="pos-error" style={{ marginBottom: 16 }} role="alert">
+            <AlertCircle size={15} /> {error}
+          </div>
+        )}
+
+        <label className="pos-field" style={{ marginBottom: 16 }}>
+          <span>Target Hotel / Restaurant Outlet *</span>
+          <div style={{ position: 'relative' }}>
+            <Building2 size={15} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--p-muted)', pointerEvents: 'none' }} />
+            <select
+              className="pos-select"
+              value={form.restaurantId}
+              onChange={e => setForm({ ...form, restaurantId: e.target.value })}
+              style={{ width: '100%', height: 40, paddingLeft: 34, fontWeight: 600 }}
+              required
+            >
+              <option value="">Select Hotel Outlet...</option>
+              {restaurants.map(r => (
+                <option key={r.restaurantId} value={r.restaurantId}>
+                  🏨 {r.name} {r.address ? `— ${r.address.split(',')[0]}` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+        </label>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14, marginBottom: 14 }}>
+          <label className="pos-field">
+            <span>Manager Full Name *</span>
+            <div style={{ position: 'relative' }}>
+              <User size={15} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--p-muted)', pointerEvents: 'none' }} />
+              <input
+                className="pos-input"
+                style={{ paddingLeft: 34 }}
+                value={form.name}
+                onChange={e => setForm({ ...form, name: e.target.value })}
+                placeholder="e.g. Rohit Mehta"
+                required
+                maxLength={150}
+              />
+            </div>
+          </label>
+
+          <label className="pos-field">
+            <span>Login Email Address *</span>
+            <div style={{ position: 'relative' }}>
+              <Mail size={15} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--p-muted)', pointerEvents: 'none' }} />
+              <input
+                type="email"
+                className="pos-input"
+                style={{ paddingLeft: 34 }}
+                value={form.email}
+                onChange={e => setForm({ ...form, email: e.target.value })}
+                placeholder="e.g. manager@hotel.com"
+                required
+                maxLength={255}
+              />
+            </div>
+          </label>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14, marginBottom: 18 }}>
+          <label className="pos-field">
+            <span>Mobile Phone Number <small style={{ color: 'var(--p-muted)' }}>(Optional)</small></span>
+            <div style={{ position: 'relative' }}>
+              <Phone size={15} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--p-muted)', pointerEvents: 'none' }} />
+              <input
+                type="tel"
+                className="pos-input"
+                style={{ paddingLeft: 34 }}
+                value={form.phone}
+                onChange={e => setForm({ ...form, phone: e.target.value })}
+                placeholder="+91 98765 43210"
+                maxLength={30}
+              />
+            </div>
+          </label>
+
+          <label className="pos-field">
+            <span>Initial Password (Min 6 chars) *</span>
+            <div style={{ position: 'relative' }}>
+              <Lock size={15} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--p-muted)', pointerEvents: 'none' }} />
+              <input
+                type={showPassword ? 'text' : 'password'}
+                className="pos-input"
+                style={{ paddingLeft: 34, paddingRight: 36 }}
+                value={form.password}
+                onChange={e => setForm({ ...form, password: e.target.value })}
+                placeholder="Create secure password"
+                required
+                minLength={6}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(p => !p)}
+                style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 0, padding: 4, cursor: 'pointer', color: 'var(--p-muted)', display: 'flex' }}
+              >
+                {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+              </button>
+            </div>
+          </label>
+        </div>
+
+        <div className="pos-info-box" style={{ marginBottom: 18 }}>
+          <Info size={15} />
+          <span>The manager will use this email and password to log in. Their access is automatically scoped to this hotel.</span>
+        </div>
+
+        <div className="pos-modal-footer" style={{ padding: '16px 0 0', display: 'flex', gap: 10, justifyContent: 'flex-end', borderTop: '1px solid var(--p-border)', marginTop: 20 }}>
+          <button type="button" className="pos-button" onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="pos-button primary"
+            disabled={busy || !form.name.trim() || !form.email.trim() || !form.password}
+            style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%)', color: '#fff', border: 0, minWidth: 170, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            {busy ? <RefreshCw className="pos-spin" size={14} /> : <UserPlus size={15} />}
+            {busy ? 'Assigning Manager…' : 'Assign General Manager'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function AddStaffModal({ currentRestaurant, currentUserRole, restaurants = [], onClose, onSuccess }) {
+  const isSuperAdmin = currentUserRole === 'SUPER_ADMIN';
+  const [form, setForm] = useState({
+    restaurantId: currentRestaurant?.restaurantId || (restaurants[0]?.restaurantId || ''),
+    name: '',
+    email: '',
+    phone: '',
+    role: 'WAITER',
+    password: ''
+  });
+  const [showPassword, setShowPassword] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const roleDefinitions = [
+    {
+      id: 'RECEPTIONIST',
+      title: 'Receptionist',
+      desc: 'Front desk, table assignment, reservations & customer billing',
+      icon: <UserCheck size={18} />
+    },
+    {
+      id: 'KITCHEN',
+      title: 'Kitchen Staff',
+      desc: 'Live KDS ticket display, order prep & menu availability pass',
+      icon: <ChefHat size={18} />
+    },
+    {
+      id: 'WAITER',
+      title: 'Floor Waiter',
+      desc: 'Dine-in table orders, ready food alerts & customer assistance',
+      icon: <HandPlatter size={18} />
+    },
+    ...(isSuperAdmin ? [{
+      id: 'MANAGER',
+      title: 'Hotel Manager',
+      desc: 'Full operational control over menus, orders, tables & staffing',
+      icon: <ShieldCheck size={18} />
+    }] : [])
+  ];
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    const targetRestId = isSuperAdmin ? (form.restaurantId || currentRestaurant?.restaurantId) : currentRestaurant?.restaurantId;
+
+    if (!targetRestId) {
+      setError('Restaurant outlet ID is required.');
+      return;
+    }
+    if (!form.name.trim() || !form.email.trim() || !form.password) {
+      setError('Name, email, and password are required.');
+      return;
+    }
+    if (form.password.length < 6) {
+      setError('Password must be at least 6 characters.');
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+    try {
+      if (form.role === 'MANAGER' && isSuperAdmin) {
+        await api.createManager({
+          restaurantId: targetRestId,
+          name: form.name.trim(),
+          email: form.email.trim(),
+          phone: form.phone.trim() || null,
+          password: form.password
+        });
+        onSuccess(`Manager "${form.name}" successfully created!`);
+      } else {
+        await api.createStaff({
+          restaurantId: targetRestId,
+          name: form.name.trim(),
+          email: form.email.trim(),
+          phone: form.phone.trim() || null,
+          role: form.role,
+          password: form.password
+        });
+        onSuccess(`${form.role.replace('_', ' ')} "${form.name}" successfully created!`);
+      }
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Failed to create staff member.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title="Add Team Member" wide={true} onClose={onClose}>
+      <form onSubmit={handleSubmit} style={{ padding: '24px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 16, borderBottom: '1px solid var(--p-border)', marginBottom: 18 }}>
+          <div style={{ width: 44, height: 44, borderRadius: 12, background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <UserPlus size={22} />
+          </div>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>New Staff Credential Setup</h3>
+            <p style={{ margin: '3px 0 0', fontSize: 11, color: 'var(--p-muted)', lineHeight: 1.4 }}>
+              Create verified station access credentials for front desk, kitchen line, or floor waitstaff.
+            </p>
+          </div>
+        </div>
+
+        {error && (
+          <div className="pos-error" style={{ marginBottom: 16 }} role="alert">
+            <AlertCircle size={15} /> {error}
+          </div>
+        )}
+
+        {isSuperAdmin && restaurants.length > 0 ? (
+          <label className="pos-field" style={{ marginBottom: 16 }}>
+            <span>Target Hotel Outlet *</span>
+            <div style={{ position: 'relative' }}>
+              <Building2 size={15} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--p-muted)', pointerEvents: 'none' }} />
+              <select
+                className="pos-select"
+                value={form.restaurantId}
+                onChange={e => setForm({ ...form, restaurantId: e.target.value })}
+                style={{ width: '100%', height: 40, paddingLeft: 34, fontWeight: 600 }}
+                required
+              >
+                {restaurants.map(r => (
+                  <option key={r.restaurantId} value={r.restaurantId}>
+                    🏨 {r.name} {r.address ? `— ${r.address.split(',')[0]}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </label>
+        ) : (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '10px 14px',
+            background: 'var(--p-elevated)',
+            border: '1px solid var(--p-border)',
+            borderRadius: 10,
+            marginBottom: 16,
+            fontSize: 12
+          }}>
+            <Building2 size={16} style={{ color: 'var(--p-blue)' }} />
+            <div>
+              <span style={{ color: 'var(--p-muted)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.4px', display: 'block' }}>Assigned Hotel Outlet</span>
+              <strong>{currentRestaurant?.name || 'Current Restaurant'}</strong>
+            </div>
+          </div>
+        )}
+
+        {/* Interactive Role Cards */}
+        <div style={{ marginBottom: 18 }}>
+          <span style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--p-text)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+            Operational Role & Station *
+          </span>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+            {roleDefinitions.map(r => {
+              const isSelected = form.role === r.id;
+              return (
+                <div
+                  key={r.id}
+                  onClick={() => setForm({ ...form, role: r.id })}
+                  style={{
+                    border: isSelected ? '2px solid #3b82f6' : '1px solid var(--p-border)',
+                    background: isSelected ? 'var(--p-blue-soft)' : 'var(--p-card)',
+                    borderRadius: 10,
+                    padding: '12px 14px',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: 8,
+                        background: isSelected ? '#3b82f6' : 'var(--p-elevated)',
+                        color: isSelected ? '#ffffff' : 'var(--p-text)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        transition: 'all 0.15s ease'
+                      }}>
+                        {r.icon}
+                      </div>
+                      <strong style={{ fontSize: 13, fontWeight: 700 }}>{r.title}</strong>
+                    </div>
+                    {isSelected && <CheckCircle2 size={16} style={{ color: '#3b82f6' }} />}
+                  </div>
+                  <span style={{ fontSize: 11, color: 'var(--p-muted)', lineHeight: 1.4 }}>
+                    {r.desc}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Credentials Form */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14, marginBottom: 14 }}>
+          <label className="pos-field">
+            <span>Staff Member Name *</span>
+            <div style={{ position: 'relative' }}>
+              <User size={15} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--p-muted)', pointerEvents: 'none' }} />
+              <input
+                className="pos-input"
+                style={{ paddingLeft: 34 }}
+                value={form.name}
+                onChange={e => setForm({ ...form, name: e.target.value })}
+                placeholder="e.g. Kunal Sharma"
+                required
+                maxLength={150}
+              />
+            </div>
+          </label>
+
+          <label className="pos-field">
+            <span>Login Email Address *</span>
+            <div style={{ position: 'relative' }}>
+              <Mail size={15} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--p-muted)', pointerEvents: 'none' }} />
+              <input
+                type="email"
+                className="pos-input"
+                style={{ paddingLeft: 34 }}
+                value={form.email}
+                onChange={e => setForm({ ...form, email: e.target.value })}
+                placeholder="e.g. waiter.kunal@hotel.com"
+                required
+                maxLength={255}
+              />
+            </div>
+          </label>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14, marginBottom: 18 }}>
+          <label className="pos-field">
+            <span>Phone Number <small style={{ color: 'var(--p-muted)' }}>(Optional)</small></span>
+            <div style={{ position: 'relative' }}>
+              <Phone size={15} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--p-muted)', pointerEvents: 'none' }} />
+              <input
+                type="tel"
+                className="pos-input"
+                style={{ paddingLeft: 34 }}
+                value={form.phone}
+                onChange={e => setForm({ ...form, phone: e.target.value })}
+                placeholder="+91 98765 43210"
+                maxLength={30}
+              />
+            </div>
+          </label>
+
+          <label className="pos-field">
+            <span>Station Password (Min 6 chars) *</span>
+            <div style={{ position: 'relative' }}>
+              <Lock size={15} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--p-muted)', pointerEvents: 'none' }} />
+              <input
+                type={showPassword ? 'text' : 'password'}
+                className="pos-input"
+                style={{ paddingLeft: 34, paddingRight: 36 }}
+                value={form.password}
+                onChange={e => setForm({ ...form, password: e.target.value })}
+                placeholder="Create station password"
+                required
+                minLength={6}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(p => !p)}
+                style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 0, padding: 4, cursor: 'pointer', color: 'var(--p-muted)', display: 'flex' }}
+              >
+                {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+              </button>
+            </div>
+          </label>
+        </div>
+
+        <div className="pos-info-box" style={{ marginBottom: 18 }}>
+          <Info size={15} />
+          <span>Staff members sign in at <b>/login</b> using their email and password. Portal routes are automatically guarded by role.</span>
+        </div>
+
+        <div className="pos-modal-footer" style={{ padding: '16px 0 0', display: 'flex', gap: 10, justifyContent: 'flex-end', borderTop: '1px solid var(--p-border)', marginTop: 20 }}>
+          <button type="button" className="pos-button" onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="pos-button primary"
+            disabled={busy || !form.name.trim() || !form.email.trim() || !form.password}
+            style={{ minWidth: 160, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            {busy ? <RefreshCw className="pos-spin" size={14} /> : <Plus size={15} />}
+            {busy ? 'Creating Staff…' : 'Create Staff Member'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function AddCategoryModal({ onClose, onSuccess }) {
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const { addToast } = useNotification();
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!name.trim()) {
+      setError('Category name is required.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      await api.createCategory({
+        name: name.trim(),
+        description: description.trim() || null
+      });
+      addToast(`Category "${name.trim()}" created successfully.`, 'success');
+      if (onSuccess) await onSuccess();
+    } catch (err) {
+      setError(err.message || 'Failed to create category.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title="Add Menu Category" onClose={onClose}>
+      <form onSubmit={handleSubmit} style={{ padding: '24px' }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          padding: '12px 14px',
+          background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(16, 185, 129, 0.05))',
+          borderRadius: 10,
+          border: '1px solid rgba(59, 130, 246, 0.2)',
+          marginBottom: 16
+        }}>
+          <div style={{
+            width: 36,
+            height: 36,
+            borderRadius: 8,
+            background: 'linear-gradient(135deg, #3b82f6, #0d9488)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#fff',
+            flexShrink: 0
+          }}>
+            <FolderPlus size={18} />
+          </div>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--p-text)' }}>New Menu Classification</div>
+            <div style={{ fontSize: 11, color: 'var(--p-muted)', marginTop: 1 }}>
+              Organize dishes into sections (e.g. Starters, Main Course, Biryani, Desserts).
+            </div>
+          </div>
+        </div>
+
+        {error && (
+          <div className="pos-error" style={{ marginBottom: 16 }}>
+            <AlertCircle size={15} /> {error}
+          </div>
+        )}
+
+        <label className="pos-field" style={{ marginBottom: 14 }}>
+          <span>Category Name *</span>
+          <input
+            className="pos-input"
+            value={name}
+            onChange={e => setName(e.target.value)}
+            placeholder="e.g. Starters & Small Bites"
+            required
+            maxLength={100}
+            autoFocus
+            style={{ fontWeight: 600 }}
+          />
+        </label>
+
+        <label className="pos-field" style={{ marginBottom: 14 }}>
+          <span>Category Description <small style={{ color: 'var(--p-muted)' }}>(Optional)</small></span>
+          <textarea
+            className="pos-textarea"
+            value={description}
+            onChange={e => setDescription(e.target.value)}
+            placeholder="Short highlight for guest digital menu..."
+            rows={2}
+            maxLength={300}
+          />
+        </label>
+
+        <div className="pos-modal-footer" style={{ padding: '16px 0 0 0', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+          <button type="button" className="pos-button" onClick={onClose} disabled={busy}>Cancel</button>
+          <button
+            type="submit"
+            className="pos-button primary"
+            disabled={busy || !name.trim()}
+            style={{
+              padding: '8px 20px',
+              fontWeight: 700,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+              boxShadow: '0 4px 12px rgba(37, 99, 235, 0.3)'
+            }}
+          >
+            {busy ? 'Creating…' : <><FolderPlus size={15} /> Create Category</>}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function EditCategoryModal({ category, onClose, onSuccess }) {
+  const [name, setName] = useState(category?.name || '');
+  const [description, setDescription] = useState(category?.description || '');
+  const [sortOrder, setSortOrder] = useState(category?.sortOrder ?? 0);
+  const [status, setStatus] = useState(category?.status || 'ACTIVE');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const { addToast } = useNotification();
+
+  const handleUpdate = async (e) => {
+    e.preventDefault();
+    if (!name.trim()) {
+      setError('Category name is required.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      await api.updateCategory(category.categoryId, {
+        name: name.trim(),
+        description: description.trim() || null,
+        sortOrder: Number(sortOrder) || 0,
+        status
+      });
+      addToast(`Category "${name.trim()}" updated successfully.`, 'success');
+      if (onSuccess) await onSuccess();
+    } catch (err) {
+      setError(err.message || 'Failed to update category.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!window.confirm(`Are you sure you want to remove the category "${category.name}"? If items exist, it will be deactivated.`)) return;
+    setBusy(true);
+    setError('');
+    try {
+      await api.deleteCategory(category.categoryId);
+      addToast(`Category "${category.name}" removed.`, 'success');
+      if (onSuccess) await onSuccess();
+    } catch (err) {
+      setError(err.message || 'Failed to delete category.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title={`Edit Category: ${category?.name}`} onClose={onClose}>
+      <form onSubmit={handleUpdate} style={{ padding: '24px' }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          padding: '12px 14px',
+          background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(147, 51, 234, 0.05))',
+          borderRadius: 10,
+          border: '1px solid rgba(59, 130, 246, 0.2)',
+          marginBottom: 16
+        }}>
+          <div style={{
+            width: 36,
+            height: 36,
+            borderRadius: 8,
+            background: 'linear-gradient(135deg, #2563eb, #7c3aed)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#fff',
+            flexShrink: 0
+          }}>
+            <Pencil size={17} />
+          </div>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--p-text)' }}>Update Category</div>
+            <div style={{ fontSize: 11, color: 'var(--p-muted)', marginTop: 1 }}>
+              Configure category label, sequence ordering, and visibility.
+            </div>
+          </div>
+        </div>
+
+        {error && (
+          <div className="pos-error" style={{ marginBottom: 16 }}>
+            <AlertCircle size={15} /> {error}
+          </div>
+        )}
+
+        <label className="pos-field" style={{ marginBottom: 14 }}>
+          <span>Category Name *</span>
+          <input
+            className="pos-input"
+            value={name}
+            onChange={e => setName(e.target.value)}
+            required
+            maxLength={100}
+            style={{ fontWeight: 600 }}
+          />
+        </label>
+
+        <label className="pos-field" style={{ marginBottom: 14 }}>
+          <span>Description</span>
+          <textarea
+            className="pos-textarea"
+            value={description}
+            onChange={e => setDescription(e.target.value)}
+            rows={2}
+            maxLength={300}
+          />
+        </label>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
+          <label className="pos-field">
+            <span>Sort Order</span>
+            <input
+              type="number"
+              className="pos-input"
+              value={sortOrder}
+              onChange={e => setSortOrder(e.target.value)}
+              min={0}
+            />
+          </label>
+          <label className="pos-field">
+            <span>Status</span>
+            <select
+              className="pos-select"
+              value={status}
+              onChange={e => setStatus(e.target.value)}
+            >
+              <option value="ACTIVE">Active (Visible)</option>
+              <option value="INACTIVE">Inactive (Hidden)</option>
+            </select>
+          </label>
+        </div>
+
+        <div className="pos-modal-footer" style={{ padding: '16px 0 0 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <button
+            type="button"
+            className="pos-button danger"
+            onClick={handleDelete}
+            disabled={busy}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            <Trash2 size={15} /> Delete Category
+          </button>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button type="button" className="pos-button" onClick={onClose} disabled={busy}>Cancel</button>
+            <button
+              type="submit"
+              className="pos-button primary"
+              disabled={busy || !name.trim()}
+              style={{
+                padding: '8px 20px',
+                fontWeight: 700,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+                boxShadow: '0 4px 12px rgba(37, 99, 235, 0.3)'
+              }}
+            >
+              {busy ? 'Saving…' : 'Save Changes'}
+            </button>
+          </div>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function AddMenuItemModal({ categories = [], defaultCategoryId = '', onClose, onSuccess }) {
+  const [form, setForm] = useState({
+    categoryId: defaultCategoryId || (categories[0]?.categoryId || ''),
+    name: '',
+    description: '',
+    price: '',
+    vegNonveg: 'VEG',
+    spiceLevel: 'NONE',
+    image: '',
+    availability: true,
+    isSweet: false
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const { addToast } = useNotification();
+
+  const imagePresets = [
+    { label: '🍕 Pizza', url: 'https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?auto=format&fit=crop&w=400&q=80' },
+    { label: '🍔 Burger', url: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=400&q=80' },
+    { label: '🍛 Curry', url: 'https://images.unsplash.com/photo-1546833999-b9f581a1996d?auto=format&fit=crop&w=400&q=80' },
+    { label: '🍜 Chinese', url: 'https://images.unsplash.com/photo-1585032226651-759b368d7246?auto=format&fit=crop&w=400&q=80' },
+    { label: '🥞 Dosa / South', url: 'https://images.unsplash.com/photo-1668236543090-82eba5ee5976?auto=format&fit=crop&w=400&q=80' },
+    { label: '🍰 Dessert', url: 'https://images.unsplash.com/photo-1593798603546-b302636a0d0d?auto=format&fit=crop&w=400&q=80' },
+    { label: '🍹 Drink', url: 'https://images.unsplash.com/photo-1551024709-8f23befc6f87?auto=format&fit=crop&w=400&q=80' },
+  ];
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!form.name.trim()) {
+      setError('Dish name is required.');
+      return;
+    }
+    if (!form.categoryId) {
+      setError('Please select a menu category.');
+      return;
+    }
+    if (isNaN(Number(form.price)) || Number(form.price) < 0) {
+      setError('Please enter a valid price.');
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+    try {
+      await api.createMenuItem({
+        categoryId: form.categoryId,
+        name: form.name.trim(),
+        description: form.description.trim() || null,
+        price: Number(form.price),
+        vegNonVeg: form.vegNonveg,
+        spiceLevel: form.spiceLevel,
+        image: form.image.trim() || null,
+        availability: form.availability,
+        isSweet: form.isSweet
+      });
+      addToast(`"${form.name.trim()}" added to the menu!`, 'success');
+      if (onSuccess) await onSuccess();
+    } catch (err) {
+      setError(err.message || 'Failed to add menu item.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title="Add Dish / Menu Item" wide={true} onClose={onClose}>
+      <form onSubmit={handleSubmit} style={{ padding: '24px' }}>
+        {/* Executive Header Banner */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          padding: '12px 16px',
+          background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(239, 68, 68, 0.06))',
+          borderRadius: 12,
+          border: '1px solid rgba(245, 158, 11, 0.25)',
+          marginBottom: 16
+        }}>
+          <div style={{
+            width: 42,
+            height: 42,
+            borderRadius: 10,
+            background: 'linear-gradient(135deg, #f59e0b, #ea580c)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#fff',
+            boxShadow: '0 4px 12px rgba(245, 158, 11, 0.3)',
+            flexShrink: 0
+          }}>
+            <UtensilsCrossed size={22} />
+          </div>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--p-text)' }}>New Dish Creation</h3>
+            <p style={{ margin: '2px 0 0 0', fontSize: 12, color: 'var(--p-muted)' }}>
+              Configure culinary details, pricing, food preferences, and visual assets.
+            </p>
+          </div>
+        </div>
+
+        {error && (
+          <div className="pos-error" style={{ marginBottom: 16 }}>
+            <AlertCircle size={15} /> {error}
+          </div>
+        )}
+
+        {/* Dietary Classification Cards */}
+        <div style={{ marginBottom: 16 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--p-muted)', display: 'block', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Dietary Classification *
+          </span>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div
+              onClick={() => setForm(f => ({ ...f, vegNonveg: 'VEG' }))}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '12px 14px',
+                borderRadius: 10,
+                cursor: 'pointer',
+                border: form.vegNonveg === 'VEG' ? '2px solid #16a34a' : '1px solid var(--p-border)',
+                background: form.vegNonveg === 'VEG' ? 'rgba(22, 163, 74, 0.08)' : 'var(--p-card)',
+                transition: 'all 0.2s ease',
+                boxShadow: form.vegNonveg === 'VEG' ? '0 0 0 1px #16a34a' : 'none'
+              }}
+            >
+              <div style={{
+                width: 32,
+                height: 32,
+                borderRadius: 6,
+                border: '2px solid #16a34a',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: '#fff',
+                flexShrink: 0
+              }}>
+                <div style={{ width: 14, height: 14, borderRadius: '50%', background: '#16a34a' }} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: form.vegNonveg === 'VEG' ? '#16a34a' : 'var(--p-text)' }}>
+                  100% Pure Vegetarian
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--p-muted)', marginTop: 1 }}>
+                  Plant, dairy & green label ingredients
+                </div>
+              </div>
+              {form.vegNonveg === 'VEG' && <CheckCircle2 size={18} color="#16a34a" />}
+            </div>
+
+            <div
+              onClick={() => setForm(f => ({ ...f, vegNonveg: 'NON_VEG' }))}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '12px 14px',
+                borderRadius: 10,
+                cursor: 'pointer',
+                border: form.vegNonveg === 'NON_VEG' ? '2px solid #dc2626' : '1px solid var(--p-border)',
+                background: form.vegNonveg === 'NON_VEG' ? 'rgba(220, 38, 38, 0.08)' : 'var(--p-card)',
+                transition: 'all 0.2s ease',
+                boxShadow: form.vegNonveg === 'NON_VEG' ? '0 0 0 1px #dc2626' : 'none'
+              }}
+            >
+              <div style={{
+                width: 32,
+                height: 32,
+                borderRadius: 6,
+                border: '2px solid #dc2626',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: '#fff',
+                flexShrink: 0
+              }}>
+                <div style={{
+                  width: 0,
+                  height: 0,
+                  borderLeft: '7px solid transparent',
+                  borderRight: '7px solid transparent',
+                  borderBottom: '12px solid #dc2626'
+                }} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: form.vegNonveg === 'NON_VEG' ? '#dc2626' : 'var(--p-text)' }}>
+                  Non-Vegetarian
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--p-muted)', marginTop: 1 }}>
+                  Poultry, meat, fish or egg recipes
+                </div>
+              </div>
+              {form.vegNonveg === 'NON_VEG' && <CheckCircle2 size={18} color="#dc2626" />}
+            </div>
+          </div>
+        </div>
+
+        {/* Dish Name & Category Row */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 14, marginBottom: 14 }}>
+          <label className="pos-field">
+            <span>Dish Name *</span>
+            <input
+              className="pos-input"
+              value={form.name}
+              onChange={e => setForm({ ...form, name: e.target.value })}
+              placeholder="e.g. Paneer Butter Masala / Truffle Pasta"
+              required
+              maxLength={255}
+              style={{ fontWeight: 600 }}
+            />
+          </label>
+          <label className="pos-field">
+            <span>Menu Category *</span>
+            <select
+              className="pos-select"
+              value={form.categoryId}
+              onChange={e => setForm({ ...form, categoryId: e.target.value })}
+              required
+              style={{ fontWeight: 600 }}
+            >
+              <option value="">Select Category...</option>
+              {categories.map(c => (
+                <option key={c.categoryId} value={c.categoryId}>{c.name}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        {/* Price & Spice Profile */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+          <label className="pos-field">
+            <span>Selling Price (₹) *</span>
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <span style={{
+                position: 'absolute',
+                left: 12,
+                fontWeight: 700,
+                fontSize: 15,
+                color: 'var(--p-muted)',
+                pointerEvents: 'none'
+              }}>₹</span>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                className="pos-input"
+                style={{ paddingLeft: 28, fontSize: 15, fontWeight: 700 }}
+                value={form.price}
+                onChange={e => setForm({ ...form, price: e.target.value })}
+                placeholder="299.00"
+                required
+              />
+            </div>
+          </label>
+
+          <label className="pos-field">
+            <span>Spice Profile</span>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, marginTop: 2 }}>
+              {[
+                { id: 'NONE', label: 'None', icon: '🌱' },
+                { id: 'MILD', label: 'Mild', icon: '🌶️' },
+                { id: 'MEDIUM', label: 'Medium', icon: '🌶️🌶️' },
+                { id: 'SPICY', label: 'Hot', icon: '🔥' }
+              ].map(sp => {
+                const isSelected = form.spiceLevel === sp.id;
+                return (
+                  <button
+                    key={sp.id}
+                    type="button"
+                    onClick={() => setForm({ ...form, spiceLevel: sp.id })}
+                    style={{
+                      padding: '8px 4px',
+                      borderRadius: 8,
+                      border: isSelected ? '1.5px solid var(--p-blue)' : '1px solid var(--p-border)',
+                      background: isSelected ? 'rgba(59, 130, 246, 0.12)' : 'var(--p-elevated)',
+                      color: isSelected ? 'var(--p-blue)' : 'var(--p-text)',
+                      fontWeight: isSelected ? 700 : 500,
+                      fontSize: 11,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: 2,
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <span style={{ fontSize: 13 }}>{sp.icon}</span>
+                    <span>{sp.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </label>
+        </div>
+
+        {/* Description */}
+        <label className="pos-field" style={{ marginBottom: 14 }}>
+          <span>Dish Description <small style={{ color: 'var(--p-muted)' }}>(Ingredients, portion size, flavors)</small></span>
+          <textarea
+            className="pos-textarea"
+            value={form.description}
+            onChange={e => setForm({ ...form, description: e.target.value })}
+            placeholder="e.g. Tender cottage cheese cubes simmered in a velvety tomato and cashew gravy, garnished with rich butter cream."
+            rows={2}
+            maxLength={500}
+          />
+        </label>
+
+        {/* Photo Asset with Live Preview & Quick Presets */}
+        <div style={{
+          padding: 12,
+          background: 'var(--p-elevated)',
+          borderRadius: 10,
+          border: '1px solid var(--p-border)',
+          marginBottom: 16
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{
+              width: 58,
+              height: 58,
+              borderRadius: 8,
+              border: '1px solid var(--p-border)',
+              background: 'var(--p-card)',
+              overflow: 'hidden',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0
+            }}>
+              {form.image ? (
+                <img
+                  src={form.image}
+                  alt="Preview"
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  onError={(e) => { e.target.style.display = 'none'; }}
+                />
+              ) : (
+                <UtensilsCrossed size={22} style={{ color: 'var(--p-muted)', opacity: 0.5 }} />
+              )}
+            </div>
+
+            <div style={{ flex: 1 }}>
+              <label className="pos-field" style={{ margin: 0 }}>
+                <span style={{ fontSize: 11, fontWeight: 700 }}>Item Image URL</span>
+                <input
+                  type="url"
+                  className="pos-input"
+                  value={form.image}
+                  onChange={e => setForm({ ...form, image: e.target.value })}
+                  placeholder="https://images.unsplash.com/... or paste image link"
+                  style={{ fontSize: 12, padding: '6px 10px' }}
+                />
+              </label>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--p-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Sparkles size={12} color="var(--p-blue)" /> Quick Gallery:
+            </span>
+            {imagePresets.map(p => (
+              <button
+                key={p.label}
+                type="button"
+                onClick={() => setForm({ ...form, image: p.url })}
+                style={{
+                  fontSize: 11,
+                  padding: '3px 10px',
+                  borderRadius: 6,
+                  border: form.image === p.url ? '1px solid var(--p-blue)' : '1px solid var(--p-border)',
+                  background: form.image === p.url ? 'rgba(59, 130, 246, 0.15)' : 'var(--p-card)',
+                  color: form.image === p.url ? 'var(--p-blue)' : 'var(--p-text)',
+                  fontWeight: form.image === p.url ? 700 : 500,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Operational Availability Toggles */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 18 }}>
+          <label style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '10px 14px',
+            borderRadius: 8,
+            border: '1px solid var(--p-border)',
+            background: form.availability ? 'rgba(22, 163, 74, 0.08)' : 'var(--p-card)',
+            cursor: 'pointer',
+            transition: 'all 0.15s ease'
+          }}>
+            <input
+              type="checkbox"
+              checked={form.availability}
+              onChange={e => setForm({ ...form, availability: e.target.checked })}
+              style={{ width: 16, height: 16, accentColor: '#16a34a' }}
+            />
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: form.availability ? '#16a34a' : 'var(--p-text)' }}>
+                Available Immediately
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--p-muted)' }}>Visible across POS and Guest QR Menus</div>
+            </div>
+          </label>
+
+          <label style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '10px 14px',
+            borderRadius: 8,
+            border: '1px solid var(--p-border)',
+            background: form.isSweet ? 'rgba(236, 72, 153, 0.08)' : 'var(--p-card)',
+            cursor: 'pointer',
+            transition: 'all 0.15s ease'
+          }}>
+            <input
+              type="checkbox"
+              checked={form.isSweet}
+              onChange={e => setForm({ ...form, isSweet: e.target.checked })}
+              style={{ width: 16, height: 16, accentColor: '#ec4899' }}
+            />
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: form.isSweet ? '#ec4899' : 'var(--p-text)' }}>
+                Sweet / Dessert Course
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--p-muted)' }}>Classified under sweets & confectionery</div>
+            </div>
+          </label>
+        </div>
+
+        {/* Modal Action Footer */}
+        <div className="pos-modal-footer" style={{ padding: '16px 0 0 0', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+          <button type="button" className="pos-button" onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="pos-button primary"
+            disabled={busy || !form.name.trim() || !form.price || !form.categoryId}
+            style={{
+              padding: '9px 22px',
+              fontWeight: 700,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+              boxShadow: '0 4px 12px rgba(37, 99, 235, 0.35)'
+            }}
+          >
+            {busy ? (
+              <>Creating Dish…</>
+            ) : (
+              <>
+                <Plus size={16} /> Add Dish to Menu
+              </>
+            )}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function EditMenuItemModal({ item, categories = [], onClose, onSuccess }) {
+  const [form, setForm] = useState({
+    categoryId: item.categoryId || (categories[0]?.categoryId || ''),
+    name: item.name || '',
+    description: item.description || '',
+    price: item.price ?? '',
+    vegNonveg: item.vegNonveg || item.vegNonVeg || 'VEG',
+    spiceLevel: item.spiceLevel || 'NONE',
+    image: item.image || '',
+    availability: item.availability ?? true,
+    isSweet: item.isSweet ?? false
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const { addToast } = useNotification();
+
+  const imagePresets = [
+    { label: '🍕 Pizza', url: 'https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?auto=format&fit=crop&w=400&q=80' },
+    { label: '🍔 Burger', url: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=400&q=80' },
+    { label: '🍛 Curry', url: 'https://images.unsplash.com/photo-1546833999-b9f581a1996d?auto=format&fit=crop&w=400&q=80' },
+    { label: '🍜 Chinese', url: 'https://images.unsplash.com/photo-1585032226651-759b368d7246?auto=format&fit=crop&w=400&q=80' },
+    { label: '🥞 Dosa / South', url: 'https://images.unsplash.com/photo-1668236543090-82eba5ee5976?auto=format&fit=crop&w=400&q=80' },
+    { label: '🍰 Dessert', url: 'https://images.unsplash.com/photo-1593798603546-b302636a0d0d?auto=format&fit=crop&w=400&q=80' },
+    { label: '🍹 Drink', url: 'https://images.unsplash.com/photo-1551024709-8f23befc6f87?auto=format&fit=crop&w=400&q=80' },
+  ];
+
+  const handleUpdate = async (e) => {
+    e.preventDefault();
+    if (!form.name.trim()) {
+      setError('Dish name is required.');
+      return;
+    }
+    if (isNaN(Number(form.price)) || Number(form.price) < 0) {
+      setError('Please enter a valid price.');
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+    try {
+      await api.updateMenuItem(item.menuItemId, {
+        categoryId: form.categoryId,
+        name: form.name.trim(),
+        description: form.description.trim() || null,
+        price: Number(form.price),
+        vegNonVeg: form.vegNonveg,
+        spiceLevel: form.spiceLevel,
+        image: form.image.trim() || null,
+        availability: form.availability,
+        isSweet: form.isSweet
+      });
+      addToast(`"${form.name.trim()}" updated successfully!`, 'success');
+      if (onSuccess) await onSuccess();
+    } catch (err) {
+      setError(err.message || 'Failed to update menu item.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!window.confirm(`Are you sure you want to delete "${item.name}" from the menu?`)) return;
+    setBusy(true);
+    setError('');
+    try {
+      await api.deleteMenuItem(item.menuItemId);
+      addToast(`"${item.name}" removed from the menu.`, 'success');
+      if (onSuccess) await onSuccess();
+    } catch (err) {
+      setError(err.message || 'Failed to delete menu item.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title={`Edit Dish: ${item.name}`} wide={true} onClose={onClose}>
+      <form onSubmit={handleUpdate} style={{ padding: '24px' }}>
+        {/* Executive Header Banner */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          padding: '12px 16px',
+          background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(147, 51, 234, 0.06))',
+          borderRadius: 12,
+          border: '1px solid rgba(59, 130, 246, 0.25)',
+          marginBottom: 16
+        }}>
+          <div style={{
+            width: 42,
+            height: 42,
+            borderRadius: 10,
+            background: 'linear-gradient(135deg, #2563eb, #7c3aed)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#fff',
+            boxShadow: '0 4px 12px rgba(37, 99, 235, 0.3)',
+            flexShrink: 0
+          }}>
+            <Pencil size={20} />
+          </div>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--p-text)' }}>Update Dish Details</h3>
+            <p style={{ margin: '2px 0 0 0', fontSize: 12, color: 'var(--p-muted)' }}>
+              Edit menu information, category placement, pricing, and guest visibility.
+            </p>
+          </div>
+        </div>
+
+        {error && (
+          <div className="pos-error" style={{ marginBottom: 16 }}>
+            <AlertCircle size={15} /> {error}
+          </div>
+        )}
+
+        {/* Dietary Classification Cards */}
+        <div style={{ marginBottom: 16 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--p-muted)', display: 'block', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Dietary Classification *
+          </span>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div
+              onClick={() => setForm(f => ({ ...f, vegNonveg: 'VEG' }))}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '12px 14px',
+                borderRadius: 10,
+                cursor: 'pointer',
+                border: form.vegNonveg === 'VEG' ? '2px solid #16a34a' : '1px solid var(--p-border)',
+                background: form.vegNonveg === 'VEG' ? 'rgba(220, 252, 231, 0.4)' : 'var(--p-card)',
+                transition: 'all 0.2s ease',
+                boxShadow: form.vegNonveg === 'VEG' ? '0 0 0 1px #16a34a' : 'none'
+              }}
+            >
+              <div style={{
+                width: 32,
+                height: 32,
+                borderRadius: 6,
+                border: '2px solid #16a34a',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: '#fff',
+                flexShrink: 0
+              }}>
+                <div style={{ width: 14, height: 14, borderRadius: '50%', background: '#16a34a' }} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: form.vegNonveg === 'VEG' ? '#16a34a' : 'var(--p-text)' }}>
+                  100% Pure Vegetarian
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--p-muted)', marginTop: 1 }}>
+                  Plant, dairy & green label ingredients
+                </div>
+              </div>
+              {form.vegNonveg === 'VEG' && <CheckCircle2 size={18} color="#16a34a" />}
+            </div>
+
+            <div
+              onClick={() => setForm(f => ({ ...f, vegNonveg: 'NON_VEG' }))}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '12px 14px',
+                borderRadius: 10,
+                cursor: 'pointer',
+                border: form.vegNonveg === 'NON_VEG' ? '2px solid #dc2626' : '1px solid var(--p-border)',
+                background: form.vegNonveg === 'NON_VEG' ? 'rgba(254, 226, 226, 0.4)' : 'var(--p-card)',
+                transition: 'all 0.2s ease',
+                boxShadow: form.vegNonveg === 'NON_VEG' ? '0 0 0 1px #dc2626' : 'none'
+              }}
+            >
+              <div style={{
+                width: 32,
+                height: 32,
+                borderRadius: 6,
+                border: '2px solid #dc2626',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: '#fff',
+                flexShrink: 0
+              }}>
+                <div style={{
+                  width: 0,
+                  height: 0,
+                  borderLeft: '7px solid transparent',
+                  borderRight: '7px solid transparent',
+                  borderBottom: '12px solid #dc2626'
+                }} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: form.vegNonveg === 'NON_VEG' ? '#dc2626' : 'var(--p-text)' }}>
+                  Non-Vegetarian
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--p-muted)', marginTop: 1 }}>
+                  Poultry, meat, fish or egg recipes
+                </div>
+              </div>
+              {form.vegNonveg === 'NON_VEG' && <CheckCircle2 size={18} color="#dc2626" />}
+            </div>
+          </div>
+        </div>
+
+        {/* Dish Name & Category Row */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 14, marginBottom: 14 }}>
+          <label className="pos-field">
+            <span>Dish Name *</span>
+            <input
+              className="pos-input"
+              value={form.name}
+              onChange={e => setForm({ ...form, name: e.target.value })}
+              required
+              maxLength={255}
+              style={{ fontWeight: 600 }}
+            />
+          </label>
+          <label className="pos-field">
+            <span>Menu Category *</span>
+            <select
+              className="pos-select"
+              value={form.categoryId}
+              onChange={e => setForm({ ...form, categoryId: e.target.value })}
+              required
+              style={{ fontWeight: 600 }}
+            >
+              {categories.map(c => (
+                <option key={c.categoryId} value={c.categoryId}>{c.name}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        {/* Price & Spice Profile */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+          <label className="pos-field">
+            <span>Selling Price (₹) *</span>
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <span style={{
+                position: 'absolute',
+                left: 12,
+                fontWeight: 700,
+                fontSize: 15,
+                color: 'var(--p-muted)',
+                pointerEvents: 'none'
+              }}>₹</span>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                className="pos-input"
+                style={{ paddingLeft: 28, fontSize: 15, fontWeight: 700 }}
+                value={form.price}
+                onChange={e => setForm({ ...form, price: e.target.value })}
+                required
+              />
+            </div>
+          </label>
+
+          <label className="pos-field">
+            <span>Spice Profile</span>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, marginTop: 2 }}>
+              {[
+                { id: 'NONE', label: 'None', icon: '🌱' },
+                { id: 'MILD', label: 'Mild', icon: '🌶️' },
+                { id: 'MEDIUM', label: 'Medium', icon: '🌶️🌶️' },
+                { id: 'SPICY', label: 'Hot', icon: '🔥' }
+              ].map(sp => {
+                const isSelected = form.spiceLevel === sp.id;
+                return (
+                  <button
+                    key={sp.id}
+                    type="button"
+                    onClick={() => setForm({ ...form, spiceLevel: sp.id })}
+                    style={{
+                      padding: '8px 4px',
+                      borderRadius: 8,
+                      border: isSelected ? '1.5px solid var(--p-blue)' : '1px solid var(--p-border)',
+                      background: isSelected ? 'rgba(59, 130, 246, 0.12)' : 'var(--p-elevated)',
+                      color: isSelected ? 'var(--p-blue)' : 'var(--p-text)',
+                      fontWeight: isSelected ? 700 : 500,
+                      fontSize: 11,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: 2,
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <span style={{ fontSize: 13 }}>{sp.icon}</span>
+                    <span>{sp.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </label>
+        </div>
+
+        {/* Description */}
+        <label className="pos-field" style={{ marginBottom: 14 }}>
+          <span>Dish Description <small style={{ color: 'var(--p-muted)' }}>(Ingredients, portion size, flavors)</small></span>
+          <textarea
+            className="pos-textarea"
+            value={form.description}
+            onChange={e => setForm({ ...form, description: e.target.value })}
+            rows={2}
+            maxLength={500}
+          />
+        </label>
+
+        {/* Photo Asset with Live Preview & Quick Presets */}
+        <div style={{
+          padding: 12,
+          background: 'var(--p-elevated)',
+          borderRadius: 10,
+          border: '1px solid var(--p-border)',
+          marginBottom: 16
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{
+              width: 58,
+              height: 58,
+              borderRadius: 8,
+              border: '1px solid var(--p-border)',
+              background: 'var(--p-card)',
+              overflow: 'hidden',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0
+            }}>
+              {form.image ? (
+                <img
+                  src={form.image}
+                  alt="Preview"
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  onError={(e) => { e.target.style.display = 'none'; }}
+                />
+              ) : (
+                <UtensilsCrossed size={22} style={{ color: 'var(--p-muted)', opacity: 0.5 }} />
+              )}
+            </div>
+
+            <div style={{ flex: 1 }}>
+              <label className="pos-field" style={{ margin: 0 }}>
+                <span style={{ fontSize: 11, fontWeight: 700 }}>Item Image URL</span>
+                <input
+                  type="url"
+                  className="pos-input"
+                  value={form.image}
+                  onChange={e => setForm({ ...form, image: e.target.value })}
+                  placeholder="https://images.unsplash.com/... or paste image link"
+                  style={{ fontSize: 12, padding: '6px 10px' }}
+                />
+              </label>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--p-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Sparkles size={12} color="var(--p-blue)" /> Quick Gallery:
+            </span>
+            {imagePresets.map(p => (
+              <button
+                key={p.label}
+                type="button"
+                onClick={() => setForm({ ...form, image: p.url })}
+                style={{
+                  fontSize: 11,
+                  padding: '3px 10px',
+                  borderRadius: 6,
+                  border: form.image === p.url ? '1px solid var(--p-blue)' : '1px solid var(--p-border)',
+                  background: form.image === p.url ? 'rgba(59, 130, 246, 0.15)' : 'var(--p-card)',
+                  color: form.image === p.url ? 'var(--p-blue)' : 'var(--p-text)',
+                  fontWeight: form.image === p.url ? 700 : 500,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Operational Availability Toggles */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 18 }}>
+          <label style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '10px 14px',
+            borderRadius: 8,
+            border: '1px solid var(--p-border)',
+            background: form.availability ? 'rgba(22, 163, 74, 0.08)' : 'var(--p-card)',
+            cursor: 'pointer',
+            transition: 'all 0.15s ease'
+          }}>
+            <input
+              type="checkbox"
+              checked={form.availability}
+              onChange={e => setForm({ ...form, availability: e.target.checked })}
+              style={{ width: 16, height: 16, accentColor: '#16a34a' }}
+            />
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: form.availability ? '#16a34a' : 'var(--p-text)' }}>
+                Available for Ordering
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--p-muted)' }}>Visible across POS and Guest QR Menus</div>
+            </div>
+          </label>
+
+          <label style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '10px 14px',
+            borderRadius: 8,
+            border: '1px solid var(--p-border)',
+            background: form.isSweet ? 'rgba(236, 72, 153, 0.08)' : 'var(--p-card)',
+            cursor: 'pointer',
+            transition: 'all 0.15s ease'
+          }}>
+            <input
+              type="checkbox"
+              checked={form.isSweet}
+              onChange={e => setForm({ ...form, isSweet: e.target.checked })}
+              style={{ width: 16, height: 16, accentColor: '#ec4899' }}
+            />
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: form.isSweet ? '#ec4899' : 'var(--p-text)' }}>
+                Sweet / Dessert Course
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--p-muted)' }}>Classified under sweets & confectionery</div>
+            </div>
+          </label>
+        </div>
+
+        {/* Modal Action Footer */}
+        <div className="pos-modal-footer" style={{ padding: '16px 0 0 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <button
+            type="button"
+            className="pos-button danger"
+            onClick={handleDelete}
+            disabled={busy}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            <Trash2 size={15} /> Delete Dish
+          </button>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button type="button" className="pos-button" onClick={onClose} disabled={busy}>
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="pos-button primary"
+              disabled={busy || !form.name.trim() || !form.price}
+              style={{
+                padding: '9px 22px',
+                fontWeight: 700,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+                boxShadow: '0 4px 12px rgba(37, 99, 235, 0.35)'
+              }}
+            >
+              {busy ? 'Saving…' : 'Save Changes'}
+            </button>
+          </div>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
@@ -1610,7 +3937,22 @@ function OrderDetails({ order, paid, payments, restaurant, onClose, onPay, onUpd
               <div key={ord.orderId || oIdx} style={{ background: 'var(--p-card)', border: '1px solid var(--p-border)', borderRadius: 7, padding: '8px 10px', marginBottom: 10 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, borderBottom: '1px dashed var(--p-border)', paddingBottom: 4 }}>
                   <b style={{ fontSize: 10 }}>{ord.orderNumber} <span style={{ color: 'var(--p-muted)', fontWeight: 400 }}>· {time(ord.createdAt)}</span></b>
-                  <Badge status={ord.status} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Badge status={ord.status} />
+                    {!['DELIVERED', 'PICKED_UP', 'CANCELLED', 'CONFIRMATION_TIMEOUT'].includes(ord.status) && (
+                      <button
+                        type="button"
+                        className="pos-mark-delivered-btn"
+                        disabled={busy}
+                        onClick={async () => {
+                          await run(() => api.updateOrderStatus(ord.orderId, 'DELIVERED'), `Order #${ord.orderNumber} delivered`);
+                          onUpdated && onUpdated();
+                        }}
+                      >
+                        <Check size={10} /> Mark delivered
+                      </button>
+                    )}
+                  </div>
                 </div>
                 {(ord.items || []).map((i, idx) => {
                   const cust = typeof i.customization === 'object' && i.customization !== null ? i.customization : {};
@@ -1690,6 +4032,20 @@ function OrderDetails({ order, paid, payments, restaurant, onClose, onPay, onUpd
         {order?.source === 'TAKEAWAY' && ['READY', 'READY_FOR_PICKUP'].includes(order?.status) && (
           <button className="pos-button primary full" disabled={busy} onClick={() => transition('PICKED_UP')}>
             Mark collected
+          </button>
+        )}
+        {order?.source === 'DINE_IN_QR' && !['DELIVERED', 'PICKED_UP', 'CANCELLED', 'CONFIRMATION_TIMEOUT'].includes(order?.status) && (!isSession || order.orders.length <= 1) && (
+          <button
+            className="pos-button primary full"
+            style={{ marginTop: 10 }}
+            disabled={busy}
+            onClick={async () => {
+              const targetId = order.orderId || order.orders?.[0]?.orderId;
+              await run(() => api.updateOrderStatus(targetId, 'DELIVERED'), 'Order marked as delivered');
+              onUpdated && onUpdated();
+            }}
+          >
+            <Check size={13} style={{ display: 'inline', marginRight: 4 }} /> Mark delivered
           </button>
         )}
       </div>
@@ -2276,13 +4632,17 @@ function ReservationDialog({ reservation, onClose, onSaved }) {
     try {
       if (reservation) {
         const res = await api.rescheduleReservation(reservation.reservationId, { newDate: form.reservationDate, newTime: form.reservationTime, guestCount: form.guestCount });
-        const updated = res.reservation || res;
+        const updated = res?.reservation || {
+          ...reservation,
+          reservationDate: form.reservationDate,
+          reservationTime: form.reservationTime,
+          guestCount: form.guestCount,
+        };
         setRescheduledRes(updated);
-        await onSaved();
+        if (onSaved) await onSaved(true);
       } else {
         await api.createReservation(form);
-        await onSaved();
-        onClose();
+        if (onSaved) await onSaved(false);
       }
     } catch (e) {
       setError(e.message);
@@ -2364,6 +4724,130 @@ function ReservationDialog({ reservation, onClose, onSaved }) {
       </form>
     )}
   </Modal>;
+}
+
+function CancelReservationDialog({ reservation, onClose, onCancelled }) {
+  const [reason, setReason] = useState('Operational / Table maintenance');
+  const [customReason, setCustomReason] = useState('');
+  const [cancelled, setCancelled] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const finalReason = reason === 'Other' ? (customReason.trim() || 'Operational inconvenience') : reason;
+
+  const handleCancel = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      await api.updateReservationStatus(reservation.reservationId, 'CANCELLED');
+      setCancelled(true);
+      if (onCancelled) await onCancelled();
+    } catch (e) {
+      setError(e.message || 'Failed to cancel reservation');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title={cancelled ? "Reservation Cancelled" : "Cancel Reservation"} onClose={onClose}>
+      {cancelled ? (
+        <div className="pos-modal-body">
+          <div style={{ textAlign: 'center', padding: '12px 0 16px' }}>
+            <div style={{ width: 48, height: 48, borderRadius: '50%', background: '#fee2e2', color: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
+              <AlertCircle size={28} />
+            </div>
+            <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: '#991b1b' }}>Reservation Cancelled</h3>
+            <p style={{ fontSize: 11, color: 'var(--p-muted)', marginTop: 4 }}>Booking reference: <b>{reservation.bookingId}</b></p>
+          </div>
+
+          <div className="pos-detail-meta" style={{ marginTop: 8 }}>
+            <div><span>Guest</span><b>{reservation.customerName}</b></div>
+            <div><span>Customer phone</span><b style={{ color: 'var(--p-blue)' }}>{reservation.customerPhone}</b></div>
+            <div><span>Originally booked for</span><b>{shortDate(reservation.reservationDate)} at {reservation.reservationTime?.slice(0, 5)}</b></div>
+            <div><span>Reason cited</span><b>{finalReason}</b></div>
+          </div>
+
+          <div className="pos-info-box" style={{ marginTop: 14, backgroundColor: '#fef2f2', borderColor: '#fecaca', color: '#991b1b' }}>
+            <Info size={15} />
+            <span>Notify customer immediately on their mobile number so they are aware of the cancellation:</span>
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+            <a 
+              className="pos-button primary full" 
+              href={getCancelWhatsAppUrl(reservation, finalReason)} 
+              target="_blank" 
+              rel="noreferrer" 
+              style={{ backgroundColor: '#25D366', borderColor: '#25D366' }}
+            >
+              📱 Send WhatsApp notification
+            </a>
+            <a 
+              className="pos-button full" 
+              href={getCancelSmsUrl(reservation, finalReason)}
+            >
+              💬 Send SMS
+            </a>
+          </div>
+
+          <div className="pos-modal-footer" style={{ padding: 0, marginTop: 20 }}>
+            <button className="pos-button primary full" onClick={onClose}>Done</button>
+          </div>
+        </div>
+      ) : (
+        <div className="pos-modal-body">
+          {error && <div className="pos-error" role="alert">{error}</div>}
+          <p style={{ fontSize: 13, lineHeight: 1.6 }}>
+            Are you sure you want to cancel booking <b>{reservation.bookingId}</b> for <b>{reservation.customerName}</b>? The assigned table will be released.
+          </p>
+          <div className="pos-detail-meta" style={{ margin: '12px 0' }}>
+            <div><span>Guest</span><b>{reservation.customerName}</b></div>
+            <div><span>Phone</span><b>{reservation.customerPhone}</b></div>
+            <div><span>Time</span><b>{shortDate(reservation.reservationDate)} at {reservation.reservationTime?.slice(0, 5)}</b></div>
+            <div><span>Party</span><b>{reservation.guestCount} guests</b></div>
+          </div>
+
+          <label className="pos-field full" style={{ marginTop: 12 }}>
+            <span>Reason for cancellation:</span>
+            <select className="pos-select" style={{ width: '100%' }} value={reason} onChange={e => setReason(e.target.value)}>
+              <option value="Operational / Table maintenance">Operational / Table maintenance</option>
+              <option value="Unforeseen private event / hall booking">Unforeseen private event / hall booking</option>
+              <option value="Overcapacity / Safety limitation">Overcapacity / Safety limitation</option>
+              <option value="Customer requested cancellation via call">Customer requested cancellation via call</option>
+              <option value="Severe weather / Emergency closure">Severe weather / Emergency closure</option>
+              <option value="Other">Other / Custom reason</option>
+            </select>
+          </label>
+
+          {reason === 'Other' && (
+            <label className="pos-field full" style={{ marginTop: 8 }}>
+              <span>Specify reason:</span>
+              <input 
+                className="pos-input" 
+                maxLength={200}
+                placeholder="e.g. Power maintenance between 2 PM - 4 PM" 
+                value={customReason} 
+                onChange={e => setCustomReason(e.target.value)} 
+              />
+            </label>
+          )}
+
+          <div className="pos-info-box" style={{ marginTop: 12 }}>
+            <Info size={14} />
+            <span>After confirming, you can send an instant WhatsApp or SMS notification with polite apologies and explanation to the customer.</span>
+          </div>
+
+          <div className="pos-modal-footer" style={{ padding: 0, marginTop: 16 }}>
+            <button type="button" className="pos-button" onClick={onClose}>Keep reservation</button>
+            <button type="button" className="pos-button danger" disabled={busy} onClick={handleCancel}>
+              {busy ? 'Cancelling…' : 'Confirm cancellation'}
+            </button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
 }
 
 function ResolveIssue({ issue, onClose, onResolved }) {

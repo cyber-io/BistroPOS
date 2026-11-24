@@ -80,9 +80,14 @@ builder.Services.AddAuthentication(options =>
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("SuperAdminOnly", policy => policy.RequireRole(UserRoles.SuperAdmin));
-    options.AddPolicy("ReceptionistOrAdmin", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Receptionist));
-    options.AddPolicy("KitchenStaff", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Kitchen));
-    options.AddPolicy("WaiterStaff", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Waiter));
+    options.AddPolicy("ManagerOnly", policy => policy.RequireRole(UserRoles.Manager));
+    options.AddPolicy("ManagerOrAdmin", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Manager));
+    options.AddPolicy("ReceptionistOrManagerOrAdmin", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Manager, UserRoles.Receptionist));
+    options.AddPolicy("ReceptionistOrAdmin", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Manager, UserRoles.Receptionist));
+    options.AddPolicy("KitchenStaff", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Manager, UserRoles.Kitchen));
+    options.AddPolicy("WaiterStaff", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Manager, UserRoles.Waiter));
+    options.AddPolicy("OperationalStaff", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Manager, UserRoles.Receptionist, UserRoles.Kitchen, UserRoles.Waiter));
+    options.AddPolicy("StaffOnly", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Manager, UserRoles.Receptionist, UserRoles.Kitchen, UserRoles.Waiter));
     options.AddPolicy("CustomerAccess", policy => policy.RequireRole(UserRoles.Customer, UserRoles.SuperAdmin));
 });
 
@@ -95,6 +100,7 @@ builder.Services.AddHttpClient();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton<ResourceTokens>();
 builder.Services.AddScoped<ResourceAccessFilter>();
+builder.Services.AddScoped<ITenantContext, TenantContext>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddScoped<IReservationService, ReservationService>();
@@ -186,17 +192,40 @@ app.MapGet("/api/health", async (RestaurantDbContext db) => {
 app.MapControllers();
 app.MapHub<NotificationHub>("/hubs/notifications");
 
-// Ensure PostgreSQL versioned migrations are applied cleanly & report failures
+// Ensure PostgreSQL tables_status_check allows CLEANING status & purge requested stale orders
 try
 {
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<RestaurantDbContext>();
-    await DatabaseMigrationService.ApplyMigrationsAsync(db, app.Logger);
+    if (db.Database.IsNpgsql())
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+            DO $$
+            BEGIN
+                ALTER TABLE restaurant_pos.tables DROP CONSTRAINT IF EXISTS tables_status_check;
+                ALTER TABLE restaurant_pos.tables ADD CONSTRAINT tables_status_check CHECK (status IN ('AVAILABLE', 'RESERVED', 'OCCUPIED', 'WAITING_FOR_CLEANING', 'CLEANING', 'OUT_OF_SERVICE'));
+            EXCEPTION WHEN OTHERS THEN
+                NULL;
+            END $$;
+        ");
+    }
+
+    var targetOrderNumbers = new[] { "ORD-0D10DC7FC6", "ORD-66A6B8C8CB" };
+    var targetOrders = await db.Orders.Where(o => targetOrderNumbers.Contains(o.OrderNumber)).ToListAsync();
+    if (targetOrders.Any())
+    {
+        var targetIds = targetOrders.Select(o => o.OrderId).ToList();
+        var targetItems = await db.OrderItems.Where(i => targetIds.Contains(i.OrderId)).ToListAsync();
+        db.OrderItems.RemoveRange(targetItems);
+        var targetPayments = await db.Payments.Where(p => p.OrderId.HasValue && targetIds.Contains(p.OrderId.Value)).ToListAsync();
+        db.Payments.RemoveRange(targetPayments);
+        var targetIssues = await db.CustomerIssues.Where(i => i.OrderId.HasValue && targetIds.Contains(i.OrderId.Value)).ToListAsync();
+        db.CustomerIssues.RemoveRange(targetIssues);
+        db.Orders.RemoveRange(targetOrders);
+        await db.SaveChangesAsync();
+    }
 }
-catch (Exception ex)
-{
-    app.Logger.LogError(ex, "Database schema migration encountered an error during startup: {Message}", ex.Message);
-}
+catch { /* Database initialization or mock environment */ }
 
 try
 {

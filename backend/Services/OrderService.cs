@@ -60,8 +60,8 @@ public class OrderService : IOrderService
         }
         if (request.Source == OrderSources.DineInQr)
         {
-            var table = request.TableId.HasValue ? await _db.Tables.FindAsync(request.TableId.Value) : null;
-            if (table == null || table.RestaurantId != request.RestaurantId || table.Status == TableStatuses.OutOfService)
+            var tableCheck = request.TableId.HasValue ? await _db.Tables.FindAsync(request.TableId.Value) : null;
+            if (tableCheck == null || tableCheck.RestaurantId != request.RestaurantId || tableCheck.Status == TableStatuses.OutOfService)
                 throw new ArgumentException("A valid restaurant table is required for dine-in ordering.");
         }
         else if (request.TableId.HasValue) throw new ArgumentException("Only dine-in orders can be assigned a table.");
@@ -191,13 +191,13 @@ public class OrderService : IOrderService
             existingActiveOrder.Status = OrderStatuses.New;
             existingActiveOrder.UpdatedAt = DateTime.UtcNow;
 
-            var tableToUpdate = request.TableId.HasValue ? await _db.Tables.FindAsync(request.TableId.Value) : null;
+            var tableToUpdate = await _db.Tables.FindAsync(request.TableId.Value);
             if (tableToUpdate != null)
             {
-                tableToUpdate.Status = TableStatuses.Occupied;
-                if (!string.IsNullOrWhiteSpace(existingActiveOrder.CustomerName))
+                table.Status = TableStatuses.Occupied;
+                if (!string.IsNullOrWhiteSpace(request.CustomerName))
                 {
-                    tableToUpdate.CurrentCustomerName = existingActiveOrder.CustomerName;
+                    table.CurrentCustomerName = request.CustomerName;
                 }
                 tableToUpdate.UpdatedAt = DateTime.UtcNow;
             }
@@ -205,25 +205,25 @@ public class OrderService : IOrderService
             await _db.SaveChangesAsync();
             await transaction.CommitAsync();
 
-            var activeTableNum = tableToUpdate?.TableNumber;
+            var tableNum = tableToUpdate?.TableNumber;
 
             // Trigger notification to kitchen and receptionist
             await _notifications.NotifyRoleAsync(
                 request.RestaurantId,
                 UserRoles.Kitchen,
                 "ORDER_UPDATED",
-                $"Additional Items for Table #{activeTableNum}",
+                $"Additional Items for Table #{tableNum}",
                 $"New items added to Order #{existingActiveOrder.OrderNumber}. Total: ₹{existingActiveOrder.Total}",
-                new { existingActiveOrder.OrderId, existingActiveOrder.OrderNumber, existingActiveOrder.Source, TableNumber = activeTableNum }
+                new { existingActiveOrder.OrderId, existingActiveOrder.OrderNumber, existingActiveOrder.Source, TableNumber = tableNum }
             );
 
             await _notifications.NotifyRoleAsync(
                 request.RestaurantId,
                 UserRoles.Receptionist,
                 "ORDER_UPDATED",
-                $"Table #{activeTableNum} Order Updated",
+                $"Table #{tableNum} Order Updated",
                 $"New items added to Order #{existingActiveOrder.OrderNumber}.",
-                new { existingActiveOrder.OrderId, existingActiveOrder.OrderNumber, existingActiveOrder.Source, TableNumber = activeTableNum }
+                new { existingActiveOrder.OrderId, existingActiveOrder.OrderNumber, existingActiveOrder.Source, TableNumber = tableNum }
             );
 
             await _audit.LogAsync(
@@ -235,53 +235,11 @@ public class OrderService : IOrderService
                 new { existingActiveOrder.OrderId, existingActiveOrder.OrderNumber, existingActiveOrder.Total, existingActiveOrder.Source }
             );
 
-            return await MapWithPaymentAsync(existingActiveOrder, activeTableNum);
+            return await MapWithPaymentAsync(existingActiveOrder, tableNum);
         }
 
         // 3. Generate unique order number (New Table Session)
         var orderNumber = "ORD-" + Guid.NewGuid().ToString("N")[..10].ToUpperInvariant();
-
-        // Calculate dynamic prep time estimate
-        var maxPrep = 15;
-        if (menuItems.Values.Any()) maxPrep = menuItems.Values.Max(m => m.PrepTimeMinutes > 0 ? m.PrepTimeMinutes : 15);
-        var activeKitchenTickets = await _db.Orders.CountAsync(o => o.RestaurantId == request.RestaurantId && (o.Status == OrderStatuses.New || o.Status == OrderStatuses.Preparing));
-        var prepMinutes = maxPrep + Math.Min(30, activeKitchenTickets * 2);
-        var readyAt = DateTime.UtcNow.AddMinutes(prepMinutes);
-
-        // Associate with active shared dining session for dine-in orders
-        Guid? activeSessionId = request.SessionId;
-        if (request.TableId.HasValue && request.Source == OrderSources.DineInQr && !activeSessionId.HasValue)
-        {
-            try
-            {
-                var currentSession = await _db.DiningSessions
-                    .Where(s => s.TableId == request.TableId.Value && s.Status == "ACTIVE")
-                    .OrderByDescending(s => s.CreatedAt)
-                    .FirstOrDefaultAsync();
-
-                if (currentSession == null)
-                {
-                    var tableForSession = await _db.Tables.FindAsync(request.TableId.Value);
-                    currentSession = new DiningSession
-                    {
-                        RestaurantId = request.RestaurantId,
-                        TableId = request.TableId.Value,
-                        SessionCode = $"SES-{tableForSession?.TableNumber ?? 1}-{DateTime.UtcNow:MMddHHmm}",
-                        Status = "ACTIVE",
-                        CreatedAt = DateTime.UtcNow
-                    };
-                    _db.DiningSessions.Add(currentSession);
-                    await _db.SaveChangesAsync();
-                }
-                activeSessionId = currentSession?.SessionId;
-            }
-            catch
-            {
-                // Gracefully detach and continue without session ID if dining_sessions table has any DB discrepancy
-                _db.ChangeTracker.Clear();
-                activeSessionId = null;
-            }
-        }
 
         var order = new Order
         {
@@ -299,8 +257,8 @@ public class OrderService : IOrderService
             EstimatedPrepTimeMinutes = prepMinutes,
             EstimatedReadyAt = readyAt,
             DeliveryAddress = request.DeliveryAddressJson,
-            CustomerName = request.CustomerName,
-            CustomerPhone = request.CustomerPhone,
+            CustomerName = !string.IsNullOrWhiteSpace(customerName) ? customerName : "Guest",
+            CustomerPhone = customerPhone,
             IdempotencyKey = request.IdempotencyKey,
             TakeawayPickupTime = request.TakeawayPickupTime,
             SpecialInstructions = request.SpecialInstructions,
@@ -310,35 +268,18 @@ public class OrderService : IOrderService
         };
 
         _db.Orders.Add(order);
-
-        // If dine-in, update table status to OCCUPIED and set guest name
-        if (request.TableId.HasValue)
-        {
-            var table = await _db.Tables.FindAsync(request.TableId.Value);
-            if (table != null)
-            {
-                table.Status = TableStatuses.Occupied;
-                if (!string.IsNullOrWhiteSpace(request.CustomerName))
-                {
-                    table.CurrentCustomerName = request.CustomerName;
-                }
-                table.UpdatedAt = DateTime.UtcNow;
-            }
-        }
-
         await _db.SaveChangesAsync();
-
         await transaction.CommitAsync();
-        // 4. Trigger Real-Time Notification (Website -> Kitchen: NEW ONLINE ORDER / Customer -> Kitchen)
-        var tableEntity = request.TableId.HasValue ? await _db.Tables.FindAsync(request.TableId.Value) : null;
-        var tableNum = tableEntity?.TableNumber;
+
+        // 4. Trigger Real-Time Notification (Kitchen receives separate ticket for each order placed)
+        var tableNum = table?.TableNumber;
 
         await _notifications.NotifyRoleAsync(
             request.RestaurantId,
             UserRoles.Kitchen,
             "NEW_ORDER",
             $"New Order #{order.OrderNumber}",
-            $"New {order.Source} order #{order.OrderNumber} received. Total: ₹{order.Total}",
+            tableNum.HasValue ? $"New dine-in order #{order.OrderNumber} for Table {tableNum}. Total: ₹{order.Total}" : $"New {order.Source} order #{order.OrderNumber} received. Total: ₹{order.Total}",
             new { order.OrderId, order.OrderNumber, order.Source, TableNumber = tableNum }
         );
 
@@ -347,7 +288,7 @@ public class OrderService : IOrderService
             UserRoles.Receptionist,
             "NEW_ORDER",
             $"New Order #{order.OrderNumber}",
-            $"New {order.Source} order #{order.OrderNumber} received. Sent to kitchen.",
+            tableNum.HasValue ? $"New dine-in order #{order.OrderNumber} for Table {tableNum}." : $"New {order.Source} order #{order.OrderNumber}.",
             new { order.OrderId, order.OrderNumber, order.Source, TableNumber = tableNum }
         );
 
@@ -369,7 +310,7 @@ public class OrderService : IOrderService
             "CUSTOMER",
             "ORDER_CREATED",
             "orders",
-            new { order.OrderId, order.OrderNumber, order.Total, order.Source }
+            new { order.OrderId, order.OrderNumber, order.Total, order.Source, TableNumber = tableNum }
         );
 
         return await MapWithPaymentAsync(order, tableNum);
@@ -483,6 +424,29 @@ public class OrderService : IOrderService
                     "Order Delivered",
                     "Have you received your complete order?",
                     new { order.OrderId, order.OrderNumber }
+                );
+            }
+        }
+        else if (newStatus == OrderStatuses.Delivered || newStatus == OrderStatuses.PickedUp)
+        {
+            await _notifications.NotifyRoleAsync(
+                order.RestaurantId,
+                UserRoles.Receptionist,
+                "ORDER_STATUS_CHANGED",
+                $"Order #{order.OrderNumber} Delivered",
+                $"Order #{order.OrderNumber} has been delivered.",
+                new { order.OrderId, order.OrderNumber, Status = newStatus, TableNumber = order.Table?.TableNumber }
+            );
+
+            if (order.TableId.HasValue)
+            {
+                await _notifications.NotifyTableAsync(
+                    order.RestaurantId,
+                    order.TableId.Value,
+                    "ORDER_STATUS_CHANGED",
+                    "Order Delivered",
+                    $"Your order #{order.OrderNumber} has been served.",
+                    new { order.OrderId, order.OrderNumber, Status = newStatus }
                 );
             }
         }
@@ -829,20 +793,23 @@ public class OrderService : IOrderService
                                      (current == OrderStatuses.Preparing && next == OrderStatuses.Ready) ||
                                      (current == OrderStatuses.Ready && next == OrderStatuses.PendingConfirmation) ||
                                      (current == OrderStatuses.PendingConfirmation && next == OrderStatuses.Delivered) ||
-                                     (current == OrderStatuses.PendingConfirmation && next == OrderStatuses.ConfirmationTimeout),
+                                     (current == OrderStatuses.PendingConfirmation && next == OrderStatuses.ConfirmationTimeout) ||
+                                     ((current is OrderStatuses.Ready or OrderStatuses.Preparing or OrderStatuses.Accepted or OrderStatuses.New) && next == OrderStatuses.Delivered),
 
             OrderSources.Delivery => (current == OrderStatuses.New && next == OrderStatuses.Accepted) ||
                                      (current == OrderStatuses.Accepted && next == OrderStatuses.Preparing) ||
                                      (current == OrderStatuses.New && next == OrderStatuses.Preparing) ||
                                      (current == OrderStatuses.Preparing && next == OrderStatuses.Ready) ||
                                      (current == OrderStatuses.Ready && next == OrderStatuses.OutForDelivery) ||
-                                     (current == OrderStatuses.OutForDelivery && next == OrderStatuses.Delivered),
+                                     (current == OrderStatuses.OutForDelivery && next == OrderStatuses.Delivered) ||
+                                     ((current is OrderStatuses.Ready or OrderStatuses.Preparing or OrderStatuses.Accepted or OrderStatuses.New) && next == OrderStatuses.Delivered),
 
             OrderSources.Takeaway => (current == OrderStatuses.New && next == OrderStatuses.Accepted) ||
                                      (current == OrderStatuses.Accepted && next == OrderStatuses.Preparing) ||
                                      (current == OrderStatuses.New && next == OrderStatuses.Preparing) ||
                                      (current == OrderStatuses.Preparing && next == OrderStatuses.ReadyForPickup) ||
-                                     (current == OrderStatuses.ReadyForPickup && next == OrderStatuses.PickedUp),
+                                     (current == OrderStatuses.ReadyForPickup && next == OrderStatuses.PickedUp) ||
+                                     ((current is OrderStatuses.Ready or OrderStatuses.ReadyForPickup or OrderStatuses.Preparing or OrderStatuses.Accepted or OrderStatuses.New) && (next == OrderStatuses.PickedUp || next == OrderStatuses.Delivered)),
 
             _ => false
         };

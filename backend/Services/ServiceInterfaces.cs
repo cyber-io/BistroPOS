@@ -7,9 +7,14 @@ public interface IAuthService
 {
     Task<AuthResponse> RegisterAsync(RegisterRequest request);
     Task<AuthResponse> LoginAsync(LoginRequest request);
-    Task<AuthResponse> DemoLoginAsync(string role);
+    Task<AuthResponse> DemoLoginAsync(string role, Guid? restaurantId = null);
     Task<UserDto?> GetUserByIdAsync(Guid userId);
     Task<AuthResponse> UpdateProfileAsync(Guid userId, UpdateProfileRequest request);
+    Task<(bool Success, StaffDto? Staff, string Message)> CreateStaffAsync(CreateStaffRequest request);
+    Task<(bool Success, StaffDto? Manager, string Message)> CreateManagerAsync(CreateManagerRequest request);
+    Task<List<StaffDto>> GetStaffAsync(Guid? restaurantId = null);
+    Task<(bool Success, string Message)> UpdateStaffStatusAsync(Guid staffUserId, string status);
+    Task<CurrentUserContextDto?> GetCurrentUserContextAsync();
 }
 
 public interface IOrderService
@@ -33,8 +38,6 @@ public interface IReservationService
     Task<List<ReservationDto>> GetReservationsAsync(Guid restaurantId, DateOnly? date, string? status);
     Task<bool> UpdateReservationStatusAsync(Guid reservationId, string newStatus, Guid? assignedTableId);
     Task<bool> RescheduleReservationAsync(Guid reservationId, RescheduleReservationRequest request);
-    Task<ReservationDto> PlanEventAsync(Guid reservationId, EventPlanDto dto);
-    Task<KitchenPrepSheetDto> GetKitchenPrepSheetAsync(Guid reservationId);
 }
 
 public interface ITableService

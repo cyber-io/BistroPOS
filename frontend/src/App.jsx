@@ -44,6 +44,7 @@ function RoleRoute({ allowedRoles, children }) {
   if (!allowedRoles.includes(role)) {
     const getRoleDestination = (userRole) => {
       switch (userRole) {
+        case 'MANAGER': return { name: 'Manager Portal / POS', path: '/pos', badge: '👔 MANAGER' };
         case 'WAITER': return { name: 'Waiter Dashboard', path: '/waiter', badge: '🤵 WAITER' };
         case 'KITCHEN': return { name: 'Kitchen KDS Display', path: '/kitchen', badge: '👨‍🍳 KITCHEN' };
         case 'RECEPTIONIST': return { name: 'Receptionist Panel', path: '/receptionist', badge: '👩‍💼 RECEPTIONIST' };
@@ -108,6 +109,7 @@ function SmartPortalRedirect() {
     case 'KITCHEN':
       return <Navigate to="/kitchen" replace />;
     case 'RECEPTIONIST':
+    case 'MANAGER':
     case 'SUPER_ADMIN':
       return <Navigate to="/pos" replace />;
     case 'CUSTOMER':
@@ -169,7 +171,7 @@ function MainApp() {
           <Route
             path="/kitchen"
             element={
-              <RoleRoute allowedRoles={['KITCHEN', 'SUPER_ADMIN']}>
+              <RoleRoute allowedRoles={['KITCHEN', 'MANAGER', 'SUPER_ADMIN']}>
                 <PosShell><div className="pos-staff-content"><KitchenDashboard /></div></PosShell>
               </RoleRoute>
             }
@@ -179,7 +181,7 @@ function MainApp() {
           <Route
             path="/waiter"
             element={
-              <RoleRoute allowedRoles={['WAITER', 'SUPER_ADMIN']}>
+              <RoleRoute allowedRoles={['WAITER', 'MANAGER', 'SUPER_ADMIN']}>
                 <PosShell><div className="pos-staff-content"><WaiterDashboard /></div></PosShell>
               </RoleRoute>
             }
@@ -189,13 +191,13 @@ function MainApp() {
           <Route
             path="/receptionist"
             element={
-              <RoleRoute allowedRoles={['RECEPTIONIST', 'SUPER_ADMIN']}>
+              <RoleRoute allowedRoles={['RECEPTIONIST', 'MANAGER', 'SUPER_ADMIN']}>
                 <Navigate to="/pos" replace />
               </RoleRoute>
             }
           />
 
-          <Route path="/pos/*" element={<RoleRoute allowedRoles={['RECEPTIONIST', 'SUPER_ADMIN']}><PosWorkspace /></RoleRoute>} />
+          <Route path="/pos/*" element={<RoleRoute allowedRoles={['RECEPTIONIST', 'MANAGER', 'SUPER_ADMIN']}><PosWorkspace /></RoleRoute>} />
 
           {/* Smart Portal & Dashboard Route Redirectors */}
           <Route path="/portal" element={<SmartPortalRedirect />} />

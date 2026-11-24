@@ -148,7 +148,9 @@ export default function TableFloorPlan({ tables, allTables = tables, selectedAre
             <ChevronDown size={16} className="pos-select-arrow" aria-hidden="true" />
           </div>
         </label>
-        <span className="pos-plan-area-count" role="status">{areaTables.length} {area.id === 'party' ? (areaTables.length === 1 ? 'hall' : 'halls') : (areaTables.length === 1 ? 'table' : 'tables')} shown</span>
+        {areaTables.length > 0 && (
+          <span className="pos-plan-area-count" role="status">{areaTables.length} {area.id === 'party' ? (areaTables.length === 1 ? 'hall' : 'halls') : (areaTables.length === 1 ? 'table' : 'tables')} shown</span>
+        )}
       </div>
       <section id="pos-selected-dining-plan" className={`pos-dining-plan pos-dining-plan-${area.id}`} aria-labelledby={`pos-dining-${area.id}`}>
         <header className="pos-dining-plan-header">

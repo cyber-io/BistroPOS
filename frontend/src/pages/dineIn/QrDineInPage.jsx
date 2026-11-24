@@ -1200,7 +1200,7 @@ export default function QrDineInPage() {
       {/* Guest Identification Modal (Name & Phone required before placing) */}
       {isGuestModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-          <div role="dialog" aria-modal="true" className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
+          <div role="dialog" aria-modal="true" className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl space-y-4">
             <div className="flex items-start justify-between">
               <div>
                 <h3 className="text-sm font-black text-slate-900 leading-tight">

@@ -27,6 +27,35 @@ public class TableService : ITableService
             .OrderBy(t => t.TableNumber)
             .ToListAsync();
 
+        if (tables.Count == 0 && await _db.Restaurants.AnyAsync(r => r.RestaurantId == restaurantId))
+        {
+            var defaultCapacities = new[] { 2, 2, 4, 4, 4, 6, 6, 8, 2, 4, 4, 8 };
+            for (int i = 1; i <= 12; i++)
+            {
+                _db.Tables.Add(new TableEntity
+                {
+                    TableId = Guid.NewGuid(),
+                    RestaurantId = restaurantId,
+                    TableNumber = i,
+                    Capacity = defaultCapacities[i - 1],
+                    Status = TableStatuses.Available,
+                    QrIdentifier = $"QR_{restaurantId:N}_TBL{i:D02}",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
+            }
+            try
+            {
+                await _db.SaveChangesAsync();
+                tables = await _db.Tables
+                    .Include(t => t.AssignedWaiter)
+                    .Where(t => t.RestaurantId == restaurantId)
+                    .OrderBy(t => t.TableNumber)
+                    .ToListAsync();
+            }
+            catch { }
+        }
+
         return tables.Select(t => new TableDto(
             t.TableId,
             t.RestaurantId,

@@ -3,7 +3,7 @@ import { api, getAuthToken, setAuthToken } from '../services/api';
 import { supabase } from '../services/supabaseClient';
 
 const AuthContext = createContext(null);
-const avatarByRole = { KITCHEN: '👨‍🍳', WAITER: '🤵', RECEPTIONIST: '👩‍💼', SUPER_ADMIN: '👤', CUSTOMER: '👤' };
+const avatarByRole = { MANAGER: '👔', KITCHEN: '👨‍🍳', WAITER: '🤵', RECEPTIONIST: '👩‍💼', SUPER_ADMIN: '👤', CUSTOMER: '👤' };
 const normalizeUser = user => ({ ...user, avatar: avatarByRole[user.role] || '👤' });
 
 export function AuthProvider({ children }) {

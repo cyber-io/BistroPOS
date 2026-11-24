@@ -1,9 +1,10 @@
-import { tableTitle } from './tablePresentation';
+import { tableTitle } from './tablePresentation.js';
 
 // All business operations go through the .NET API. Failed requests never become
 // local success records: the database remains the authority for orders and bookings.
-const API_BASE = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
-const DEFAULT_RESTAURANT_ID = import.meta.env.VITE_RESTAURANT_ID || 'a0000000-0000-0000-0000-000000000001';
+const metaEnv = (typeof import.meta !== 'undefined' && import.meta.env) ? import.meta.env : {};
+const API_BASE = (metaEnv.VITE_API_URL || '/api').replace(/\/$/, '');
+const DEFAULT_RESTAURANT_ID = metaEnv.VITE_RESTAURANT_ID || 'a0000000-0000-0000-0000-000000000001';
 const TOKEN_KEY = 'rs_api_session';
 const RESOURCE_KEY = 'rs_customer_order_access';
 const HELP_KEY = 'rs_customer_help_access';
@@ -21,6 +22,7 @@ const PURGED_ORDERS = new Set(['ORD-0D10DC7FC6', 'ORD-66A6B8C8CB']);
 
 function stored(key, fallback = []) {
   try {
+    if (typeof localStorage === 'undefined') return fallback;
     const data = JSON.parse(localStorage.getItem(key) || 'null') || fallback;
     if (key === RESOURCE_KEY && Array.isArray(data)) {
       return data.filter(e => !PURGED_ORDERS.has(e.orderNumber) && !PURGED_ORDERS.has(e.orderId));
@@ -30,8 +32,32 @@ function stored(key, fallback = []) {
   catch { return fallback; }
 }
 function save(key, value) {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage may be disabled */ }
+  try { 
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(key, JSON.stringify(value));
+    }
+  } catch { /* storage may be disabled */ }
 }
+export function getActiveRestaurantId() {
+  return restaurantId;
+}
+
+export function setActiveRestaurantId(newId) {
+  if (!newId || newId === restaurantId) return;
+  restaurantId = newId;
+  restaurantCache = null;
+  snapshots.clear();
+  pollingGeneration += 1;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('rs_active_restaurant_id', newId);
+    }
+  } catch {}
+  if (typeof window !== 'undefined' && typeof CustomEvent !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('rs_outlet_changed', { detail: newId }));
+  }
+}
+
 export function getAuthToken() {
   try { return sessionStorage.getItem(TOKEN_KEY) || ''; } catch { return ''; }
 }
@@ -48,7 +74,12 @@ export function setAuthToken(token) {
     try {
       const payload = token.split('.')[1];
       const claims = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
-      restaurantId = claims.restaurant_id || DEFAULT_RESTAURANT_ID;
+      if (claims.restaurant_id) {
+        restaurantId = claims.restaurant_id;
+      } else {
+        const saved = localStorage.getItem('rs_active_restaurant_id');
+        if (saved) restaurantId = saved;
+      }
     } catch { /* the server validates the token before any protected operation */ }
   }
   snapshots.clear();
@@ -61,7 +92,7 @@ function jwtRole() {
     return claims.role || claims['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'] || 'CUSTOMER';
   } catch { return 'GUEST'; }
 }
-function isStaff() { return ['SUPER_ADMIN', 'RECEPTIONIST', 'KITCHEN', 'WAITER'].includes(jwtRole()); }
+function isStaff() { return ['SUPER_ADMIN', 'MANAGER', 'RECEPTIONIST', 'KITCHEN', 'WAITER'].includes(jwtRole()); }
 function parseJson(value, fallback) {
   if (typeof value !== 'string') return value ?? fallback;
   try { return JSON.parse(value); } catch { return fallback; }
@@ -254,27 +285,23 @@ export function subscribeRealtimeEvents(callback) {
 export const api = {
   health: () => request('/health'),
   login: body => request('/auth/login', { method: 'POST', body }),
-  demoLogin: role => request('/auth/demo-login', { method: 'POST', body: { role } }),
+  demoLogin: (role, restaurantId) => request('/auth/demo-login', { method: 'POST', body: { role, restaurantId } }),
   me: async () => {
     const user = await request('/auth/me');
     if (user.restaurantId) restaurantId = user.restaurantId;
     return user;
   },
+  getContext: () => request('/auth/context'),
+  getStaff: (resId) => request(`/auth/staff${query({ restaurantId: resId })}`),
+  createStaff: details => request('/auth/staff', { method: 'POST', body: details }),
+  updateStaffStatus: (userId, status) => request(`/auth/staff/${userId}/status`, { method: 'PATCH', body: { status } }),
+  createManager: details => request('/auth/managers', { method: 'POST', body: details }),
   updateProfile: body => request('/auth/profile', { method: 'PATCH', body }),
   register: ({ name, email, phone, password }) => request('/auth/register', { method: 'POST', body: { name, email, phone, password, restaurantId, role: 'CUSTOMER' } }),
 
-  getRestaurant: async (targetId) => {
-    let reqId = targetId || restaurantId;
-    if (typeof reqId === 'string') {
-      const match = reqId.match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);
-      if (match) reqId = match[0];
-      else if (!/^[0-9a-fA-F-]{36}$/.test(reqId)) reqId = DEFAULT_RESTAURANT_ID;
-    }
-    const data = await request(`/restaurants/${reqId}`).catch(async () => {
-      return await request(`/restaurants/${DEFAULT_RESTAURANT_ID}`).catch(() => null);
-    });
-    if (!data) return null;
-    if (data?.restaurantId) restaurantId = data.restaurantId;
+  getRestaurant: async () => {
+    const data = await request(`/restaurants/${restaurantId}`);
+    restaurantId = data.restaurantId;
     restaurantCache = {
       ...data,
       logo: data.logo || '/favicon.svg',
@@ -341,6 +368,10 @@ export const api = {
   }),
   validateQr: qrCode => request(`/qr/validate/${encodeURIComponent(qrCode)}`),
   getCategories: async () => (await request(`/menu/categories${query({ restaurantId })}`)).map(category => ({ ...category, icon: ({ Pizza: '🍕', Burger: '🍔', Chinese: '🥢', Indian: '🍛', 'South Indian': '🥞', 'North Indian': '🥘', Desserts: '🍨', Beverages: '☕' })[category.name] || '🍽️' })),
+  createCategory: data => request(`/menu/categories`, { method: 'POST', body: { restaurantId, ...data } }),
+  updateCategory: (id, data) => request(`/menu/categories/${id}`, { method: 'PUT', body: data }),
+  deleteCategory: id => request(`/menu/categories/${id}`, { method: 'DELETE' }),
+
   getMenuItems: async () => (await request(`/menu/items${query({ restaurantId })}`)).map(item => ({
     ...item,
     price: Number(item.price),
@@ -365,6 +396,10 @@ export const api = {
     isSpecial: Boolean(item.isSpecial),
     prepTimeMinutes: Number(item.prepTimeMinutes || 15)
   })),
+  createMenuItem: data => request(`/menu/items`, { method: 'POST', body: { restaurantId, ...data } }),
+  updateMenuItem: (id, data) => request(`/menu/items/${id}`, { method: 'PUT', body: data }),
+  deleteMenuItem: id => request(`/menu/items/${id}`, { method: 'DELETE' }),
+
   updateItemAvailability: (menuItemId, availability) => request(`/menu/items/${menuItemId}/availability`, { method: 'PATCH', body: { availability } }).then(result => {
     broadcastEvent('FOOD_AVAILABILITY_CHANGED', { menuItemId, availability });
     return result;
@@ -518,6 +553,10 @@ export const api = {
     return result;
   },
   rescheduleReservation: (reservationId, { newDate, newTime, guestCount }) => request(`/reservations/${reservationId}/reschedule`, { method: 'PATCH', body: { newDate, newTime: normalizeTime(newTime), guestCount } }),
+  lookupReservation: async queryStr => {
+    const res = await request(`/reservations/lookup?query=${encodeURIComponent(queryStr)}`);
+    return normalizeReservation(res);
+  },
 
   getHelpRequests: async () => {
     if (isStaff()) return request(`/help${query({ restaurantId })}`);

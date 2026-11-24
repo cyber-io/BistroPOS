@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useNotification } from '../../context/NotificationContext';
-import { Calendar, Clock, Users, CheckCircle2, AlertCircle, ArrowRight, ArrowLeft, Phone, RefreshCw, Printer } from 'lucide-react';
+import { Calendar, Clock, Users, CheckCircle2, AlertCircle, ArrowRight, ArrowLeft, Phone, RefreshCw, Printer, Search } from 'lucide-react';
 
 const dateValue = (date) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
 const prettyTime = (value) => { if (!value) return ''; if (/AM|PM/i.test(value)) return value; const [h,m] = value.split(':'); return `${Number(h)%12 || 12}:${m} ${Number(h)>=12 ? 'PM' : 'AM'}`; };
@@ -12,7 +12,7 @@ const inputClass='w-full rounded-lg border border-[#E8D1CE] bg-white px-3.5 py-3
 export default function BookTablePage() {
   const { currentUser } = useAuth();
   const { addToast } = useNotification();
-  const [date, setDate] = useState(() => { const day=new Date(); day.setDate(day.getDate()+1); return dateValue(day); });
+  const [date, setDate] = useState(() => dateValue(new Date()));
   const [guestCount, setGuestCount] = useState(2);
   const [slots, setSlots] = useState([]);
   const [selectedSlot, setSelectedSlot] = useState('');
@@ -23,6 +23,33 @@ export default function BookTablePage() {
   const [submitError, setSubmitError] = useState('');
   const [confirmation, setConfirmation] = useState(null);
   const [form, setForm] = useState({ name:currentUser?.name || '', phone:currentUser?.phone || '', email:currentUser?.email || '', request:'' });
+  
+  // Status tracking tab state
+  const [tabMode, setTabMode] = useState('book'); // 'book' | 'lookup'
+  const [lookupQuery, setLookupQuery] = useState('');
+  const [lookupResult, setLookupResult] = useState(null);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupError, setLookupError] = useState('');
+
+  const handleLookup = async (e) => {
+    e.preventDefault();
+    if (!lookupQuery.trim()) return;
+    setLookupLoading(true);
+    setLookupError('');
+    setLookupResult(null);
+    try {
+      const res = await api.lookupReservation(lookupQuery.trim());
+      setLookupResult(res);
+    } catch (err) {
+      const msg = err.message === 'This record could not be found.'
+        ? 'No reservation found for this phone number or Booking ID. Please check the 10-digit mobile number or Booking Reference ID.'
+        : (err.message || 'Unable to check reservation status.');
+      setLookupError(msg);
+    } finally {
+      setLookupLoading(false);
+    }
+  };
+
   useEffect(() => {
     let active = true;
     setLoading(true); setSlotError(''); setSlots([]); setSelectedSlot('');
@@ -44,7 +71,168 @@ export default function BookTablePage() {
   return <main className="website-subpage mx-auto min-h-[85vh] max-w-5xl space-y-8 px-4 py-10 text-[#11164B] sm:px-6 sm:py-14">
     <Link to="/" className="inline-flex items-center gap-2 text-xs text-[#75666B]"><ArrowLeft size={14} />Back to the bistro</Link>
     <div className="space-y-3 text-center"><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#A61920]">There’s a place for you here</p><h1 className="font-serif text-4xl sm:text-5xl">Make room for a good time.</h1><p className="mx-auto max-w-lg text-sm leading-relaxed text-[#75666B]">A catch-up over coffee or an evening around the table. Choose your time, and we’ll find the right table for you.</p></div>
-    {confirmation ? <section className="mx-auto max-w-2xl space-y-6 rounded-2xl border border-[#E8D1CE] bg-white p-6 sm:p-10" aria-live="polite">
+    
+    <div className="flex justify-center">
+      <div className="inline-flex rounded-xl bg-[#FAF1F0] p-1 border border-[#E8D1CE]">
+        <button
+          type="button"
+          onClick={() => { setTabMode('book'); setConfirmation(null); }}
+          className={`rounded-lg px-5 py-2 text-xs font-semibold transition-all ${
+            tabMode === 'book'
+              ? 'bg-[#11164B] text-white shadow-sm'
+              : 'text-[#75666B] hover:text-[#11164B]'
+          }`}
+        >
+          Book a Table
+        </button>
+        <button
+          type="button"
+          onClick={() => setTabMode('lookup')}
+          className={`rounded-lg px-5 py-2 text-xs font-semibold transition-all ${
+            tabMode === 'lookup'
+              ? 'bg-[#11164B] text-white shadow-sm'
+              : 'text-[#75666B] hover:text-[#11164B]'
+          }`}
+        >
+          Check Booking Status
+        </button>
+      </div>
+    </div>
+
+    {tabMode === 'lookup' ? (
+      <div className="mx-auto max-w-2xl space-y-6">
+        <form onSubmit={handleLookup} className="flex gap-2 rounded-xl border border-[#E8D1CE] bg-white p-2.5 shadow-sm">
+          <Search size={19} className="my-3 ml-2 shrink-0 text-[#75666B]" />
+          <input
+            type="text"
+            required
+            value={lookupQuery}
+            onChange={e => setLookupQuery(e.target.value)}
+            placeholder="Enter Booking ID (e.g. RES-XXXX) or Mobile Number"
+            className="min-w-0 flex-1 bg-transparent py-2 text-sm outline-none"
+          />
+          <button
+            type="submit"
+            disabled={lookupLoading}
+            className="btn-3d-crimson rounded-xl px-5 text-xs font-semibold text-white disabled:opacity-50"
+          >
+            {lookupLoading ? 'Checking…' : 'Check status'}
+          </button>
+        </form>
+
+        {lookupError && (
+          <div role="alert" className="flex gap-3 rounded-xl border border-red-200 bg-red-50 p-5 text-sm text-red-900">
+            <AlertCircle size={19} className="shrink-0 text-red-600" />
+            <div>
+              <strong className="block font-medium">Reservation not found</strong>
+              <p className="mt-0.5 text-xs text-red-700">{lookupError}</p>
+            </div>
+          </div>
+        )}
+
+        {lookupResult && (
+          <section className="space-y-6 rounded-2xl border border-[#E8D1CE] bg-white p-6 sm:p-8 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#E8D1CE] pb-5">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-[#75666B]">Booking Reference</p>
+                <h2 className="mt-1 font-serif text-2xl text-[#11164B]">{lookupResult.bookingId}</h2>
+                <p className="mt-1 text-xs text-[#75666B]">
+                  Reserved for <strong>{lookupResult.customerName}</strong>
+                </p>
+              </div>
+              <div className="text-right">
+                <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${
+                  lookupResult.status === 'CONFIRMED' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                  lookupResult.status === 'RESCHEDULED' ? 'bg-amber-50 text-amber-800 border border-amber-200' :
+                  lookupResult.status === 'CANCELLED' ? 'bg-red-50 text-red-700 border border-red-200' :
+                  lookupResult.status === 'ARRIVED' || lookupResult.status === 'SEATED' ? 'bg-blue-50 text-blue-700 border border-blue-200' :
+                  'bg-stone-100 text-stone-700 border border-stone-200'
+                }`}>
+                  {lookupResult.status === 'CONFIRMED' && '✓ Confirmed'}
+                  {lookupResult.status === 'RESCHEDULED' && '⏰ Rescheduled by Reception'}
+                  {lookupResult.status === 'CANCELLED' && '✕ Cancelled'}
+                  {lookupResult.status === 'ARRIVED' && 'Arrived'}
+                  {lookupResult.status === 'SEATED' && 'Seated at Table'}
+                  {lookupResult.status === 'COMPLETED' && 'Completed'}
+                  {!['CONFIRMED', 'RESCHEDULED', 'CANCELLED', 'ARRIVED', 'SEATED', 'COMPLETED'].includes(lookupResult.status) && lookupResult.status}
+                </span>
+              </div>
+            </div>
+
+            {lookupResult.status === 'RESCHEDULED' && (
+              <div className="flex gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs leading-relaxed text-amber-900">
+                <Clock size={18} className="shrink-0 text-amber-700 mt-0.5" />
+                <div>
+                  <strong className="block font-medium">Notice: Reservation rescheduled by reception</strong>
+                  <p className="mt-0.5 text-amber-800">
+                    Your table reservation timing was updated. Please note the new date and time below. If this does not fit your schedule, please call our reception.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {lookupResult.status === 'CANCELLED' && (
+              <div className="flex gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-xs leading-relaxed text-red-900">
+                <AlertCircle size={18} className="shrink-0 text-red-700 mt-0.5" />
+                <div>
+                  <strong className="block font-medium">Reservation Cancelled</strong>
+                  <p className="mt-0.5 text-red-800">
+                    This reservation was cancelled due to an unforeseen operational inconvenience or constraint. We sincerely apologize for any disruption. Please call our reception or book an alternative date.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-xl bg-[#FAF1F0] p-4 text-xs">
+              <div>
+                <span className="block text-[#75666B]">Date</span>
+                <strong className="mt-1 block text-sm">
+                  {new Date(`${lookupResult.reservationDate}T12:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                </strong>
+              </div>
+              <div>
+                <span className="block text-[#75666B]">Time</span>
+                <strong className="mt-1 block text-sm text-[#A61920]">
+                  {prettyTime(lookupResult.reservationTimeFormatted || lookupResult.reservationTime)}
+                </strong>
+              </div>
+              <div>
+                <span className="block text-[#75666B]">Party Size</span>
+                <strong className="mt-1 block text-sm">{lookupResult.guestCount} guests</strong>
+              </div>
+              <div>
+                <span className="block text-[#75666B]">Table</span>
+                <strong className="mt-1 block text-sm">{lookupResult.tableNumber ? `Table A${lookupResult.tableNumber}` : 'Assigned on arrival'}</strong>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#E8D1CE] pt-4 text-xs text-[#75666B]">
+              <a href="tel:+919876543210" className="inline-flex items-center gap-1.5 font-medium text-[#11164B] hover:underline">
+                <Phone size={14} className="text-[#A61920]" />
+                Call Reception: +91 98765 43210
+              </a>
+              <button
+                type="button"
+                onClick={() => { setTabMode('book'); setLookupResult(null); }}
+                className="text-xs font-semibold text-[#A61920] hover:underline"
+              >
+                Make a new booking →
+              </button>
+            </div>
+          </section>
+        )}
+
+        {!lookupResult && !lookupError && (
+          <div className="rounded-2xl border border-[#E8D1CE] bg-white p-8 text-center text-xs text-[#75666B]">
+            <Clock size={32} className="mx-auto mb-3 text-[#A61920]" />
+            <h3 className="font-serif text-lg text-[#11164B]">Track your table reservation anytime</h3>
+            <p className="mt-1 max-w-md mx-auto">
+              Check live confirmation status, reschedule updates, or cancellation details using the Booking Reference ID provided during booking.
+            </p>
+          </div>
+        )}
+      </div>
+    ) : confirmation ? <section className="mx-auto max-w-2xl space-y-6 rounded-2xl border border-[#E8D1CE] bg-white p-6 sm:p-10" aria-live="polite">
       <CheckCircle2 size={43} className="text-[#11164B]" /><div><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#75666B]">Booking confirmed</p><h2 className="mt-2 font-serif text-3xl">We’ll see you soon, {confirmation.customerName.split(' ')[0]}.</h2><p className="mt-3 text-sm text-[#75666B]">Your reservation reference is <strong className="text-[#11164B]">{confirmation.bookingId}</strong>.</p></div>
       <div className="grid grid-cols-3 gap-3 rounded-xl bg-[#FAF1F0] p-5 text-xs"><div><span className="block text-[#75666B]">Date</span><strong className="mt-1 block">{new Date(`${confirmation.reservationDate}T12:00:00`).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}</strong></div><div><span className="block text-[#75666B]">Time</span><strong className="mt-1 block">{prettyTime(confirmation.reservationTimeFormatted || confirmation.reservationTime)}</strong></div><div><span className="block text-[#75666B]">Guests</span><strong className="mt-1 block">{confirmation.guestCount} people</strong></div></div>
       <div className="flex gap-3 rounded-xl border border-[#E8D1CE] p-4 text-sm leading-relaxed text-[#75666B]"><Clock size={19} className="mt-0.5 shrink-0 text-[#A61920]" /><p>Please arrive 5 minutes before your scheduled time. If you’re running late, let us know. We may need to move your reservation to the next available time, depending on table availability.</p></div>
