@@ -230,6 +230,49 @@ public record UpdateItemAvailabilityRequest(
     bool Availability
 );
 
+public record CreateMenuCategoryRequest(
+    Guid? RestaurantId,
+    [Required] string Name,
+    string? Description,
+    int? SortOrder
+);
+
+public record UpdateMenuCategoryRequest(
+    [Required] string Name,
+    string? Description,
+    int? SortOrder,
+    string? Status
+);
+
+public record CreateMenuItemRequest(
+    Guid? RestaurantId,
+    [Required] Guid CategoryId,
+    [Required] string Name,
+    string? Description,
+    [Required] decimal Price,
+    string? Image,
+    string? VegNonVeg,
+    bool? Availability,
+    string? SpiceLevel,
+    bool? IsSweet,
+    string? CustomizationOptions,
+    string? AddOns
+);
+
+public record UpdateMenuItemRequest(
+    Guid? CategoryId,
+    [Required] string Name,
+    string? Description,
+    [Required] decimal Price,
+    string? Image,
+    string? VegNonVeg,
+    bool? Availability,
+    string? SpiceLevel,
+    bool? IsSweet,
+    string? CustomizationOptions,
+    string? AddOns
+);
+
 // --- PAYMENT DTOS ---
 public record InitiatePaymentRequest(
     Guid RestaurantId,
@@ -306,9 +349,9 @@ public record ResolveIssueDto(
     bool Escalate
 );
 
-public record DemoLoginRequest(string Role);
+public record DemoLoginRequest(string Role, Guid? RestaurantId = null);
 
-// --- RESTAURANT & STAFF MANAGEMENT DTOS ---
+// --- RESTAURANT & STAFF MANAGEMENT DTOS (PHASE 2 RBAC) ---
 public record UpdateRestaurantSettingsDto(
     string? Name,
     string? Phone,
@@ -318,10 +361,54 @@ public record UpdateRestaurantSettingsDto(
     string? Settings
 );
 
+public record CreateStaffRequest(
+    [Required, MaxLength(150)] string Name,
+    [Required, EmailAddress, MaxLength(255)] string Email,
+    [MaxLength(30)] string? Phone,
+    [Required, MaxLength(50)] string Role,
+    [Required, MinLength(6)] string Password,
+    Guid? RestaurantId = null
+);
+
 public record CreateStaffDto(
     [Required] string Name,
     [Required, EmailAddress] string Email,
     string? Phone,
     string? Role,
     string? Password
+);
+
+public record CreateManagerRequest(
+    [Required] Guid RestaurantId,
+    [Required, MaxLength(150)] string Name,
+    [Required, EmailAddress, MaxLength(255)] string Email,
+    [MaxLength(30)] string? Phone,
+    [Required, MinLength(6)] string Password
+);
+
+public record StaffDto(
+    Guid UserId,
+    Guid? AuthUserId,
+    Guid? RestaurantId,
+    string Name,
+    string Email,
+    string? Phone,
+    string Role,
+    string Status,
+    DateTime CreatedAt
+);
+
+public record UpdateStaffStatusRequest(
+    [Required, MaxLength(50)] string Status
+);
+
+public record CurrentUserContextDto(
+    Guid UserId,
+    Guid? RestaurantId,
+    string Name,
+    string Email,
+    string Role,
+    string Status,
+    bool IsSuperAdmin,
+    bool IsManager
 );

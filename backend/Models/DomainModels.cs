@@ -6,6 +6,7 @@ namespace RestaurantSystem.Api.Models;
 public static class UserRoles
 {
     public const string SuperAdmin = "SUPER_ADMIN";
+    public const string Manager = "MANAGER";
     public const string Receptionist = "RECEPTIONIST";
     public const string Kitchen = "KITCHEN";
     public const string Waiter = "WAITER";
@@ -416,4 +417,98 @@ public class AuditLog
     public string? Metadata { get; set; }
     public string? IpAddress { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+[Table("staff_profiles")]
+public class StaffProfile
+{
+    [Key]
+    public Guid UserId { get; set; } = Guid.NewGuid();
+    public Guid AuthUserId { get; set; }
+    public Guid? RestaurantId { get; set; }
+    [ForeignKey(nameof(RestaurantId))]
+    public Restaurant? Restaurant { get; set; }
+    [Required, MaxLength(150)]
+    public string Name { get; set; } = string.Empty;
+    [MaxLength(30)]
+    public string? Phone { get; set; }
+    [Required, MaxLength(50)]
+    public string Role { get; set; } = UserRoles.Waiter;
+    [Required, MaxLength(50)]
+    public string Status { get; set; } = "ACTIVE"; // ACTIVE, DISABLED
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? DeletedAt { get; set; }
+}
+
+[Table("table_sessions")]
+public class TableSession
+{
+    [Key]
+    public Guid SessionId { get; set; } = Guid.NewGuid();
+    [Required]
+    public Guid RestaurantId { get; set; }
+    [Required]
+    public Guid TableId { get; set; }
+    [ForeignKey(nameof(TableId))]
+    public TableEntity? Table { get; set; }
+    public Guid? OpenedBy { get; set; }
+    public Guid? CustomerId { get; set; }
+    [MaxLength(150)]
+    public string? CustomerName { get; set; }
+    public int GuestCount { get; set; } = 1;
+    [Required, MaxLength(50)]
+    public string Status { get; set; } = "OPEN"; // OPEN, CLOSED
+    public DateTime OpenedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? ClosedAt { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+[Table("table_assignments")]
+public class TableAssignment
+{
+    [Key]
+    public Guid AssignmentId { get; set; } = Guid.NewGuid();
+    [Required]
+    public Guid RestaurantId { get; set; }
+    [Required]
+    public Guid TableId { get; set; }
+    [ForeignKey(nameof(TableId))]
+    public TableEntity? Table { get; set; }
+    [Required]
+    public Guid WaiterId { get; set; }
+    public Guid? AssignedBy { get; set; }
+    public DateTime AssignedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? UnassignedAt { get; set; }
+    [Required, MaxLength(50)]
+    public string Status { get; set; } = "ACTIVE"; // ACTIVE, ENDED
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+[Table("restaurant_settings")]
+public class RestaurantSettingsEntity
+{
+    [Key]
+    public Guid SettingId { get; set; } = Guid.NewGuid();
+    [Required]
+    public Guid RestaurantId { get; set; }
+    [Column(TypeName = "numeric(5,2)")]
+    public decimal TaxPercentage { get; set; } = 5.0m;
+    [MaxLength(10)]
+    public string Currency { get; set; } = "INR";
+    [Column(TypeName = "numeric(12,2)")]
+    public decimal DeliveryFee { get; set; } = 40.0m;
+    [Column(TypeName = "numeric(12,2)")]
+    public decimal PackagingFee { get; set; } = 0.0m;
+    [Column(TypeName = "numeric(5,2)")]
+    public decimal DiscountLimit { get; set; } = 25.0m;
+    [MaxLength(100)]
+    public string Timezone { get; set; } = "Asia/Kolkata";
+    public int ReservationGraceMinutes { get; set; } = 15;
+    public string ReceiptSettings { get; set; } = "{}";
+    public string NotificationSettings { get; set; } = "{}";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

@@ -83,7 +83,7 @@ public class ReservationService(RestaurantDbContext db, IOptions<BusinessRulesOp
         var query=db.Reservations.Include(r=>r.Table).Where(r=>r.RestaurantId==restaurantId);
         if(date.HasValue)query=query.Where(r=>r.ReservationDate==date.Value);
         if(!string.IsNullOrEmpty(status))query=query.Where(r=>r.Status==status);
-        return(await query.OrderBy(r=>r.ReservationDate).ThenBy(r=>r.ReservationTime).ToListAsync()).Select(r=>Map(r,r.Table?.TableNumber)).ToList();
+        return(await query.OrderByDescending(r=>r.CreatedAt).ToListAsync()).Select(r=>Map(r,r.Table?.TableNumber)).ToList();
     }
     public async Task<bool> UpdateReservationStatusAsync(Guid reservationId,string newStatus,Guid? assignedTableId)
     {
@@ -114,9 +114,9 @@ public class ReservationService(RestaurantDbContext db, IOptions<BusinessRulesOp
         await db.SaveChangesAsync();await transaction.CommitAsync();
         await audit.LogAsync(reservation.RestaurantId,null,UserRoles.Receptionist,"RESERVATION_"+newStatus,"reservations",new{reservation.BookingId});return true;
     }
-    public async Task<bool> RescheduleReservationAsync(Guid reservationId,RescheduleReservationRequest request)
+    public async Task<ReservationDto?> RescheduleReservationAsync(Guid reservationId,RescheduleReservationRequest request)
     {
-        var reservation=await db.Reservations.FindAsync(reservationId);if(reservation==null)return false;
+        var reservation=await db.Reservations.Include(r => r.Table).FirstOrDefaultAsync(r => r.ReservationId == reservationId);if(reservation==null)return null;
         if(reservation.Status is not (ReservationStatuses.Confirmed or ReservationStatuses.Rescheduled))throw new InvalidOperationException("Only an upcoming booking can be rescheduled.");
         var guests=request.GuestCount??reservation.GuestCount;await ValidateSlot(reservation.RestaurantId,request.NewDate,request.NewTime,guests);
         await using var transaction=await db.Database.BeginTransactionAsync();
@@ -124,7 +124,70 @@ public class ReservationService(RestaurantDbContext db, IOptions<BusinessRulesOp
         var table=(await AvailableTables(reservation.RestaurantId,request.NewDate,request.NewTime,guests,reservationId)).FirstOrDefault();
         if(table==null)throw new InvalidOperationException("No table is available at that time.");
         reservation.ReservationDate=request.NewDate;reservation.ReservationTime=request.NewTime;reservation.GuestCount=guests;reservation.TableId=table.TableId;reservation.Status=ReservationStatuses.Rescheduled;reservation.UpdatedAt=DateTime.UtcNow;
-        await db.SaveChangesAsync();await transaction.CommitAsync();return true;
+        await db.SaveChangesAsync();await transaction.CommitAsync();
+        return Map(reservation, table.TableNumber);
+    }
+    public async Task<ReservationDto?> LookupReservationAsync(string query)
+    {
+        var raw = query.Trim();
+        var upper = raw.ToUpperInvariant();
+        var digits = new string(raw.Where(char.IsDigit).ToArray());
+        var last10 = digits.Length >= 10 ? digits[^10..] : digits;
+
+        // 1. Direct or partial booking ID lookup
+        var reservation = await db.Reservations
+            .Include(r => r.Table)
+            .Where(r => r.BookingId.ToUpper() == upper
+                     || r.BookingId.ToUpper() == "RES-" + upper
+                     || r.BookingId.ToUpper().EndsWith(upper))
+            .OrderByDescending(r => r.CreatedAt)
+            .FirstOrDefaultAsync();
+
+        if (reservation != null) return Map(reservation, reservation.Table?.TableNumber);
+
+        // 2. Phone number lookup (supports raw, last 10 digits, formatted phones like +91 95168 51825)
+        if (!string.IsNullOrEmpty(digits))
+        {
+            // Direct DB match (raw or last10 substring)
+            reservation = await db.Reservations
+                .Include(r => r.Table)
+                .Where(r => r.CustomerPhone == raw || (last10.Length >= 6 && r.CustomerPhone.Contains(last10)))
+                .OrderByDescending(r => r.CreatedAt)
+                .FirstOrDefaultAsync();
+
+            if (reservation != null) return Map(reservation, reservation.Table?.TableNumber);
+
+            // In-memory digit comparison for numbers formatted with spaces or country codes in DB
+            var recent = await db.Reservations
+                .Include(r => r.Table)
+                .OrderByDescending(r => r.CreatedAt)
+                .Take(150)
+                .ToListAsync();
+
+            reservation = recent.FirstOrDefault(r => {
+                if (string.IsNullOrWhiteSpace(r.CustomerPhone)) return false;
+                var phoneDigits = new string(r.CustomerPhone.Where(char.IsDigit).ToArray());
+                return phoneDigits == digits 
+                    || (last10.Length >= 6 && phoneDigits.EndsWith(last10))
+                    || (phoneDigits.Length >= 10 && last10.EndsWith(phoneDigits[^10..]));
+            });
+
+            if (reservation != null) return Map(reservation, reservation.Table?.TableNumber);
+        }
+
+        // 3. Fallback name lookup if query is not numeric
+        if (digits.Length < 4 && raw.Length >= 3)
+        {
+            reservation = await db.Reservations
+                .Include(r => r.Table)
+                .Where(r => r.CustomerName.ToLower().Contains(raw.ToLower()))
+                .OrderByDescending(r => r.CreatedAt)
+                .FirstOrDefaultAsync();
+
+            if (reservation != null) return Map(reservation, reservation.Table?.TableNumber);
+        }
+
+        return null;
     }
     private static ReservationDto Map(Reservation r,int? table)=>new(r.ReservationId,r.BookingId,r.RestaurantId,r.TableId,table,r.CustomerName,r.CustomerPhone,r.CustomerEmail,r.ReservationDate,r.ReservationTime,r.GuestCount,r.Status,r.GracePeriodMinutes,r.SpecialRequest,r.CreatedAt);
 }

@@ -12,6 +12,8 @@ public class RestaurantDbContext : DbContext
     public DbSet<Restaurant> Restaurants => Set<Restaurant>();
     public DbSet<User> Users => Set<User>();
     public DbSet<TableEntity> Tables => Set<TableEntity>();
+    public DbSet<TableSession> TableSessions => Set<TableSession>();
+    public DbSet<TableAssignment> TableAssignments => Set<TableAssignment>();
     public DbSet<MenuCategory> MenuCategories => Set<MenuCategory>();
     public DbSet<MenuItem> MenuItems => Set<MenuItem>();
     public DbSet<Order> Orders => Set<Order>();
@@ -22,6 +24,7 @@ public class RestaurantDbContext : DbContext
     public DbSet<CustomerIssue> CustomerIssues => Set<CustomerIssue>();
     public DbSet<NotificationEntity> Notifications => Set<NotificationEntity>();
     public DbSet<DeliveryAddressEntity> DeliveryAddresses => Set<DeliveryAddressEntity>();
+    public DbSet<RestaurantSettingsEntity> RestaurantSettings => Set<RestaurantSettingsEntity>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

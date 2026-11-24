@@ -13,6 +13,15 @@ public sealed class ResourceAccessFilter(RestaurantDbContext db, ResourceTokens 
     {
         var http = context.HttpContext;
         var user = http.User;
+
+        // Check if user account was marked disabled in claims
+        var status = user.FindFirstValue("status");
+        if (string.Equals(status, "DISABLED", StringComparison.OrdinalIgnoreCase))
+        {
+            context.Result = new ObjectResult(new { message = "Your account has been disabled by management." }) { StatusCode = 401 };
+            return;
+        }
+
         var controller = context.RouteData.Values["controller"]?.ToString() ?? "";
         var action = context.RouteData.Values["action"]?.ToString() ?? "";
         var role = user.FindFirstValue(ClaimTypes.Role) ?? UserRoles.Customer;

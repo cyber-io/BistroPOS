@@ -80,9 +80,14 @@ builder.Services.AddAuthentication(options =>
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("SuperAdminOnly", policy => policy.RequireRole(UserRoles.SuperAdmin));
-    options.AddPolicy("ReceptionistOrAdmin", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Receptionist));
-    options.AddPolicy("KitchenStaff", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Kitchen));
-    options.AddPolicy("WaiterStaff", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Waiter));
+    options.AddPolicy("ManagerOnly", policy => policy.RequireRole(UserRoles.Manager));
+    options.AddPolicy("ManagerOrAdmin", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Manager));
+    options.AddPolicy("ReceptionistOrManagerOrAdmin", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Manager, UserRoles.Receptionist));
+    options.AddPolicy("ReceptionistOrAdmin", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Manager, UserRoles.Receptionist));
+    options.AddPolicy("KitchenStaff", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Manager, UserRoles.Kitchen));
+    options.AddPolicy("WaiterStaff", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Manager, UserRoles.Waiter));
+    options.AddPolicy("OperationalStaff", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Manager, UserRoles.Receptionist, UserRoles.Kitchen, UserRoles.Waiter));
+    options.AddPolicy("StaffOnly", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Manager, UserRoles.Receptionist, UserRoles.Kitchen, UserRoles.Waiter));
     options.AddPolicy("CustomerAccess", policy => policy.RequireRole(UserRoles.Customer, UserRoles.SuperAdmin));
 });
 
@@ -95,6 +100,7 @@ builder.Services.AddHttpClient();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton<ResourceTokens>();
 builder.Services.AddScoped<ResourceAccessFilter>();
+builder.Services.AddScoped<ITenantContext, TenantContext>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddScoped<IReservationService, ReservationService>();
@@ -181,7 +187,7 @@ app.MapGet("/api/health", async (RestaurantDbContext db) => {
 app.MapControllers();
 app.MapHub<NotificationHub>("/hubs/notifications");
 
-// Ensure PostgreSQL tables_status_check allows CLEANING status & purge requested stale orders
+// Ensure PostgreSQL constraints allow MANAGER role, CLEANING status & purge requested stale orders
 try
 {
     using var scope = app.Services.CreateScope();
@@ -190,11 +196,47 @@ try
     {
         await db.Database.ExecuteSqlRawAsync(@"
             DO $$
+            DECLARE
+                r RECORD;
             BEGIN
-                ALTER TABLE restaurant_pos.tables DROP CONSTRAINT IF EXISTS tables_status_check;
-                ALTER TABLE restaurant_pos.tables ADD CONSTRAINT tables_status_check CHECK (status IN ('AVAILABLE', 'RESERVED', 'OCCUPIED', 'WAITING_FOR_CLEANING', 'CLEANING', 'OUT_OF_SERVICE'));
-            EXCEPTION WHEN OTHERS THEN
-                NULL;
+                -- 1. Ensure users_role_check is dropped across all schemas
+                FOR r IN (
+                    SELECT n.nspname AS schemaname, c.conname
+                    FROM pg_constraint c
+                    JOIN pg_namespace n ON n.oid = c.connamespace
+                    WHERE c.conname = 'users_role_check'
+                ) LOOP
+                    EXECUTE 'ALTER TABLE ' || quote_ident(r.schemaname) || '.users DROP CONSTRAINT IF EXISTS ' || quote_ident(r.conname);
+                END LOOP;
+
+                BEGIN
+                    ALTER TABLE restaurant_pos.users DROP CONSTRAINT IF EXISTS users_role_check;
+                EXCEPTION WHEN OTHERS THEN NULL;
+                END;
+
+                BEGIN
+                    ALTER TABLE public.users DROP CONSTRAINT IF EXISTS users_role_check;
+                EXCEPTION WHEN OTHERS THEN NULL;
+                END;
+
+                -- 2. Ensure tables_status_check allows CLEANING
+                BEGIN
+                    ALTER TABLE restaurant_pos.tables DROP CONSTRAINT IF EXISTS tables_status_check;
+                    ALTER TABLE restaurant_pos.tables ADD CONSTRAINT tables_status_check CHECK (status IN ('AVAILABLE', 'RESERVED', 'OCCUPIED', 'WAITING_FOR_CLEANING', 'CLEANING', 'OUT_OF_SERVICE'));
+                EXCEPTION WHEN OTHERS THEN NULL;
+                END;
+
+                BEGIN
+                    ALTER TABLE public.tables DROP CONSTRAINT IF EXISTS tables_status_check;
+                    ALTER TABLE public.tables ADD CONSTRAINT tables_status_check CHECK (status IN ('AVAILABLE', 'RESERVED', 'OCCUPIED', 'WAITING_FOR_CLEANING', 'CLEANING', 'OUT_OF_SERVICE'));
+                EXCEPTION WHEN OTHERS THEN NULL;
+                END;
+
+                -- 3. Ensure public.app_role enum has MANAGER if enum is present
+                BEGIN
+                    ALTER TYPE public.app_role ADD VALUE IF NOT EXISTS 'MANAGER';
+                EXCEPTION WHEN OTHERS THEN NULL;
+                END;
             END $$;
         ");
     }
