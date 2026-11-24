@@ -330,11 +330,13 @@ public class MenuController : ControllerBase
 {
     private readonly RestaurantDbContext _db;
     private readonly INotificationService _notifications;
+    private readonly ITenantContext _tenant;
 
-    public MenuController(RestaurantDbContext db, INotificationService notifications)
+    public MenuController(RestaurantDbContext db, INotificationService notifications, ITenantContext tenant)
     {
         _db = db;
         _notifications = notifications;
+        _tenant = tenant;
     }
 
     [HttpGet("categories")]

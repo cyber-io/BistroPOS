@@ -25,6 +25,11 @@ public class RestaurantDbContext : DbContext
     public DbSet<CustomerIssue> CustomerIssues => Set<CustomerIssue>();
     public DbSet<NotificationEntity> Notifications => Set<NotificationEntity>();
     public DbSet<DeliveryAddressEntity> DeliveryAddresses => Set<DeliveryAddressEntity>();
+    public DbSet<RestaurantSettingsEntity> RestaurantSettings => Set<RestaurantSettingsEntity>();
+    public DbSet<StaffProfile> StaffProfiles => Set<StaffProfile>();
+    public DbSet<InventoryItem> InventoryItems => Set<InventoryItem>();
+    public DbSet<CustomerLoyalty> CustomerLoyalties => Set<CustomerLoyalty>();
+    public DbSet<CustomerFeedback> CustomerFeedbacks => Set<CustomerFeedback>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<WalkInWaitlist> WalkInWaitlists => Set<WalkInWaitlist>();
     public DbSet<ReceiptDelivery> ReceiptDeliveries => Set<ReceiptDelivery>();

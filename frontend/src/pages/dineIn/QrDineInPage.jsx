@@ -469,28 +469,14 @@ export default function QrDineInPage() {
               <h1 className="text-sm font-black text-slate-900 leading-tight truncate">
                 {restaurant.name}
               </h1>
-              {(() => {
-                const label = tableLabel(table);
-                const isParty = label === 'Party Hall' || label === 'Party hall';
-                const tableNum = isParty ? 'Hall' : (label && label !== 'Table' ? label.replace(/^Table\s+/i, '') : (table?.tableNumber ? String(table.tableNumber) : '—'));
-                const tablePrefix = isParty ? 'Party' : 'Table';
-                return (
-                  <div className="flex items-center space-x-2 mt-0.5">
-                    <span className="inline-flex flex-col items-center justify-center text-center px-3 py-1 rounded-2xl bg-[#1a382b] text-white shadow-xs shrink-0 select-none min-w-[50px]">
-                      <span className="text-[9px] font-extrabold uppercase tracking-wider text-emerald-200/90 leading-none">
-                        {tablePrefix}
-                      </span>
-                      <span className="text-xs font-black tracking-wide text-white leading-none mt-0.5">
-                        {tableNum}
-                      </span>
-                    </span>
-                    <div className="flex flex-col justify-center leading-tight">
-                      <span className="text-xs text-slate-800 font-bold leading-none">Dine-In</span>
-                      <span className="text-[10px] text-slate-400 font-semibold leading-none mt-0.5">Menu</span>
-                    </div>
-                  </div>
-                );
-              })()}
+              <div className="flex items-center space-x-2 mt-0.5">
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-black bg-[#1a382b] text-white shadow-xs shrink-0 whitespace-nowrap">
+                  {tableTitle(table)}
+                </span>
+                <span className="text-xs text-slate-500 font-medium whitespace-nowrap">
+                  Dine-In Menu
+                </span>
+              </div>
             </div>
           </div>
 

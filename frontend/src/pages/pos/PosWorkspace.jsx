@@ -768,6 +768,7 @@ export default function PosWorkspace() {
   const [dialog, setDialog] = useState(null);
   const [selected, setSelected] = useState(null);
   const [reservationEdit, setReservationEdit] = useState(null);
+  const [staffRoleFilter, setStaffRoleFilter] = useState('ALL');
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -927,6 +928,19 @@ export default function PosWorkspace() {
       () => api.updateOrderStatus(orderId, 'DELIVERED'),
       'Order marked as delivered to customer.'
     );
+  };
+  const handleToggleStaffStatus = async (member) => {
+    const nextStatus = member.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+    try {
+      setBusy(true);
+      await api.updateStaffStatus(member.userId, nextStatus);
+      addToast(`${member.name} marked as ${nextStatus.toLowerCase()}`, 'success');
+      await load(true);
+    } catch (err) {
+      addToast(err.message || 'Failed to update staff status', 'error');
+    } finally {
+      setBusy(false);
+    }
   };
   const newReservation = () => { setReservationEdit(null); setDialog('reservation'); };
   const tableOrders = t => data.orders.filter(o => o.tableId === t.tableId && !['CANCELLED', 'CONFIRMATION_TIMEOUT'].includes(o.status) && (!DONE.includes(o.status) || !paidIds.has(o.orderId)));
@@ -1100,6 +1114,32 @@ export default function PosWorkspace() {
     })
     .filter(o => filter === 'ALL' || (filter === 'ACTIVE' ? !DONE.includes(o.status) : filter === 'COMPLETED' ? ['DELIVERED', 'PICKED_UP'].includes(o.status) : filter === 'CANCELLED' ? ['CANCELLED', 'CONFIRMATION_TIMEOUT'].includes(o.status) : o.source === filter || o.status === filter))
     .filter(o => `${o.orderNumber} ${o.customerName} ${o.customerPhone || ''} ${o.tableNumber ? `${tableLabel(o)} Table ${o.tableNumber}` : ''}`.toLowerCase().includes(query.toLowerCase()));
+
+  const filteredStaff = useMemo(() => {
+    let list = Array.isArray(data.staff) ? data.staff : [];
+    if (staffRoleFilter !== 'ALL') {
+      list = list.filter(s => s.role === staffRoleFilter);
+    }
+    if (query?.trim()) {
+      const q = query.trim().toLowerCase();
+      list = list.filter(s =>
+        (s.name || '').toLowerCase().includes(q) ||
+        (s.email || '').toLowerCase().includes(q) ||
+        (s.phone || '').toLowerCase().includes(q) ||
+        (s.role || '').toLowerCase().includes(q)
+      );
+    }
+    return list;
+  }, [data.staff, staffRoleFilter, query]);
+
+  const menuDots = useMemo(() => ({
+    '/pos/orders': section !== 'orders' && data.orders.some(o => o.status === 'NEW'),
+    '/pos/reservations': section !== 'reservations' && data.reservations.some(r => r.status === 'PENDING'),
+    '/pos/tables': section !== 'tables' && (
+      data.tables.some(t => t.status === 'WAITING_FOR_CLEANING') ||
+      data.help.some(h => h.status === 'PENDING')
+    ),
+  }), [section, data.orders, data.reservations, data.tables, data.help]);
 
   return (
     <PosShell alertCount={openIssues.length + openHelp.length} onAlerts={() => navigate('/pos/notifications')} menuDots={menuDots}>

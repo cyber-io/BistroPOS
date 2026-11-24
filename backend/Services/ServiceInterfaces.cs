@@ -37,7 +37,10 @@ public interface IReservationService
     Task<(bool Success, ReservationDto? Reservation, string Message)> CreateReservationAsync(CreateReservationRequest request);
     Task<List<ReservationDto>> GetReservationsAsync(Guid restaurantId, DateOnly? date, string? status);
     Task<bool> UpdateReservationStatusAsync(Guid reservationId, string newStatus, Guid? assignedTableId);
-    Task<bool> RescheduleReservationAsync(Guid reservationId, RescheduleReservationRequest request);
+    Task<ReservationDto?> RescheduleReservationAsync(Guid reservationId, RescheduleReservationRequest request);
+    Task<ReservationDto?> LookupReservationAsync(string query);
+    Task<ReservationDto> PlanEventAsync(Guid reservationId, EventPlanDto dto);
+    Task<KitchenPrepSheetDto> GetKitchenPrepSheetAsync(Guid reservationId);
 }
 
 public interface ITableService

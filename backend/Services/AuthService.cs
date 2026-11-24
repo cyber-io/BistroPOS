@@ -156,7 +156,8 @@ public class AuthService(
 
     public async Task<AuthResponse> DemoLoginAsync(string role, Guid? restaurantId = null)
     {
-        if (role is not (UserRoles.SuperAdmin or UserRoles.Receptionist or UserRoles.Kitchen or UserRoles.Waiter or UserRoles.Customer))
+        var targetRole = role.Trim().ToUpperInvariant();
+        if (targetRole is not (UserRoles.SuperAdmin or UserRoles.Manager or UserRoles.Receptionist or UserRoles.Kitchen or UserRoles.Waiter or UserRoles.Customer))
             return new(false, "", null, "Unknown demo role.");
 
         await EnsureUsersRoleConstraintAllowsManagerAsync();

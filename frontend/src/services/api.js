@@ -299,6 +299,7 @@ export const api = {
   updateProfile: body => request('/auth/profile', { method: 'PATCH', body }),
   register: ({ name, email, phone, password }) => request('/auth/register', { method: 'POST', body: { name, email, phone, password, restaurantId, role: 'CUSTOMER' } }),
 
+  getRestaurants: () => request('/restaurants'),
   getRestaurant: async () => {
     const data = await request(`/restaurants/${restaurantId}`);
     restaurantId = data.restaurantId;
