@@ -229,7 +229,6 @@ public class RestaurantsController : ControllerBase
         return Ok(restaurant);
     }
 
-<<<<<<< HEAD
     [Authorize(Roles = UserRoles.SuperAdmin)]
     [HttpPost]
     public async Task<IActionResult> CreateRestaurant([FromBody] CreateRestaurantDto dto)
@@ -299,37 +298,6 @@ public class RestaurantsController : ControllerBase
 
         await _db.SaveChangesAsync();
         return CreatedAtAction(nameof(GetRestaurantById), new { id = restaurant.RestaurantId }, restaurant);
-=======
-    [HttpGet("{id:guid}/wifi")]
-    public async Task<IActionResult> GetWifi(Guid id)
-    {
-        var restaurant = await _db.Restaurants.FindAsync(id);
-        if (restaurant == null) return NotFound();
-        return Ok(new
-        {
-            restaurantId = restaurant.RestaurantId,
-            wifiSsid = restaurant.WifiSsid ?? "Bistro-HighSpeed-Guest",
-            wifiPassword = restaurant.WifiEnabled ? (restaurant.WifiPassword ?? "Bistro@2026") : null,
-            wifiEnabled = restaurant.WifiEnabled,
-            googleReviewUrl = restaurant.GoogleReviewUrl ?? "https://maps.google.com",
-            subscriptionTier = restaurant.SubscriptionTier ?? "PRO"
-        });
-    }
-
-    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager},{UserRoles.Receptionist}")]
-    [HttpPatch("{id:guid}/wifi")]
-    public async Task<IActionResult> UpdateWifi(Guid id, [FromBody] UpdateRestaurantWifiDto dto)
-    {
-        var restaurant = await _db.Restaurants.FindAsync(id);
-        if (restaurant == null) return NotFound();
-        if (dto.WifiSsid != null) restaurant.WifiSsid = dto.WifiSsid;
-        if (dto.WifiPassword != null) restaurant.WifiPassword = dto.WifiPassword;
-        if (dto.WifiEnabled.HasValue) restaurant.WifiEnabled = dto.WifiEnabled.Value;
-        if (dto.GoogleReviewUrl != null) restaurant.GoogleReviewUrl = dto.GoogleReviewUrl;
-        restaurant.UpdatedAt = DateTime.UtcNow;
-        await _db.SaveChangesAsync();
-        return Ok(restaurant);
->>>>>>> eca0a65db7ac53e4dae0846f322f30f18263f332
     }
 }
 
@@ -373,7 +341,6 @@ public class TablesController : ControllerBase
         return Ok(new { success = true, message = "Table status updated successfully." });
     }
 
-<<<<<<< HEAD
     [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
     [HttpPost]
     public async Task<IActionResult> CreateTable([FromBody] CreateTableRequest request, [FromQuery] Guid? restaurantId)
@@ -419,7 +386,8 @@ public class TablesController : ControllerBase
         {
             return BadRequest(new { message = ex.Message });
         }
-=======
+    }
+
     [HttpGet("{id:guid}/session")]
     public async Task<IActionResult> GetTableSession(Guid id)
     {
@@ -495,7 +463,6 @@ public class InventoryController : ControllerBase
         _tenant.EnforceTenantAccess(request.RestaurantId);
         var success = await _inventory.ReportShortageAsync(request);
         return Ok(new { success = true, message = "Shortage alert processed." });
->>>>>>> eca0a65db7ac53e4dae0846f322f30f18263f332
     }
 }
 

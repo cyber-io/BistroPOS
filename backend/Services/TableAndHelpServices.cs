@@ -229,7 +229,6 @@ public class TableService : ITableService
         return true;
     }
 
-<<<<<<< HEAD
     public async Task<TableDto> CreateTableAsync(CreateTableRequest request, Guid targetRestaurantId)
     {
         int tableNumber = request.TableNumber ?? 0;
@@ -274,14 +273,10 @@ public class TableService : ITableService
     }
 
     public async Task<bool> DeleteTableAsync(Guid tableId)
-=======
-    public async Task<bool> UpdateTablePositionAsync(Guid tableId, UpdateTablePositionDto request)
->>>>>>> eca0a65db7ac53e4dae0846f322f30f18263f332
     {
         var table = await _db.Tables.FindAsync(tableId);
         if (table == null) return false;
 
-<<<<<<< HEAD
         var hasActiveOrders = await _db.Orders.AnyAsync(o => o.TableId == tableId && o.Status != "COMPLETED" && o.Status != "CANCELLED");
         if (hasActiveOrders)
         {
@@ -329,7 +324,12 @@ public class TableService : ITableService
             table.AssignedWaiter?.Name
         );
     }
-=======
+
+    public async Task<bool> UpdateTablePositionAsync(Guid tableId, UpdateTablePositionDto request)
+    {
+        var table = await _db.Tables.FindAsync(tableId);
+        if (table == null) return false;
+
         table.PositionX = request.PositionX;
         table.PositionY = request.PositionY;
         if (!string.IsNullOrWhiteSpace(request.Shape)) table.Shape = request.Shape.Trim().ToUpperInvariant();
@@ -511,7 +511,6 @@ public class TableService : ITableService
             return false;
         }
     }
->>>>>>> eca0a65db7ac53e4dae0846f322f30f18263f332
 }
 
 public class HelpRequestService : IHelpRequestService
