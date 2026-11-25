@@ -49,17 +49,6 @@ public interface ITableService
     Task<TableDto?> GetTableByIdAsync(Guid tableId);
     Task<QrValidationResponse> ValidateQrAsync(string qrIdentifier);
     Task<bool> UpdateTableStatusAsync(Guid tableId, UpdateTableStatusRequest request);
-    Task<bool> UpdateTablePositionAsync(Guid tableId, UpdateTablePositionDto request);
-    Task<DiningSessionDto?> GetOrCreateActiveSessionAsync(Guid tableId);
-    Task<bool> CloseSessionAsync(Guid tableId);
-}
-
-public interface IInventoryService
-{
-    Task<List<InventoryItemDto>> GetInventoryAsync(Guid restaurantId);
-    Task<InventoryItemDto> CreateItemAsync(CreateInventoryItemDto request);
-    Task<bool> UpdateStockAsync(Guid itemId, decimal quantityChange, string? reason);
-    Task<bool> ReportShortageAsync(ReportShortageDto request);
 }
 
 public interface IHelpRequestService

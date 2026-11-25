@@ -309,6 +309,7 @@ export const api = {
   register: ({ name, email, phone, password }) => request('/auth/register', { method: 'POST', body: { name, email, phone, password, restaurantId, role: 'CUSTOMER' } }),
 
   getRestaurants: () => request('/restaurants'),
+  createRestaurant: details => request('/restaurants', { method: 'POST', body: details }),
   getRestaurant: async () => {
     const data = await request(`/restaurants/${restaurantId}`);
     restaurantId = data.restaurantId;
@@ -320,58 +321,11 @@ export const api = {
     };
     return restaurantCache;
   },
-  getTables: (targetRestaurantId) => request(`/tables${query({ restaurantId: targetRestaurantId || restaurantId })}`),
-  getTableById: async (tableId, targetRestaurantId) => {
-    if (!tableId) return null;
-    const resId = targetRestaurantId || restaurantId;
-    if (/^\d+$/.test(String(tableId))) {
-      try {
-        const tables = await api.getTables(resId);
-        const found = tables.find(t => t.tableNumber === Number(tableId) || String(t.tableId).toLowerCase() === String(tableId).toLowerCase());
-        if (found) return found;
-      } catch {}
-    }
-    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(tableId))) {
-      try {
-        const table = await request(`/tables/${encodeURIComponent(tableId)}`);
-        if (table) return table;
-      } catch {}
-    }
-    try {
-      const tables = await api.getTables(resId);
-      return tables.find(t =>
-        String(t.tableId).toLowerCase() === String(tableId).toLowerCase() ||
-        String(t.tableNumber) === String(tableId) ||
-        String(t.qrIdentifier).toLowerCase() === String(tableId).toLowerCase()
-      ) || null;
-    } catch {
-      return null;
-    }
+  getTables: () => request(`/tables${query({ restaurantId })}`),
+  getTableById: async tableId => {
+    if (/^\d+$/.test(String(tableId))) return (await api.getTables()).find(table => table.tableNumber === Number(tableId)) || null;
+    return request(`/tables/${encodeURIComponent(tableId)}`);
   },
-  getTableSession: async tableId => {
-    try {
-      const data = await request(`/tables/${encodeURIComponent(tableId)}/session`);
-      if (data && Array.isArray(data.orders)) {
-        data.orders = data.orders.map(normalizeOrder);
-      }
-      return data;
-    } catch {
-      return null;
-    }
-  },
-  getTableOrders: async tableId => {
-    try {
-      const sess = await api.getTableSession(tableId);
-      return Array.isArray(sess?.orders) ? sess.orders : [];
-    } catch {
-      return [];
-    }
-  },
-  closeTableSession: tableId => request(`/tables/${encodeURIComponent(tableId)}/session/close`, { method: 'POST' }),
-  updateTablePosition: (tableId, positionX, positionY, shape = 'SQUARE', diningArea = 'everyday') => request(`/tables/${encodeURIComponent(tableId)}/position`, { method: 'PATCH', body: { positionX, positionY, shape, diningArea } }).then(result => {
-    broadcastEvent('TABLE_POSITION_UPDATED', { tableId, positionX, positionY, shape, diningArea });
-    return result;
-  }),
   updateTableStatus: (tableId, status, customerName = null, assignedWaiterId = null) => request(`/tables/${tableId}/status`, { method: 'PUT', body: { status, customerName, assignedWaiterId } }).then(result => {
     broadcastEvent('TABLE_STATUS_UPDATED', { tableId, status, customerName });
     return result;
@@ -589,6 +543,9 @@ export const api = {
   getIssues: () => request(`/issues${query({ restaurantId })}`).catch(() => []),
   resolveIssue: (issueId, resolution, escalate = false) => request(`/issues/${issueId}/resolve`, { method: 'PATCH', body: typeof resolution === 'object' ? resolution : { resolution, escalate } }),
   getUsers: (role) => request(`/users${query({ restaurantId, role })}`),
+  getAllManagers: () => request('/users/managers'),
+  getPlatformSummary: () => request('/restaurants/summary'),
+  updateRestaurantStatus: (id, status) => request(`/restaurants/${id}/status`, { method: 'PUT', body: { status } }),
   createStaffUser: details => request(`/users${query({ restaurantId })}`, { method: 'POST', body: details }),
   deleteStaffUser: userId => request(`/users/${userId}`, { method: 'DELETE' }),
   updateRestaurantSettings: (restaurantIdToUpdate, payload) => request(`/restaurants/${restaurantIdToUpdate || restaurantId}/settings`, { method: 'PATCH', body: payload }),

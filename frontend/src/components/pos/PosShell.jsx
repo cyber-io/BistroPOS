@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { NavLink, Link, useNavigate } from 'react-router-dom';
-import { Cloud, LayoutDashboard, ClipboardList, Armchair, CalendarDays, History, Package, ChefHat, HandPlatter, Sun, Moon, Bell, ChevronDown, LogOut, Building2, Check, Store, Users, UserPlus } from 'lucide-react';
+import { Cloud, LayoutDashboard, ClipboardList, Armchair, CalendarDays, History, Package, ChefHat, HandPlatter, Sun, Moon, Bell, ChevronDown, LogOut, Building2, Check, Store, Users, UserPlus, Plus, Shield } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { api, getActiveRestaurantId, setActiveRestaurantId } from '../../services/api';
 import '../../styles/pos.css';
@@ -125,70 +125,82 @@ export default function PosShell({ children, alertCount = 0, onAlerts, menuDots 
 
         {/* Multi-Tenant Admin Outlet Switcher (SUPER_ADMIN) / Locked Tenant Badge (MANAGER/STAFF) */}
         {role === 'SUPER_ADMIN' ? (
-          <div className="relative inline-block" ref={outletRef} style={{ zIndex: 30 }}>
-            <button
-              type="button"
-              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-900 text-xs font-semibold shadow-sm transition-all cursor-pointer"
-              onClick={() => setOutletOpen(prev => !prev)}
-              aria-expanded={outletOpen}
-              title="Switch Restaurant Outlet"
-            >
-              <Building2 size={15} className="text-blue-600" />
-              <span className="font-bold truncate max-w-[140px] text-slate-900">
-                {currentRestaurant?.name || 'Select Outlet'}
-              </span>
-              <span className="text-[9px] bg-blue-600 text-white font-extrabold px-1.5 py-0.5 rounded tracking-wide uppercase">
-                Outlet
-              </span>
-              <ChevronDown size={13} className="text-blue-600" />
-            </button>
-
-            {outletOpen && (
-              <div
-                className="absolute left-0 mt-2 w-72 bg-white rounded-2xl shadow-2xl border border-slate-200 p-2 z-50 animate-fade-in text-slate-800"
-                style={{ top: '100%', minWidth: '260px' }}
+          <div className="flex items-center gap-2" style={{ zIndex: 30 }}>
+            <div className="relative inline-block" ref={outletRef}>
+              <button
+                type="button"
+                className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-900 text-xs font-semibold shadow-sm transition-all cursor-pointer"
+                onClick={() => setOutletOpen(prev => !prev)}
+                aria-expanded={outletOpen}
+                title="Switch Restaurant Outlet"
               >
-                <div className="px-3 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100 mb-1 flex items-center justify-between">
-                  <span>Switch Tenant Outlet</span>
-                  <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded text-[9px]">{restaurants.length} Outlets</span>
-                </div>
-                <div className="space-y-1 max-h-64 overflow-y-auto">
-                  {restaurants.map(r => {
-                    const isActive = (currentRestaurant?.restaurantId || getActiveRestaurantId()) === r.restaurantId;
-                    return (
-                      <button
-                        key={r.restaurantId}
-                        type="button"
-                        onClick={() => handleSwitchOutlet(r)}
-                        className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-center justify-between transition-colors cursor-pointer ${
-                          isActive
-                            ? 'bg-blue-600 text-white font-bold shadow-sm'
-                            : 'hover:bg-slate-100 text-slate-700'
-                        }`}
-                      >
-                        <div className="truncate pr-2">
-                          <div className="font-medium text-xs truncate">{r.name}</div>
-                          <div className={`text-[10px] truncate ${isActive ? 'text-blue-100' : 'text-slate-400'}`}>
-                            {r.address ? r.address.split(',')[0] : r.slug}
+                <Building2 size={15} className="text-blue-600" />
+                <span className="font-bold truncate max-w-[140px] text-slate-900">
+                  {currentRestaurant?.name || 'Select Outlet'}
+                </span>
+                <span className="text-[9px] bg-blue-600 text-white font-extrabold px-1.5 py-0.5 rounded tracking-wide uppercase">
+                  Outlet
+                </span>
+                <ChevronDown size={13} className="text-blue-600" />
+              </button>
+
+              {outletOpen && (
+                <div
+                  className="absolute left-0 mt-2 w-72 bg-white rounded-2xl shadow-2xl border border-slate-200 p-2 z-50 animate-fade-in text-slate-800"
+                  style={{ top: '100%', minWidth: '260px' }}
+                >
+                  <div className="px-3 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100 mb-1 flex items-center justify-between">
+                    <span>Switch Tenant Outlet</span>
+                    <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded text-[9px]">{restaurants.length} Outlets</span>
+                  </div>
+                  <div className="space-y-1 max-h-64 overflow-y-auto">
+                    {restaurants.map(r => {
+                      const isActive = (currentRestaurant?.restaurantId || getActiveRestaurantId()) === r.restaurantId;
+                      return (
+                        <button
+                          key={r.restaurantId}
+                          type="button"
+                          onClick={() => handleSwitchOutlet(r)}
+                          className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-center justify-between transition-colors cursor-pointer ${
+                            isActive
+                              ? 'bg-blue-600 text-white font-bold shadow-sm'
+                              : 'hover:bg-slate-100 text-slate-700'
+                          }`}
+                        >
+                          <div className="truncate pr-2">
+                            <div className="font-medium text-xs truncate">{r.name}</div>
+                            <div className={`text-[10px] truncate ${isActive ? 'text-blue-100' : 'text-slate-400'}`}>
+                              {r.address ? r.address.split(',')[0] : r.slug}
+                            </div>
                           </div>
-                        </div>
-                        {isActive && <Check size={14} className="shrink-0 text-white" />}
-                      </button>
-                    );
-                  })}
+                          {isActive && <Check size={14} className="shrink-0 text-white" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="pt-2 mt-2 border-t border-slate-100">
+                    <Link
+                      to="/admin"
+                      onClick={() => setOutletOpen(false)}
+                      className="w-full py-2 px-3 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <Shield size={14} />
+                      <span>Manage Tenants in SaaS Admin</span>
+                    </Link>
+                  </div>
                 </div>
-                <div className="pt-2 mt-2 border-t border-slate-100">
-                  <Link
-                    to="/pos/staff?action=add-manager"
-                    onClick={() => setOutletOpen(false)}
-                    className="w-full py-2 px-3 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                  >
-                    <UserPlus size={14} />
-                    <span>+ Add Hotel Manager</span>
-                  </Link>
-                </div>
-              </div>
-            )}
+              )}
+            </div>
+
+            {/* Super Admin: SaaS Admin Control Plane Link */}
+            <Link
+              to="/admin"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white text-xs font-bold shadow-sm transition-all"
+              title="Return to Super Admin SaaS Control Plane"
+            >
+              <Shield size={14} />
+              <span>SaaS Admin</span>
+            </Link>
           </div>
         ) : (
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100/90 border border-slate-200 text-slate-700 text-xs font-semibold shadow-xs">

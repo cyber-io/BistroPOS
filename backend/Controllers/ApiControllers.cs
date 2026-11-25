@@ -143,8 +143,41 @@ public class RestaurantsController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetRestaurants()
     {
-        var restaurants = await _db.Restaurants.Where(r => r.Status == "ACTIVE").ToListAsync();
+        var isSuperAdmin = User.IsInRole(UserRoles.SuperAdmin);
+        var query = isSuperAdmin ? _db.Restaurants.AsQueryable() : _db.Restaurants.Where(r => r.Status == "ACTIVE");
+        var restaurants = await query.OrderByDescending(r => r.CreatedAt).ToListAsync();
         return Ok(restaurants);
+    }
+
+    [Authorize(Roles = UserRoles.SuperAdmin)]
+    [HttpGet("summary")]
+    public async Task<IActionResult> GetPlatformSummary()
+    {
+        var totalRestaurants = await _db.Restaurants.CountAsync();
+        var activeRestaurants = await _db.Restaurants.CountAsync(r => r.Status == "ACTIVE");
+        var totalTables = await _db.Tables.CountAsync();
+        var totalManagers = await _db.Users.CountAsync(u => u.Role == UserRoles.Manager);
+        var totalOrders = await _db.Orders.CountAsync();
+        return Ok(new
+        {
+            totalRestaurants,
+            activeRestaurants,
+            totalTables,
+            totalManagers,
+            totalOrders
+        });
+    }
+
+    [Authorize(Roles = UserRoles.SuperAdmin)]
+    [HttpPut("{id:guid}/status")]
+    public async Task<IActionResult> UpdateRestaurantStatus(Guid id, [FromBody] UpdateRestaurantStatusDto dto)
+    {
+        var restaurant = await _db.Restaurants.FindAsync(id);
+        if (restaurant == null) return NotFound();
+        restaurant.Status = dto.Status.ToUpperInvariant();
+        restaurant.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+        return Ok(restaurant);
     }
 
     [HttpGet("{id:guid}")]
@@ -195,37 +228,6 @@ public class RestaurantsController : ControllerBase
         await _db.SaveChangesAsync();
         return Ok(restaurant);
     }
-
-    [HttpGet("{id:guid}/wifi")]
-    public async Task<IActionResult> GetWifi(Guid id)
-    {
-        var restaurant = await _db.Restaurants.FindAsync(id);
-        if (restaurant == null) return NotFound();
-        return Ok(new
-        {
-            restaurantId = restaurant.RestaurantId,
-            wifiSsid = restaurant.WifiSsid ?? "Bistro-HighSpeed-Guest",
-            wifiPassword = restaurant.WifiEnabled ? (restaurant.WifiPassword ?? "Bistro@2026") : null,
-            wifiEnabled = restaurant.WifiEnabled,
-            googleReviewUrl = restaurant.GoogleReviewUrl ?? "https://maps.google.com",
-            subscriptionTier = restaurant.SubscriptionTier ?? "PRO"
-        });
-    }
-
-    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager},{UserRoles.Receptionist}")]
-    [HttpPatch("{id:guid}/wifi")]
-    public async Task<IActionResult> UpdateWifi(Guid id, [FromBody] UpdateRestaurantWifiDto dto)
-    {
-        var restaurant = await _db.Restaurants.FindAsync(id);
-        if (restaurant == null) return NotFound();
-        if (dto.WifiSsid != null) restaurant.WifiSsid = dto.WifiSsid;
-        if (dto.WifiPassword != null) restaurant.WifiPassword = dto.WifiPassword;
-        if (dto.WifiEnabled.HasValue) restaurant.WifiEnabled = dto.WifiEnabled.Value;
-        if (dto.GoogleReviewUrl != null) restaurant.GoogleReviewUrl = dto.GoogleReviewUrl;
-        restaurant.UpdatedAt = DateTime.UtcNow;
-        await _db.SaveChangesAsync();
-        return Ok(restaurant);
-    }
 }
 
 [ApiController]
@@ -233,10 +235,12 @@ public class RestaurantsController : ControllerBase
 public class TablesController : ControllerBase
 {
     private readonly ITableService _tables;
+    private readonly ITenantContext _tenant;
 
-    public TablesController(ITableService tables)
+    public TablesController(ITableService tables, ITenantContext tenant)
     {
         _tables = tables;
+        _tenant = tenant;
     }
 
     [HttpGet]
@@ -264,83 +268,6 @@ public class TablesController : ControllerBase
         var success = await _tables.UpdateTableStatusAsync(id, request);
         if (!success) return NotFound();
         return Ok(new { success = true, message = "Table status updated successfully." });
-    }
-
-    [HttpGet("{id:guid}/session")]
-    public async Task<IActionResult> GetTableSession(Guid id)
-    {
-        var session = await _tables.GetOrCreateActiveSessionAsync(id);
-        if (session == null) return NotFound();
-        return Ok(session);
-    }
-
-    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager},{UserRoles.Receptionist}")]
-    [HttpPost("{id:guid}/session/close")]
-    public async Task<IActionResult> CloseTableSession(Guid id)
-    {
-        var success = await _tables.CloseSessionAsync(id);
-        return Ok(new { success });
-    }
-
-    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager},{UserRoles.Receptionist}")]
-    [HttpPatch("{id:guid}/position")]
-    public async Task<IActionResult> UpdatePosition(Guid id, [FromBody] UpdateTablePositionDto request)
-    {
-        var success = await _tables.UpdateTablePositionAsync(id, request);
-        if (!success) return NotFound();
-        return Ok(new { success = true, message = "Table floor position updated successfully." });
-    }
-}
-
-[ApiController]
-[Route("api/[controller]")]
-public class InventoryController : ControllerBase
-{
-    private readonly IInventoryService _inventory;
-    private readonly ITenantContext _tenant;
-
-    public InventoryController(IInventoryService inventory, ITenantContext tenant)
-    {
-        _inventory = inventory;
-        _tenant = tenant;
-    }
-
-    [Authorize(Policy = "OperationalStaff")]
-    [HttpGet]
-    public async Task<IActionResult> GetInventory([FromQuery] Guid? restaurantId)
-    {
-        var targetId = _tenant.IsSuperAdmin
-            ? (restaurantId ?? _tenant.RestaurantId ?? UserProvisioning.DefaultRestaurantId)
-            : _tenant.GetRequiredRestaurantId();
-        var items = await _inventory.GetInventoryAsync(targetId);
-        return Ok(items);
-    }
-
-    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager},{UserRoles.Kitchen}")]
-    [HttpPost]
-    public async Task<IActionResult> CreateItem([FromBody] CreateInventoryItemDto request)
-    {
-        _tenant.EnforceTenantAccess(request.RestaurantId);
-        var created = await _inventory.CreateItemAsync(request);
-        return CreatedAtAction(nameof(GetInventory), new { restaurantId = created.RestaurantId }, created);
-    }
-
-    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager},{UserRoles.Kitchen},{UserRoles.Receptionist}")]
-    [HttpPatch("{id:guid}/stock")]
-    public async Task<IActionResult> UpdateStock(Guid id, [FromBody] UpdateStockDto request)
-    {
-        var success = await _inventory.UpdateStockAsync(id, request.QuantityChange, request.Reason);
-        if (!success) return NotFound();
-        return Ok(new { success = true, message = "Stock updated successfully." });
-    }
-
-    [Authorize(Policy = "OperationalStaff")]
-    [HttpPost("shortage")]
-    public async Task<IActionResult> ReportShortage([FromBody] ReportShortageDto request)
-    {
-        _tenant.EnforceTenantAccess(request.RestaurantId);
-        var success = await _inventory.ReportShortageAsync(request);
-        return Ok(new { success = true, message = "Shortage alert processed." });
     }
 }
 
@@ -1039,6 +966,30 @@ public class UsersController : ControllerBase
         var users = await query.ToListAsync();
         var dtos = users.Select(u => new UserDto(u.UserId, u.RestaurantId, u.Name, u.Email, u.Phone, u.Role, u.Status)).ToList();
         return Ok(dtos);
+    }
+
+    [Authorize(Roles = UserRoles.SuperAdmin)]
+    [HttpGet("managers")]
+    public async Task<IActionResult> GetAllManagers()
+    {
+        var managers = await _db.Users
+            .Include(u => u.Restaurant)
+            .Where(u => u.Role == UserRoles.Manager)
+            .OrderBy(u => u.Name)
+            .Select(u => new
+            {
+                u.UserId,
+                u.RestaurantId,
+                RestaurantName = u.Restaurant != null ? u.Restaurant.Name : "Unassigned",
+                u.Name,
+                u.Email,
+                u.Phone,
+                u.Role,
+                u.Status,
+                u.CreatedAt
+            })
+            .ToListAsync();
+        return Ok(managers);
     }
 
     [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
