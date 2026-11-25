@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Plus, Search, RefreshCw, ArrowUpRight, CreditCard, Banknote, Timer, Check, ClipboardCheck, ClipboardList, Package, Armchair, CalendarDays, History, LayoutGrid, Info, AlertCircle, Bell, SlidersHorizontal, UtensilsCrossed, ShoppingBag, Truck, Minus, Trash2, Printer, QrCode, ArrowLeft, CheckCircle2, X, Users, HandPlatter, Coffee, MapPin, Download, Sparkles, ChevronLeft, ChevronRight, Calendar, ChevronDown, ChevronUp, Clock, Phone, User, UserPlus, ShieldCheck, FolderPlus, Pencil, Building2, Lock, Mail, Eye, EyeOff, ChefHat, UserCheck, Flame } from 'lucide-react';
+import { Plus, Search, RefreshCw, ArrowUpRight, CreditCard, Banknote, Timer, Check, ClipboardCheck, ClipboardList, Package, Armchair, CalendarDays, History, LayoutGrid, Info, AlertCircle, Bell, SlidersHorizontal, UtensilsCrossed, ShoppingBag, Truck, Minus, Trash2, Printer, QrCode, ArrowLeft, CheckCircle2, X, Users, HandPlatter, Coffee, MapPin, Download, Upload, Sparkles, ChevronLeft, ChevronRight, Calendar, ChevronDown, ChevronUp, Clock, Phone, User, UserPlus, ShieldCheck, FolderPlus, Pencil, Building2, Lock, Mail, Eye, EyeOff, ChefHat, UserCheck, Flame } from 'lucide-react';
 import QRCode from 'qrcode';
 import { api, subscribeRealtimeEvents, uniqueKey, getActiveRestaurantId, setActiveRestaurantId } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
@@ -759,6 +759,7 @@ export default function PosWorkspace() {
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('ALL');
+  const [orderSource, setOrderSource] = useState('ALL');
   const [tableArea, setTableArea] = useState('everyday');
   const [category, setCategory] = useState('ALL');
   const [dashboardDate, setDashboardDate] = useState(today());
@@ -964,9 +965,6 @@ export default function PosWorkspace() {
     { id: 'READY', name: 'Ready to serve' },
     { id: 'COMPLETED', name: 'Completed' },
     { id: 'CANCELLED', name: 'Cancelled' },
-    { id: 'DINE_IN', name: 'Dine in' },
-    { id: 'DELIVERY', name: 'Delivery' },
-    { id: 'TAKEAWAY', name: 'Takeaway' },
   ], []);
 
   const tabCounts = useMemo(() => {
@@ -1005,12 +1003,14 @@ export default function PosWorkspace() {
       list = list.filter(s => s.isPaid || (s.isClosed && !s.isCancelled));
     } else if (filter === 'CANCELLED') {
       list = list.filter(s => s.isCancelled);
-    } else if (filter === 'DINE_IN' || filter === 'DINE_IN_QR') {
-      list = list.filter(s => (s.type === 'TABLE_SESSION' || s.source === 'DINE_IN_QR') && !s.isClosed);
-    } else if (filter === 'DELIVERY') {
-      list = list.filter(s => s.source === 'DELIVERY' && !s.isClosed);
-    } else if (filter === 'TAKEAWAY') {
-      list = list.filter(s => s.source === 'TAKEAWAY' && !s.isClosed);
+    }
+
+    if (orderSource === 'DINE_IN_QR') {
+      list = list.filter(s => s.type === 'TABLE_SESSION' || s.source === 'DINE_IN_QR');
+    } else if (orderSource === 'DELIVERY') {
+      list = list.filter(s => s.source === 'DELIVERY');
+    } else if (orderSource === 'TAKEAWAY') {
+      list = list.filter(s => s.source === 'TAKEAWAY');
     }
 
     if (query.trim()) {
@@ -1029,7 +1029,7 @@ export default function PosWorkspace() {
     }
 
     return list;
-  }, [orderSessions, filter, query]);
+  }, [orderSessions, filter, orderSource, query]);
 
   const historySessions = useMemo(() => {
     const closedOrders = data.orders.filter(o => 
@@ -1320,7 +1320,7 @@ export default function PosWorkspace() {
             <div className="pos-toolbar">
               <h1 className="pos-page-title">
                 {section === 'orders' ? <ClipboardList /> : section === 'tables' ? <Armchair /> : section === 'reservations' ? <CalendarDays /> : section === 'history' ? <History /> : section === 'inventory' ? <Package /> : section === 'staff' ? <Users /> : <Bell />}
-                {({ orders: 'Orders', tables: 'Table overview', reservations: 'Reservations', history: 'Order history', inventory: 'Inventory', staff: currentUser?.role === 'SUPER_ADMIN' ? 'Hotel Staff & Managers' : 'Restaurant Staff Roster', notifications: 'Notifications & assistance' })[section] || 'Workspace'}
+                {({ orders: 'Orders', tables: 'Table overview', reservations: 'Reservations', history: 'Order history', inventory: 'Menu', staff: currentUser?.role === 'SUPER_ADMIN' ? 'Hotel Staff & Managers' : 'Restaurant Staff Roster', notifications: 'Notifications & assistance' })[section] || 'Workspace'}
               </h1>
               <div className="pos-toolbar-actions">
                 {section === 'orders' && <PosDateFilter value={orderDate} onChange={setOrderDate} labelText="Filter orders by date" showAllOption={false} />}
@@ -1331,6 +1331,13 @@ export default function PosWorkspace() {
                 {section === 'reservations' && <button className="pos-button primary" onClick={newReservation}><Plus /> Add new reservation</button>}
                 {section === 'inventory' && canManageStaff && (
                   <>
+                    <button
+                      className="pos-button"
+                      onClick={() => setDialog('report-shortage')}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                    >
+                      <Package size={14} /> Report Stock Shortage
+                    </button>
                     <button
                       className="pos-button"
                       onClick={() => setDialog('add-category')}
@@ -1382,19 +1389,35 @@ export default function PosWorkspace() {
                         )}
                       </div>
                     )}
-                    <div className="pos-tabs">
-                      {ORDER_TABS.map(({ id, name }) => (
-                        <button
-                          key={id}
-                          className={`pos-tab ${filter === id ? 'active' : ''}`}
-                          onClick={() => setFilter(id)}
+                    <div className="pos-toolbar" style={{ gap: 12, marginBottom: 16 }}>
+                      <div className="pos-tabs" style={{ marginBottom: 0 }}>
+                        {ORDER_TABS.map(({ id, name }) => (
+                          <button
+                            key={id}
+                            className={`pos-tab ${filter === id ? 'active' : ''}`}
+                            onClick={() => setFilter(id)}
+                          >
+                            {name}
+                            {typeof tabCounts[id] === 'number' && tabCounts[id] > 0 && (
+                              <span className="pos-count">{tabCounts[id]}</span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="pos-toolbar-actions" style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0, width: 130 }}>
+                        <select
+                          aria-label="Order source"
+                          value={orderSource}
+                          onChange={event => setOrderSource(event.target.value)}
+                          className="pos-select"
+                          style={{ height: 37, minHeight: 37, minWidth: 125 }}
                         >
-                          {name}
-                          {typeof tabCounts[id] === 'number' && tabCounts[id] > 0 && (
-                            <span className="pos-count">{tabCounts[id]}</span>
-                          )}
-                        </button>
-                      ))}
+                          <option value="ALL">All sources</option>
+                          <option value="DINE_IN_QR">Dine in</option>
+                          <option value="DELIVERY">Delivery</option>
+                          <option value="TAKEAWAY">Takeaway</option>
+                        </select>
+                      </div>
                     </div>
                     {filteredSessions.length ? (
                       <div className="pos-orders-grid">
@@ -1617,17 +1640,6 @@ export default function PosWorkspace() {
                     <aside className="pos-filter-card">
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
                         <h3 style={{ margin: 0, fontSize: 13, fontWeight: 700 }}>Menu categories</h3>
-                        {canManageStaff && (
-                          <button
-                            type="button"
-                            className="pos-icon-button"
-                            style={{ width: 26, height: 26, border: '1px solid var(--p-border)', borderRadius: 6, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
-                            title="Add new category"
-                            onClick={() => setDialog('add-category')}
-                          >
-                            <Plus size={14} />
-                          </button>
-                        )}
                       </div>
                       <div className="pos-category-list">
                         {[{ categoryId: 'ALL', name: 'All items' }, ...data.categories].map(c => {
@@ -1674,16 +1686,6 @@ export default function PosWorkspace() {
                     <div>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
                         <p className="pos-section-note" style={{ margin: 0 }}>Availability changes appear live on customer QR, website, and kitchen panels.</p>
-                        {canManageStaff && (
-                          <button
-                            type="button"
-                            className="pos-button small primary"
-                            style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
-                            onClick={() => setDialog('add-menu-item')}
-                          >
-                            <Plus size={13} /> Add Dish
-                          </button>
-                        )}
                       </div>
                       {(() => {
                         const visibleItems = data.menu.filter(m => (category === 'ALL' || m.categoryId === category) && (filter === 'ALL' || (filter === 'AVAILABLE' ? m.availability : !m.availability)) && m.name.toLowerCase().includes(query.toLowerCase()));
@@ -2136,6 +2138,19 @@ export default function PosWorkspace() {
               onClose={() => { setEditingItem(null); close(); }}
               onSuccess={async () => {
                 setEditingItem(null);
+                close();
+                await load(true);
+              }}
+            />
+          </ErrorBoundary>
+        )}
+        {dialog === 'report-shortage' && (
+          <ErrorBoundary onReset={close}>
+            <ReportStockShortageModal
+              menu={data.menu}
+              onClose={close}
+              onSuccess={async (msg) => {
+                addToast(msg, 'success');
                 close();
                 await load(true);
               }}
@@ -3389,80 +3404,12 @@ function AddMenuItemModal({ categories = [], defaultCategoryId = '', onClose, on
           />
         </label>
 
-        {/* Photo Asset with Live Preview & Quick Presets */}
-        <div style={{
-          padding: 12,
-          background: 'var(--p-elevated)',
-          borderRadius: 10,
-          border: '1px solid var(--p-border)',
-          marginBottom: 16
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{
-              width: 58,
-              height: 58,
-              borderRadius: 8,
-              border: '1px solid var(--p-border)',
-              background: 'var(--p-card)',
-              overflow: 'hidden',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0
-            }}>
-              {form.image ? (
-                <img
-                  src={form.image}
-                  alt="Preview"
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                  onError={(e) => { e.target.style.display = 'none'; }}
-                />
-              ) : (
-                <UtensilsCrossed size={22} style={{ color: 'var(--p-muted)', opacity: 0.5 }} />
-              )}
-            </div>
-
-            <div style={{ flex: 1 }}>
-              <label className="pos-field" style={{ margin: 0 }}>
-                <span style={{ fontSize: 11, fontWeight: 700 }}>Item Image URL</span>
-                <input
-                  type="url"
-                  className="pos-input"
-                  value={form.image}
-                  onChange={e => setForm({ ...form, image: e.target.value })}
-                  placeholder="https://images.unsplash.com/... or paste image link"
-                  style={{ fontSize: 12, padding: '6px 10px' }}
-                />
-              </label>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--p-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
-              <Sparkles size={12} color="var(--p-blue)" /> Quick Gallery:
-            </span>
-            {imagePresets.map(p => (
-              <button
-                key={p.label}
-                type="button"
-                onClick={() => setForm({ ...form, image: p.url })}
-                style={{
-                  fontSize: 11,
-                  padding: '3px 10px',
-                  borderRadius: 6,
-                  border: form.image === p.url ? '1px solid var(--p-blue)' : '1px solid var(--p-border)',
-                  background: form.image === p.url ? 'rgba(59, 130, 246, 0.15)' : 'var(--p-card)',
-                  color: form.image === p.url ? 'var(--p-blue)' : 'var(--p-text)',
-                  fontWeight: form.image === p.url ? 700 : 500,
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease'
-                }}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-        </div>
+        {/* Photo Asset with Live Preview, Upload & Quick Presets */}
+        <MenuImageField
+          value={form.image}
+          onChange={image => setForm({ ...form, image })}
+          presets={imagePresets}
+        />
 
         {/* Operational Availability Toggles */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 18 }}>
@@ -3866,80 +3813,12 @@ function EditMenuItemModal({ item, categories = [], onClose, onSuccess }) {
           />
         </label>
 
-        {/* Photo Asset with Live Preview & Quick Presets */}
-        <div style={{
-          padding: 12,
-          background: 'var(--p-elevated)',
-          borderRadius: 10,
-          border: '1px solid var(--p-border)',
-          marginBottom: 16
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{
-              width: 58,
-              height: 58,
-              borderRadius: 8,
-              border: '1px solid var(--p-border)',
-              background: 'var(--p-card)',
-              overflow: 'hidden',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0
-            }}>
-              {form.image ? (
-                <img
-                  src={form.image}
-                  alt="Preview"
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                  onError={(e) => { e.target.style.display = 'none'; }}
-                />
-              ) : (
-                <UtensilsCrossed size={22} style={{ color: 'var(--p-muted)', opacity: 0.5 }} />
-              )}
-            </div>
-
-            <div style={{ flex: 1 }}>
-              <label className="pos-field" style={{ margin: 0 }}>
-                <span style={{ fontSize: 11, fontWeight: 700 }}>Item Image URL</span>
-                <input
-                  type="url"
-                  className="pos-input"
-                  value={form.image}
-                  onChange={e => setForm({ ...form, image: e.target.value })}
-                  placeholder="https://images.unsplash.com/... or paste image link"
-                  style={{ fontSize: 12, padding: '6px 10px' }}
-                />
-              </label>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--p-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
-              <Sparkles size={12} color="var(--p-blue)" /> Quick Gallery:
-            </span>
-            {imagePresets.map(p => (
-              <button
-                key={p.label}
-                type="button"
-                onClick={() => setForm({ ...form, image: p.url })}
-                style={{
-                  fontSize: 11,
-                  padding: '3px 10px',
-                  borderRadius: 6,
-                  border: form.image === p.url ? '1px solid var(--p-blue)' : '1px solid var(--p-border)',
-                  background: form.image === p.url ? 'rgba(59, 130, 246, 0.15)' : 'var(--p-card)',
-                  color: form.image === p.url ? 'var(--p-blue)' : 'var(--p-text)',
-                  fontWeight: form.image === p.url ? 700 : 500,
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease'
-                }}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-        </div>
+        {/* Photo Asset with Live Preview, Upload & Quick Presets */}
+        <MenuImageField
+          value={form.image}
+          onChange={image => setForm({ ...form, image })}
+          presets={imagePresets}
+        />
 
         {/* Operational Availability Toggles */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 18 }}>
@@ -5090,4 +4969,335 @@ function ResolveIssue({ issue, onClose, onResolved }) {
   const [resolution, setResolution] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   const submit = async e => { e.preventDefault(); setBusy(true); try { await api.resolveIssue(issue.issueId, resolution); onResolved(); } catch (e) { setError(e.message); } finally { setBusy(false); } };
   return <Modal title="Resolve customer issue" onClose={onClose}><form onSubmit={submit}><div className="pos-modal-body"><p className="pos-section-note">{issue.description}</p>{error && <div className="pos-error">{error}</div>}<label className="pos-field"><span>Resolution notes</span><textarea className="pos-textarea" required minLength={3} maxLength={2000} value={resolution} onChange={e => setResolution(e.target.value)} placeholder="Describe how the issue was resolved…" /></label></div><div className="pos-modal-footer"><button className="pos-button" type="button" onClick={onClose}>Cancel</button><button className="pos-button primary" disabled={busy || !resolution.trim()} type="submit">{busy ? 'Saving…' : 'Mark resolved'}</button></div></form></Modal>;
+}
+
+function MenuImageField({ value, onChange, presets }) {
+  const fileInputRef = React.useRef(null);
+  const [uploadError, setUploadError] = useState('');
+  const [uploading, setUploading] = useState(false);
+
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setUploadError('Please select a valid image file (PNG, JPG, WEBP).');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadError('Image must be smaller than 5 MB.');
+      return;
+    }
+    setUploadError('');
+    setUploading(true);
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result;
+      const img = new Image();
+      img.onload = () => {
+        const maxSide = 800;
+        let { width, height } = img;
+        if (width > maxSide || height > maxSide) {
+          const ratio = Math.min(maxSide / width, maxSide / height);
+          width = Math.round(width * ratio);
+          height = Math.round(height * ratio);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        const compressed = canvas.toDataURL('image/jpeg', 0.82);
+        onChange(compressed);
+        setUploading(false);
+      };
+      img.onerror = () => {
+        onChange(String(dataUrl));
+        setUploading(false);
+      };
+      img.src = String(dataUrl);
+    };
+    reader.onerror = () => {
+      setUploadError('Could not read the selected image.');
+      setUploading(false);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <div style={{
+      padding: 12,
+      borderRadius: 10,
+      border: '1px solid var(--p-border)',
+      background: 'rgba(255,255,255,0.02)',
+      marginBottom: 16
+    }}>
+      <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+        <div style={{
+          width: 60,
+          height: 60,
+          borderRadius: 10,
+          border: '1px solid var(--p-border)',
+          background: 'var(--p-surface)',
+          overflow: 'hidden',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0
+        }}>
+          {value ? (
+            <img
+              src={value}
+              alt="Preview"
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              onError={(e) => { e.target.style.display = 'none'; }}
+            />
+          ) : (
+            <UtensilsCrossed size={22} style={{ color: 'var(--p-muted)', opacity: 0.5 }} />
+          )}
+        </div>
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <label className="pos-field" style={{ margin: 0 }}>
+            <span style={{ fontSize: 11, fontWeight: 700 }}>Item Image URL or Upload</span>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input
+                type="text"
+                className="pos-input"
+                value={value.startsWith('data:image/') ? '' : value}
+                onChange={e => { setUploadError(''); onChange(e.target.value); }}
+                placeholder={value.startsWith('data:image/') ? 'Uploaded image attached (paste URL to replace)' : 'https://images.unsplash.com/... or paste image link'}
+                style={{ fontSize: 12, padding: '6px 10px', flex: 1, minWidth: 0 }}
+              />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleFileChange}
+                style={{ display: 'none' }}
+              />
+              <button
+                type="button"
+                className="pos-button small"
+                disabled={uploading}
+                onClick={() => fileInputRef.current?.click()}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap', flexShrink: 0 }}
+              >
+                <Upload size={13} />
+                {uploading ? 'Uploading…' : 'Upload Image'}
+              </button>
+              {value && (
+                <button
+                  type="button"
+                  className="pos-button small"
+                  onClick={() => { setUploadError(''); onChange(''); }}
+                  title="Remove image"
+                  aria-label="Remove image"
+                  style={{ padding: '6px 8px', flexShrink: 0 }}
+                >
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+          </label>
+          {uploadError && (
+            <div style={{ fontSize: 10, color: 'var(--p-red)', marginTop: 4 }}>{uploadError}</div>
+          )}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--p-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+          <Sparkles size={12} color="var(--p-blue)" /> Quick Gallery:
+        </span>
+        {presets.map(p => (
+          <button
+            key={p.label}
+            type="button"
+            onClick={() => { setUploadError(''); onChange(p.url); }}
+            style={{
+              fontSize: 11,
+              padding: '3px 10px',
+              borderRadius: 6,
+              border: value === p.url ? '1px solid var(--p-blue)' : '1px solid var(--p-border)',
+              background: value === p.url ? 'rgba(59, 130, 246, 0.15)' : 'var(--p-card)',
+              color: value === p.url ? 'var(--p-blue)' : 'var(--p-text)',
+              fontWeight: value === p.url ? 700 : 500,
+              cursor: 'pointer',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ReportStockShortageModal({ menu, onClose, onSuccess }) {
+  const [submitting, setSubmitting] = useState(false);
+  const [itemType, setItemType] = useState('DISH');
+  const [selectedMenuItemId, setSelectedMenuItemId] = useState('');
+  const [customItemName, setCustomItemName] = useState('');
+  const [shortageReason, setShortageReason] = useState('Out of stock');
+  const [urgency, setUrgency] = useState('HIGH');
+  const [markSoldOut, setMarkSoldOut] = useState(true);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (submitting) return;
+    setSubmitting(true);
+    setError('');
+    try {
+      const selectedDish = itemType === 'DISH' ? menu.find(m => m.menuItemId === selectedMenuItemId) : null;
+      const itemName = itemType === 'DISH'
+        ? selectedDish?.name || 'Dish'
+        : customItemName.trim();
+
+      await api.reportShortage({
+        itemType,
+        menuItemId: itemType === 'DISH' && selectedMenuItemId ? selectedMenuItemId : null,
+        ingredientName: itemType === 'INGREDIENT' ? customItemName.trim() : itemName,
+        shortageStatus: shortageReason === 'Out of stock' ? 'OUT_OF_STOCK' : 'LOW_STOCK',
+        urgencyLevel: urgency,
+        markDishSoldOut: itemType === 'DISH' && markSoldOut && Boolean(selectedMenuItemId)
+      });
+
+      onSuccess(`Reported shortage for "${itemName}" (${shortageReason})`);
+    } catch (err) {
+      setError(err.message || 'Failed to report shortage');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal title="Report Stock Shortage" onClose={() => { if (!submitting) onClose(); }}>
+      <form onSubmit={handleSubmit} style={{ margin: 0, width: '100%', boxSizing: 'border-box' }}>
+        <div className="pos-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <p style={{ color: 'var(--p-muted)', fontSize: 11, margin: 0, lineHeight: 1.6 }}>
+            Report an unavailable dish or depleted ingredient to notify staff and update live menus.
+          </p>
+          {error && <div className="pos-error">{error}</div>}
+
+          <div className="pos-field">
+            <span>Item type</span>
+            <div className="pos-segment" style={{ display: 'flex', width: '100%', boxSizing: 'border-box' }}>
+              <button
+                type="button"
+                className={itemType === 'DISH' ? 'active' : ''}
+                onClick={() => setItemType('DISH')}
+                style={{ flex: 1 }}
+              >
+                Menu dish
+              </button>
+              <button
+                type="button"
+                className={itemType === 'INGREDIENT' ? 'active' : ''}
+                onClick={() => setItemType('INGREDIENT')}
+                style={{ flex: 1 }}
+              >
+                Raw ingredient / Supply
+              </button>
+            </div>
+          </div>
+
+          {itemType === 'DISH' ? (
+            <div className="pos-field">
+              <span>Select menu dish *</span>
+              <select
+                className="pos-select"
+                value={selectedMenuItemId}
+                onChange={e => setSelectedMenuItemId(e.target.value)}
+                required
+              >
+                <option value="">-- Choose a dish --</option>
+                {menu.map(item => (
+                  <option key={item.menuItemId} value={item.menuItemId}>
+                    {item.name} ({item.categoryName || 'General'}) {item.availability ? '' : '[Already Sold Out]'}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <div className="pos-field">
+              <span>Ingredient / Supply name *</span>
+              <input
+                className="pos-input"
+                value={customItemName}
+                onChange={e => setCustomItemName(e.target.value)}
+                placeholder="e.g. Cooking oil, Mozzarella cheese, Burger buns, Paneer"
+                required
+              />
+            </div>
+          )}
+
+          <div className="pos-form-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12, width: '100%', boxSizing: 'border-box' }}>
+            <div className="pos-field" style={{ minWidth: 0, width: '100%', boxSizing: 'border-box' }}>
+              <span>Shortage status</span>
+              <select
+                className="pos-select"
+                style={{ width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}
+                value={shortageReason}
+                onChange={e => setShortageReason(e.target.value)}
+              >
+                <option value="Out of stock">Out of stock (0 left)</option>
+                <option value="Running low">Running low (few left)</option>
+                <option value="Spoiled or damaged">Spoiled / Damaged</option>
+                <option value="Supplier delivery delayed">Delivery delayed</option>
+              </select>
+            </div>
+
+            <div className="pos-field" style={{ minWidth: 0, width: '100%', boxSizing: 'border-box' }}>
+              <span>Urgency level</span>
+              <select
+                className="pos-select"
+                style={{ width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}
+                value={urgency}
+                onChange={e => setUrgency(e.target.value)}
+              >
+                <option value="HIGH">High (Immediate)</option>
+                <option value="MEDIUM">Medium (Next shift)</option>
+                <option value="LOW">Low (Reorder)</option>
+              </select>
+            </div>
+          </div>
+
+          {itemType === 'DISH' && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 11, cursor: 'pointer', lineHeight: 1.5, userSelect: 'none', marginTop: 2 }}>
+              <input
+                type="checkbox"
+                style={{ width: 15, height: 15, accentColor: 'var(--p-blue)', cursor: 'pointer', margin: 0, flexShrink: 0 }}
+                checked={markSoldOut}
+                onChange={e => setMarkSoldOut(e.target.checked)}
+              />
+              <span>Automatically mark this dish as <strong>Sold out</strong> on QR code &amp; POS menus immediately</span>
+            </label>
+          )}
+        </div>
+
+        <div className="pos-modal-footer">
+          <button
+            type="button"
+            className="pos-button"
+            onClick={onClose}
+            disabled={submitting}
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="pos-button primary"
+            disabled={submitting || (itemType === 'DISH' ? !selectedMenuItemId : !customItemName.trim())}
+          >
+            <Package size={14} />
+            {submitting ? 'Reporting…' : 'Report shortage'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
 }

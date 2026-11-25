@@ -228,6 +228,43 @@ public class RestaurantsController : ControllerBase
         await _db.SaveChangesAsync();
         return Ok(restaurant);
     }
+
+    [HttpGet("{id:guid}/wifi")]
+    public async Task<IActionResult> GetWifi(Guid id)
+    {
+        var restaurant = await _db.Restaurants.FindAsync(id)
+            ?? await _db.Restaurants.FirstOrDefaultAsync(r => r.Status == "ACTIVE");
+        if (restaurant == null) return NotFound();
+
+        return Ok(new
+        {
+            wifiSsid = restaurant.WifiSsid,
+            wifiPassword = restaurant.WifiPassword,
+            wifiEnabled = restaurant.WifiEnabled
+        });
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
+    [HttpPatch("{id:guid}/wifi")]
+    public async Task<IActionResult> UpdateWifi(Guid id, [FromBody] UpdateRestaurantWifiDto dto)
+    {
+        var restaurant = await _db.Restaurants.FindAsync(id);
+        if (restaurant == null) return NotFound();
+
+        if (dto.WifiSsid != null) restaurant.WifiSsid = dto.WifiSsid.Trim();
+        if (dto.WifiPassword != null) restaurant.WifiPassword = dto.WifiPassword.Trim();
+        if (dto.WifiEnabled.HasValue) restaurant.WifiEnabled = dto.WifiEnabled.Value;
+
+        restaurant.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        return Ok(new
+        {
+            wifiSsid = restaurant.WifiSsid,
+            wifiPassword = restaurant.WifiPassword,
+            wifiEnabled = restaurant.WifiEnabled
+        });
+    }
 }
 
 [ApiController]

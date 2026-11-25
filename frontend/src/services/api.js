@@ -141,7 +141,7 @@ async function request(path, { method = 'GET', body, accessToken, signal } = {})
           : response.status === 401
             ? 'Please sign in to continue.'
             : 'The request could not be completed. Please try again.';
-    const error = new Error(data?.detail || data?.Detail || data?.message || data?.Message || data?.title || data?.Title || validation || fallbackMsg);
+    const error = new Error(data?.detail || data?.Detail || data?.message || data?.Message || data?.error || data?.Error || data?.title || data?.Title || validation || fallbackMsg);
     error.status = response.status;
     throw error;
   }
@@ -326,6 +326,8 @@ export const api = {
     if (/^\d+$/.test(String(tableId))) return (await api.getTables()).find(table => table.tableNumber === Number(tableId)) || null;
     return request(`/tables/${encodeURIComponent(tableId)}`);
   },
+  getTableSession: async () => null,
+  closeTableSession: async () => ({ success: true }),
   updateTableStatus: (tableId, status, customerName = null, assignedWaiterId = null) => request(`/tables/${tableId}/status`, { method: 'PUT', body: { status, customerName, assignedWaiterId } }).then(result => {
     broadcastEvent('TABLE_STATUS_UPDATED', { tableId, status, customerName });
     return result;
