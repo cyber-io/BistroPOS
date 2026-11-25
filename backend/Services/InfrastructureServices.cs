@@ -91,7 +91,13 @@ public class AuditLogService : IAuditLogService
     }
 }
 
-public class PaymentService(RestaurantDbContext db, IAuditLogService audit, INotificationService notifications) : IPaymentService
+public class PaymentService(
+    RestaurantDbContext db,
+    IAuditLogService audit,
+    INotificationService notifications,
+    IOptions<PaymentGatewayOptions> gatewayOptions,
+    IHostEnvironment env,
+    ILogger<PaymentService> logger) : IPaymentService
 {
     public async Task<PaymentDto> InitiatePaymentAsync(InitiatePaymentRequest request)
     {
@@ -99,9 +105,62 @@ public class PaymentService(RestaurantDbContext db, IAuditLogService audit, INot
         if (method is "NETBANKING") method = "NET_BANKING";
         if (method is not ("CASH" or "UPI" or "CARD" or "ONLINE" or "NET_BANKING" or "WALLET"))
             throw new ArgumentException($"Unsupported payment method '{request.Method}'.");
-        return await CreatePayment(request, method != "CASH");
+
+        // Keep UPI, card, and other online payments pending until backend confirms provider capture
+        var payment = await CreatePayment(request, collected: false);
+
+        if (method != "CASH"
+            && payment.Status == PaymentStatuses.Pending
+            && env.IsDevelopment()
+            && string.Equals(gatewayOptions.Value.Provider, "RazorpayMock", StringComparison.OrdinalIgnoreCase))
+        {
+            var secret = gatewayOptions.Value.SecretKey;
+            if (!string.IsNullOrWhiteSpace(secret) && secret != "dev-secret-change-in-production")
+            {
+                var mockSignature = ComputeHmacHex(secret, $"{payment.PaymentId}|{payment.TransactionId}");
+                payment = payment with { MockSignature = mockSignature };
+            }
+        }
+
+        if (method == "CASH" && request.OrderId.HasValue)
+        {
+            try
+            {
+                var order = await db.Orders.FindAsync(request.OrderId.Value);
+                var tableNum = order?.TableId.HasValue == true ? (await db.Tables.FindAsync(order.TableId.Value))?.TableNumber : null;
+                var helpReq = new HelpRequest
+                {
+                    RestaurantId = payment.RestaurantId,
+                    TableId = order?.TableId ?? Guid.Empty,
+                    Message = $"Cash payment requested for Table A{tableNum} (Order {order?.OrderNumber}): ₹{payment.Amount:F2}. PaymentId: {payment.PaymentId}",
+                    Status = "PENDING",
+                    CreatedAt = DateTime.UtcNow
+                };
+                if (order?.TableId.HasValue == true)
+                {
+                    db.HelpRequests.Add(helpReq);
+                    await db.SaveChangesAsync();
+                    await notifications.NotifyRoleAsync(
+                        payment.RestaurantId,
+                        UserRoles.Waiter,
+                        "CASH_PAYMENT_REQUESTED",
+                        $"Cash Payment Table A{tableNum}",
+                        $"Cash payment of ₹{payment.Amount:F2} requested. Please collect and confirm receipt.",
+                        new { helpReq.RequestId, PaymentId = payment.PaymentId, TableNumber = tableNum, Amount = payment.Amount }
+                    );
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to create cash payment help request");
+            }
+        }
+
+        return payment;
     }
+
     public Task<PaymentDto> RecordPaymentAsync(InitiatePaymentRequest request) => CreatePayment(request, true);
+
     private async Task<PaymentDto> CreatePayment(InitiatePaymentRequest request, bool collected)
     {
         if (!request.OrderId.HasValue) throw new ArgumentException("An order is required for payment.");
@@ -109,8 +168,11 @@ public class PaymentService(RestaurantDbContext db, IAuditLogService audit, INot
         if (normalizedMethod is "NETBANKING") normalizedMethod = "NET_BANKING";
         if (normalizedMethod is not ("CASH" or "UPI" or "CARD" or "ONLINE" or "NET_BANKING" or "WALLET"))
             throw new ArgumentException($"Unsupported payment method '{request.Method}'.");
-        await using var transaction = await db.Database.BeginTransactionAsync();
-        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtext({request.OrderId.ToString()}))");
+        await using var transaction = db.Database.IsRelational() ? await db.Database.BeginTransactionAsync() : null;
+        if (db.Database.IsRelational())
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtext({request.OrderId.ToString()}))");
+        }
         var order = await db.Orders.FindAsync(request.OrderId.Value) ?? throw new ArgumentException("Order not found.");
         
         // Ensure tenant ID matches order
@@ -128,26 +190,34 @@ public class PaymentService(RestaurantDbContext db, IAuditLogService audit, INot
                 return Map(previous);
             }
         }
-        var paid = await db.Payments.Where(p => p.OrderId == order.OrderId && p.Status == PaymentStatuses.Paid).SumAsync(p => (decimal?)p.Amount) ?? 0;
-        
-        var remaining = Math.Round(order.Total - paid, 2);
+        var paidTowardBill = await db.Payments
+            .Where(p => p.OrderId == order.OrderId && p.Status == PaymentStatuses.Paid)
+            .SumAsync(p => (decimal?)(p.Amount - p.TipAmount)) ?? 0;
+
+        var remaining = Math.Round(Math.Max(0, order.Total - paidTowardBill), 2);
+        var tip = Math.Max(0, Math.Round(request.TipAmount, 2));
         var reqAmount = Math.Round(request.Amount, 2);
         if (remaining <= 0)
             throw new InvalidOperationException("This order has already been fully paid.");
         if (reqAmount <= 0)
             throw new ArgumentException("Amount must be positive.");
-        if (reqAmount > remaining)
+        var maxAllowed = remaining + tip;
+        if (reqAmount > maxAllowed)
         {
-            if (reqAmount - remaining <= 1.0m)
-                reqAmount = remaining;
+            if (reqAmount - maxAllowed <= 1.0m)
+                reqAmount = maxAllowed;
             else
-                throw new ArgumentException($"Amount cannot exceed the order balance of ₹{remaining:F2}.");
+                throw new ArgumentException($"Amount cannot exceed the order balance + tip of ₹{maxAllowed:F2}.");
         }
+        var storedTip = Math.Min(tip, reqAmount);
 
         var payment = new Payment { 
             RestaurantId = restaurantId, 
             OrderId = order.OrderId, 
             Amount = reqAmount,
+            TipAmount = storedTip,
+            SplitCount = request.SplitCount > 0 ? request.SplitCount : 1,
+            SplitType = string.IsNullOrWhiteSpace(request.SplitType) ? "FULL" : request.SplitType,
             Method = normalizedMethod, 
             Status = collected ? PaymentStatuses.Paid : PaymentStatuses.Pending,
             IdempotencyKey = request.IdempotencyKey, 
@@ -160,7 +230,7 @@ public class PaymentService(RestaurantDbContext db, IAuditLogService audit, INot
         List<Reservation> autoCompletedReservations = new();
 
         // After payment, if order is fully paid and tied to a table, directly send table for cleaning and complete active reservation
-        if (collected && (paid + reqAmount >= order.Total - 0.05m))
+        if (collected && (paidTowardBill + Math.Max(0, reqAmount - storedTip) >= order.Total - 0.05m))
         {
             if (order.TableId.HasValue)
             {
@@ -185,11 +255,13 @@ public class PaymentService(RestaurantDbContext db, IAuditLogService audit, INot
                         db.HelpRequests.Add(cleaningReq);
                     }
 
-                    // Auto-complete any active reservation for this dining table (SEATED or ARRIVED)
+                    // Preserve tomorrow's booking! Auto-complete only TODAY's active reservation for this table (SEATED or ARRIVED)
+                    var today = DateOnly.FromDateTime(DateTime.UtcNow);
                     var activeReservations = await db.Reservations
                         .Where(r => r.RestaurantId == restaurantId 
                                  && r.TableId == order.TableId.Value 
-                                 && (r.Status == ReservationStatuses.Seated || r.Status == ReservationStatuses.Arrived || r.Status == ReservationStatuses.Confirmed))
+                                 && r.ReservationDate == today
+                                 && (r.Status == ReservationStatuses.Seated || r.Status == ReservationStatuses.Arrived))
                         .ToListAsync();
 
                     foreach (var res in activeReservations)
@@ -217,12 +289,15 @@ public class PaymentService(RestaurantDbContext db, IAuditLogService audit, INot
                         if (!autoCompletedReservations.Contains(directRes)) autoCompletedReservations.Add(directRes);
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Could not auto-complete reservation {ReservationId} during payment", request.ReservationId);
+                }
             }
         }
 
         await db.SaveChangesAsync();
-        await transaction.CommitAsync();
+        if (transaction != null) await transaction.CommitAsync();
 
         // Realtime notifications for automatically completed reservations
         foreach (var res in autoCompletedReservations)
@@ -271,7 +346,451 @@ public class PaymentService(RestaurantDbContext db, IAuditLogService audit, INot
         await audit.LogAsync(payment.RestaurantId, null, collected ? UserRoles.Receptionist : UserRoles.Customer, collected ? "PAYMENT_COLLECTED" : "PAYMENT_PENDING", "payments", new { payment.PaymentId, payment.OrderId, payment.Amount, payment.Method });
         return Map(payment);
     }
-    public Task<bool> VerifyPaymentAsync(VerifyPaymentRequest request) => throw new InvalidOperationException("A verified online payment gateway has not been configured.");
-    public Task<bool> ProcessWebhookAsync(WebhookPayloadDto payload) => throw new InvalidOperationException("A verified online payment gateway has not been configured.");
-    public static PaymentDto Map(Payment p) => new(p.PaymentId,p.RestaurantId,p.OrderId,p.Amount,p.Currency,p.Method,p.Status,p.TransactionId,p.CreatedAt);
+
+    public async Task<bool> VerifyPaymentAsync(VerifyPaymentRequest request)
+    {
+        var payment = await db.Payments.FindAsync(request.PaymentId);
+        if (payment == null) return false;
+
+        // Idempotent duplicate check: already paid returns true immediately without double credit
+        if (payment.Status == PaymentStatuses.Paid) return true;
+
+        if (request.Status?.ToUpperInvariant() is "FAILED" or "CANCELLED")
+        {
+            payment.Status = PaymentStatuses.Failed;
+            payment.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+            await audit.LogAsync(payment.RestaurantId, null, "PAYMENT_GATEWAY", "PAYMENT_FAILED", "payments", new { payment.PaymentId, request.TransactionId });
+            return false;
+        }
+
+        // Always enforce HMAC signature check (fail closed when gateway secret is missing).
+        var secret = gatewayOptions.Value.SecretKey;
+        if (string.IsNullOrWhiteSpace(secret) || secret == "dev-secret-change-in-production")
+        {
+            logger.LogWarning("Payment verification rejected because PaymentGateway:SecretKey is not configured.");
+            return false;
+        }
+
+        var expectedPayload = $"{payment.PaymentId}|{request.TransactionId}";
+        if (!VerifyHmacHex(secret, expectedPayload, request.Signature))
+        {
+            logger.LogWarning("Invalid payment signature for PaymentId {PaymentId}", payment.PaymentId);
+            return false;
+        }
+
+        payment.Status = PaymentStatuses.Paid;
+        payment.TransactionId = string.IsNullOrWhiteSpace(request.TransactionId) ? payment.TransactionId : request.TransactionId;
+        payment.UpdatedAt = DateTime.UtcNow;
+
+        await db.SaveChangesAsync();
+
+        if (payment.OrderId.HasValue)
+        {
+            await CompleteTableIfOrderPaidAsync(payment.OrderId.Value, payment.RestaurantId);
+        }
+
+        await audit.LogAsync(payment.RestaurantId, null, UserRoles.Customer, "PAYMENT_VERIFIED", "payments", new { payment.PaymentId, payment.OrderId, payment.Amount, payment.Method, payment.TransactionId });
+        return true;
+    }
+
+    public async Task<bool> ProcessWebhookAsync(WebhookPayloadDto payload, string? headerSignature = null)
+    {
+        var webhookSecret = gatewayOptions.Value.WebhookSecret;
+        if (string.IsNullOrWhiteSpace(webhookSecret) || webhookSecret == "whsec_mock_webhook_secret_signature")
+        {
+            logger.LogWarning("Webhook rejected because PaymentGateway:WebhookSecret is not configured.");
+            return false;
+        }
+
+        var suppliedSig = string.IsNullOrWhiteSpace(headerSignature) ? payload.Signature : headerSignature;
+        var canonicalPayload = $"{payload.Event}|{payload.PaymentId}|{payload.TransactionId}|{payload.Amount:F2}";
+        if (!VerifyHmacHex(webhookSecret, canonicalPayload, suppliedSig))
+        {
+            logger.LogWarning("Rejected payment webhook with invalid signature for PaymentId {PaymentId}", payload.PaymentId);
+            return false;
+        }
+
+        Payment? payment = null;
+        if (Guid.TryParse(payload.PaymentId, out var paymentGuid))
+        {
+            payment = await db.Payments.FindAsync(paymentGuid);
+        }
+        if (payment == null && !string.IsNullOrWhiteSpace(payload.TransactionId))
+        {
+            payment = await db.Payments.FirstOrDefaultAsync(p => p.TransactionId == payload.TransactionId);
+        }
+        if (payment == null) return false;
+
+        // Idempotent duplicate callback check
+        if (payment.Status == PaymentStatuses.Paid) return true;
+
+        if (payload.Event is "payment.failed" or "PAYMENT_FAILED")
+        {
+            payment.Status = PaymentStatuses.Failed;
+            payment.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+            return true;
+        }
+
+        if (payload.Event is "payment.captured" or "PAYMENT_SUCCESS" or "charge.successful")
+        {
+            if (Math.Abs(payload.Amount - payment.Amount) > 0.05m)
+            {
+                logger.LogWarning("Webhook amount mismatch for Payment {PaymentId}: got {Amount}, expected {Expected}", payment.PaymentId, payload.Amount, payment.Amount);
+                return false;
+            }
+
+            payment.Status = PaymentStatuses.Paid;
+            if (!string.IsNullOrWhiteSpace(payload.TransactionId)) payment.TransactionId = payload.TransactionId;
+            payment.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+
+            if (payment.OrderId.HasValue)
+            {
+                await CompleteTableIfOrderPaidAsync(payment.OrderId.Value, payment.RestaurantId);
+            }
+
+            await audit.LogAsync(payment.RestaurantId, null, "WEBHOOK", "PAYMENT_COLLECTED", "payments", new { payment.PaymentId, payment.OrderId, payment.Amount });
+            return true;
+        }
+
+        return true;
+    }
+
+    public async Task<bool> ConfirmCashPaymentAsync(Guid paymentId, Guid? staffUserId)
+    {
+        var payment = await db.Payments.FindAsync(paymentId);
+        if (payment == null) return false;
+
+        // Idempotent duplicate confirmation
+        if (payment.Status == PaymentStatuses.Paid) return true;
+
+        if (payment.Method != "CASH")
+            throw new ArgumentException("Only cash payments can be confirmed through the cash confirmation flow.");
+
+        payment.Status = PaymentStatuses.Paid;
+        payment.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+
+        // Resolve waiter-call help request for this cash payment if present
+        var helpReq = await db.HelpRequests
+            .Where(h => h.RestaurantId == payment.RestaurantId && h.Status == "PENDING" && h.Message.Contains(payment.PaymentId.ToString()))
+            .FirstOrDefaultAsync();
+
+        if (helpReq != null)
+        {
+            helpReq.Status = "RESOLVED";
+            helpReq.ResolvedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+        }
+
+        if (payment.OrderId.HasValue)
+        {
+            await CompleteTableIfOrderPaidAsync(payment.OrderId.Value, payment.RestaurantId);
+        }
+
+        await audit.LogAsync(payment.RestaurantId, staffUserId, UserRoles.Waiter, "CASH_PAYMENT_CONFIRMED", "payments", new { payment.PaymentId, payment.OrderId, payment.Amount });
+        return true;
+    }
+
+    public async Task<SplitCalculationDto> CalculateSplitAsync(CalculateSplitRequest request)
+    {
+        Order? order = null;
+        if (request.OrderId.HasValue)
+        {
+            order = await db.Orders.Include(o => o.Items).FirstOrDefaultAsync(o => o.OrderId == request.OrderId.Value);
+        }
+        else if (request.TableId.HasValue)
+        {
+            order = await db.Orders.Include(o => o.Items)
+                .Where(o => o.RestaurantId == request.RestaurantId && o.TableId == request.TableId.Value && o.Status != OrderStatuses.Cancelled)
+                .OrderByDescending(o => o.CreatedAt)
+                .FirstOrDefaultAsync();
+        }
+
+        if (order == null) throw new ArgumentException("Active order not found for split calculation.");
+
+        var subtotal = order.Subtotal;
+        var tax = order.Tax;
+        var tip = request.TipAmount > 0
+            ? Math.Round(request.TipAmount, 2)
+            : (request.TipPercent > 0 ? Math.Round(subtotal * request.TipPercent / 100m, 2) : 0m);
+        var discount = Math.Min(subtotal + tax, Math.Max(0m, Math.Round(request.LoyaltyDiscount, 2)));
+        var totalBill = Math.Round(Math.Max(0, subtotal + tax + tip - discount), 2);
+
+        var existingPaid = await db.Payments
+            .Where(p => p.OrderId == order.OrderId && p.Status == PaymentStatuses.Paid)
+            .SumAsync(p => (decimal?)p.Amount) ?? 0;
+
+        var remainingBalance = Math.Round(Math.Max(0, totalBill - existingPaid), 2);
+        var shares = new List<DinerShareDto>();
+
+        var existingPayments = await db.Payments
+            .Where(p => p.OrderId == order.OrderId)
+            .OrderBy(p => p.CreatedAt)
+            .ToListAsync();
+
+        var consumedPaidIds = new HashSet<Guid>();
+        var consumedPendingIds = new HashSet<Guid>();
+
+        if (string.Equals(request.SplitType, "ITEMIZED", StringComparison.OrdinalIgnoreCase) && request.ItemShares != null && request.ItemShares.Any())
+        {
+            var validShares = request.ItemShares
+                .Where(s => s.Quantity > 0 && s.DinerIndex >= 0 && order.Items.Any(i => i.OrderItemId == s.OrderItemId))
+                .ToList();
+
+            if (!validShares.Any())
+            {
+                throw new ArgumentException("Itemized split requires valid order items with positive quantities.");
+            }
+
+            var dinerItemGroups = validShares.GroupBy(s => s.DinerIndex).OrderBy(g => g.Key).ToList();
+            var totalDinerSubtotal = validShares.Sum(s =>
+            {
+                var item = order.Items.First(i => i.OrderItemId == s.OrderItemId);
+                return item.PriceSnapshot * s.Quantity;
+            });
+
+            decimal runningAllocated = 0m;
+            decimal runningPaid = existingPaid;
+
+            for (int idx = 0; idx < dinerItemGroups.Count; idx++)
+            {
+                var group = dinerItemGroups[idx];
+                var isLast = idx == dinerItemGroups.Count - 1;
+                var dinerSubtotal = group.Sum(s =>
+                {
+                    var item = order.Items.First(i => i.OrderItemId == s.OrderItemId);
+                    return item.PriceSnapshot * s.Quantity;
+                });
+
+                decimal dinerAmount;
+                if (isLast)
+                {
+                    dinerAmount = Math.Round(Math.Max(0m, totalBill - runningAllocated), 2);
+                }
+                else
+                {
+                    var proportion = totalDinerSubtotal > 0 ? dinerSubtotal / totalDinerSubtotal : 1m / dinerItemGroups.Count;
+                    dinerAmount = Math.Round(totalBill * proportion, 2);
+                    runningAllocated += dinerAmount;
+                }
+
+                string status = "UNPAID";
+                Guid? paymentId = null;
+
+                var exactPaid = existingPayments.FirstOrDefault(p =>
+                    p.Status == PaymentStatuses.Paid &&
+                    !consumedPaidIds.Contains(p.PaymentId) &&
+                    Math.Abs(p.Amount - dinerAmount) <= 0.05m);
+
+                if (exactPaid != null && dinerAmount > 0 && runningPaid >= dinerAmount - 0.05m)
+                {
+                    status = "PAID";
+                    paymentId = exactPaid.PaymentId;
+                    consumedPaidIds.Add(exactPaid.PaymentId);
+                    runningPaid -= dinerAmount;
+                }
+                else
+                {
+                    var pendingMatch = existingPayments.FirstOrDefault(p =>
+                        p.Status == PaymentStatuses.Pending &&
+                        !consumedPendingIds.Contains(p.PaymentId) &&
+                        Math.Abs(p.Amount - dinerAmount) <= 0.05m);
+                    if (pendingMatch != null)
+                    {
+                        status = "PENDING";
+                        paymentId = pendingMatch.PaymentId;
+                        consumedPendingIds.Add(pendingMatch.PaymentId);
+                    }
+                }
+
+                shares.Add(new DinerShareDto(
+                    group.Key,
+                    $"Diner {group.Key + 1}",
+                    dinerAmount,
+                    status,
+                    paymentId
+                ));
+            }
+        }
+        else
+        {
+            // Equal Split
+            int count = Math.Clamp(request.SplitCount, 1, 50);
+            decimal baseShare = Math.Round(totalBill / count, 2);
+            decimal roundingDifference = totalBill - (baseShare * count);
+
+            decimal runningPaid = existingPaid;
+            for (int i = 0; i < count; i++)
+            {
+                decimal dinerAmount = baseShare + (i == count - 1 ? roundingDifference : 0m);
+                string status = "UNPAID";
+                Guid? paymentId = null;
+
+                if (dinerAmount > 0 && existingPaid > 0 && runningPaid >= dinerAmount - 0.05m)
+                {
+                    status = "PAID";
+                    runningPaid -= dinerAmount;
+                    var match = existingPayments.FirstOrDefault(p =>
+                        p.Status == PaymentStatuses.Paid &&
+                        !consumedPaidIds.Contains(p.PaymentId) &&
+                        Math.Abs(p.Amount - dinerAmount) <= 0.05m);
+                    if (match != null)
+                    {
+                        paymentId = match.PaymentId;
+                        consumedPaidIds.Add(match.PaymentId);
+                    }
+                }
+                else
+                {
+                    var pendingMatch = existingPayments.FirstOrDefault(p =>
+                        p.Status == PaymentStatuses.Pending &&
+                        !consumedPendingIds.Contains(p.PaymentId) &&
+                        Math.Abs(p.Amount - dinerAmount) <= 0.05m);
+                    if (pendingMatch != null)
+                    {
+                        status = "PENDING";
+                        paymentId = pendingMatch.PaymentId;
+                        consumedPendingIds.Add(pendingMatch.PaymentId);
+                    }
+                }
+
+                shares.Add(new DinerShareDto(
+                    i,
+                    $"Diner {i + 1}",
+                    dinerAmount,
+                    status,
+                    paymentId
+                ));
+            }
+        }
+
+        return new SplitCalculationDto(
+            order.OrderId,
+            order.TableId,
+            subtotal,
+            tax,
+            tip,
+            discount,
+            totalBill,
+            existingPaid,
+            remainingBalance,
+            shares.Count,
+            request.SplitType ?? "EQUAL",
+            shares
+        );
+    }
+
+    private async Task CompleteTableIfOrderPaidAsync(Guid orderId, Guid restaurantId)
+    {
+        var order = await db.Orders.FindAsync(orderId);
+        if (order == null) return;
+
+        var paid = await db.Payments.Where(p => p.OrderId == orderId && p.Status == PaymentStatuses.Paid).SumAsync(p => (decimal?)(p.Amount - p.TipAmount)) ?? 0;
+        if (paid < order.Total - 0.05m) return;
+
+        if (order.TableId.HasValue)
+        {
+            try
+            {
+                var tableToClean = await db.Tables.FindAsync(order.TableId.Value);
+                if (tableToClean != null && tableToClean.Status != TableStatuses.OutOfService)
+                {
+                    tableToClean.Status = TableStatuses.WaitingForCleaning;
+                    tableToClean.CurrentCustomerName = null;
+                    tableToClean.AssignedWaiterId = null;
+                    tableToClean.UpdatedAt = DateTime.UtcNow;
+
+                    var existingCleaning = await db.HelpRequests.AnyAsync(h =>
+                        h.RestaurantId == restaurantId &&
+                        h.TableId == tableToClean.TableId &&
+                        h.Status == "PENDING" &&
+                        h.Message.Contains("cleaning"));
+
+                    if (!existingCleaning)
+                    {
+                        var cleaningReq = new HelpRequest
+                        {
+                            RestaurantId = restaurantId,
+                            TableId = tableToClean.TableId,
+                            Message = $"Payment completed for Table A{tableToClean.TableNumber} (Order {order.OrderNumber}). Table automatically marked for cleaning (2-min auto-release).",
+                            Status = "PENDING",
+                            CreatedAt = DateTime.UtcNow
+                        };
+                        db.HelpRequests.Add(cleaningReq);
+                        await db.SaveChangesAsync();
+
+                        await notifications.NotifyRoleAsync(
+                            restaurantId,
+                            UserRoles.Waiter,
+                            "CUSTOMER_HELP_REQUEST",
+                            $"Table A{tableToClean.TableNumber} needs cleaning",
+                            $"Payment completed for Table A{tableToClean.TableNumber}. Table marked for cleaning.",
+                            new { cleaningReq.RequestId, TableNumber = tableToClean.TableNumber, TableId = tableToClean.TableId, IsCleaning = true, Status = TableStatuses.WaitingForCleaning }
+                        );
+                    }
+                    else
+                    {
+                        await db.SaveChangesAsync();
+                    }
+
+                    await notifications.NotifyRoleAsync(
+                        restaurantId,
+                        UserRoles.Receptionist,
+                        "TABLE_STATUS_CHANGED",
+                        $"Table A{tableToClean.TableNumber} waiting for cleaning",
+                        $"Payment recorded. Table A{tableToClean.TableNumber} is waiting for cleaning.",
+                        new { TableId = tableToClean.TableId, Status = TableStatuses.WaitingForCleaning, TableNumber = tableToClean.TableNumber }
+                    );
+                }
+
+                // Preserve tomorrow's booking! Only complete today's Seated / Arrived reservations
+                var today = DateOnly.FromDateTime(DateTime.UtcNow);
+                var activeReservations = await db.Reservations
+                    .Where(r => r.RestaurantId == restaurantId 
+                             && r.TableId == order.TableId.Value 
+                             && r.ReservationDate == today
+                             && (r.Status == ReservationStatuses.Seated || r.Status == ReservationStatuses.Arrived))
+                    .ToListAsync();
+
+                foreach (var res in activeReservations)
+                {
+                    res.Status = ReservationStatuses.Completed;
+                    res.UpdatedAt = DateTime.UtcNow;
+                    await notifications.NotifyRoleAsync(
+                        restaurantId,
+                        UserRoles.Receptionist,
+                        "RESERVATION_STATUS_CHANGED",
+                        $"Reservation Completed: {res.CustomerName}",
+                        $"Reservation {res.BookingId} for {res.CustomerName} automatically completed after bill payment.",
+                        new { ReservationId = res.ReservationId, Status = ReservationStatuses.Completed, BookingId = res.BookingId }
+                    );
+                }
+
+                await db.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error completing table/reservation for order {OrderId}", orderId);
+            }
+        }
+    }
+
+    private static string ComputeHmacHex(string secret, string payload)
+    {
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
+        return Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(payload))).ToLowerInvariant();
+    }
+
+    private static bool VerifyHmacHex(string secret, string payload, string? suppliedSignature)
+    {
+        if (string.IsNullOrWhiteSpace(suppliedSignature)) return false;
+        var expected = Encoding.UTF8.GetBytes(ComputeHmacHex(secret, payload));
+        var supplied = Encoding.UTF8.GetBytes(suppliedSignature.Trim().ToLowerInvariant());
+        return supplied.Length == expected.Length && CryptographicOperations.FixedTimeEquals(supplied, expected);
+    }
+
+    public static PaymentDto Map(Payment p) => new(p.PaymentId,p.RestaurantId,p.OrderId,p.Amount,p.Currency,p.Method,p.Status,p.TransactionId,p.CreatedAt,p.TipAmount,p.SplitCount,p.SplitType);
 }

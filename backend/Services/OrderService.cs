@@ -118,7 +118,10 @@ public class OrderService : IOrderService
                 Quantity = itemReq.Quantity,
                 Customization = itemReq.CustomizationJson ?? "{}",
                 SpecialInstruction = itemReq.SpecialInstruction,
-                LineTotal = lineTotal
+                LineTotal = lineTotal,
+                Course = string.IsNullOrWhiteSpace(itemReq.Course) ? "MAIN" : itemReq.Course.ToUpperInvariant(),
+                Station = string.IsNullOrWhiteSpace(item.KitchenStation) ? "MAIN" : item.KitchenStation.ToUpperInvariant(),
+                PreparationStatus = "PENDING"
             });
         }
 
@@ -126,29 +129,157 @@ public class OrderService : IOrderService
         var deliveryFee = request.Source == OrderSources.Delivery ? _rules.StandardDeliveryFee : 0m;
         var total = subtotal + tax + deliveryFee;
 
-        // 3. Generate unique order number (Each customer submission creates an independent order ticket for kitchen)
-        var orderNumber = "ORD-" + Guid.NewGuid().ToString("N")[..10].ToUpperInvariant();
-
-        TableEntity? table = null;
-        var customerName = request.CustomerName;
-        var customerPhone = request.CustomerPhone;
-
-        // If dine-in, update table status to OCCUPIED and preserve customer details across repeated orders
-        if (request.TableId.HasValue)
+        // Check for an active unpaid dine-in order on this table (running table session)
+        Order? existingActiveOrder = null;
+        if (request.Source == OrderSources.DineInQr && request.TableId.HasValue)
         {
-            table = await _db.Tables.FindAsync(request.TableId.Value);
-            if (table != null)
+            var candidates = await _db.Orders
+                .Include(o => o.Items)
+                .Include(o => o.Table)
+                .Where(o => o.RestaurantId == request.RestaurantId
+                         && o.TableId == request.TableId.Value
+                         && o.Source == OrderSources.DineInQr
+                         && o.Status != OrderStatuses.Cancelled
+                         && o.Status != OrderStatuses.ConfirmationTimeout)
+                .OrderByDescending(o => o.CreatedAt)
+                .ToListAsync();
+
+            foreach (var cand in candidates)
             {
-                table.Status = TableStatuses.Occupied;
+                var paidSum = await _db.Payments
+                    .Where(p => p.OrderId == cand.OrderId && p.Status == PaymentStatuses.Paid)
+                    .SumAsync(p => (decimal?)(p.Amount - p.TipAmount)) ?? 0;
+
+                if (paidSum < cand.Total - 0.05m)
+                {
+                    existingActiveOrder = cand;
+                    break;
+                }
+            }
+        }
+
+        if (existingActiveOrder != null)
+        {
+            // Append new items to the existing running order for this table
+            foreach (var item in orderItems)
+            {
+                item.OrderId = existingActiveOrder.OrderId;
+                _db.OrderItems.Add(item);
+                existingActiveOrder.Items.Add(item);
+            }
+
+            existingActiveOrder.Subtotal += subtotal;
+            existingActiveOrder.Tax = Math.Round(existingActiveOrder.Subtotal * _rules.TaxRate, 2);
+            existingActiveOrder.Total = existingActiveOrder.Subtotal + existingActiveOrder.Tax + existingActiveOrder.DeliveryFee;
+
+            if (!string.IsNullOrWhiteSpace(request.CustomerName))
+            {
+                existingActiveOrder.CustomerName = request.CustomerName;
+            }
+            if (!string.IsNullOrWhiteSpace(request.CustomerPhone))
+            {
+                existingActiveOrder.CustomerPhone = request.CustomerPhone;
+            }
+            if (!string.IsNullOrWhiteSpace(request.SpecialInstructions))
+            {
+                existingActiveOrder.SpecialInstructions = string.IsNullOrWhiteSpace(existingActiveOrder.SpecialInstructions)
+                    ? request.SpecialInstructions
+                    : $"{existingActiveOrder.SpecialInstructions} | Extra note: {request.SpecialInstructions}";
+            }
+
+            // Reset status so Kitchen receives and prepares the new items
+            existingActiveOrder.Status = OrderStatuses.New;
+            existingActiveOrder.UpdatedAt = DateTime.UtcNow;
+
+            var tableToUpdate = request.TableId.HasValue ? await _db.Tables.FindAsync(request.TableId.Value) : null;
+            if (tableToUpdate != null)
+            {
+                tableToUpdate.Status = TableStatuses.Occupied;
                 if (!string.IsNullOrWhiteSpace(request.CustomerName))
                 {
-                    table.CurrentCustomerName = request.CustomerName;
+                    tableToUpdate.CurrentCustomerName = request.CustomerName;
                 }
-                else if (!string.IsNullOrWhiteSpace(table.CurrentCustomerName))
+                tableToUpdate.UpdatedAt = DateTime.UtcNow;
+            }
+
+            await _db.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            var activeTableNum = tableToUpdate?.TableNumber;
+
+            // Trigger notification to kitchen and receptionist
+            await _notifications.NotifyRoleAsync(
+                request.RestaurantId,
+                UserRoles.Kitchen,
+                "ORDER_UPDATED",
+                $"Additional Items for Table #{activeTableNum}",
+                $"New items added to Order #{existingActiveOrder.OrderNumber}. Total: ₹{existingActiveOrder.Total}",
+                new { existingActiveOrder.OrderId, existingActiveOrder.OrderNumber, existingActiveOrder.Source, TableNumber = activeTableNum }
+            );
+
+            await _notifications.NotifyRoleAsync(
+                request.RestaurantId,
+                UserRoles.Receptionist,
+                "ORDER_UPDATED",
+                $"Table #{activeTableNum} Order Updated",
+                $"New items added to Order #{existingActiveOrder.OrderNumber}.",
+                new { existingActiveOrder.OrderId, existingActiveOrder.OrderNumber, existingActiveOrder.Source, TableNumber = activeTableNum }
+            );
+
+            await _audit.LogAsync(
+                existingActiveOrder.RestaurantId,
+                existingActiveOrder.CustomerId,
+                "CUSTOMER",
+                "ORDER_ITEMS_ADDED",
+                "orders",
+                new { existingActiveOrder.OrderId, existingActiveOrder.OrderNumber, existingActiveOrder.Total, existingActiveOrder.Source }
+            );
+
+            return await MapWithPaymentAsync(existingActiveOrder, activeTableNum);
+        }
+
+        // 3. Generate unique order number (New Table Session)
+        var orderNumber = "ORD-" + Guid.NewGuid().ToString("N")[..10].ToUpperInvariant();
+
+        // Calculate dynamic prep time estimate
+        var maxPrep = 15;
+        if (menuItems.Values.Any()) maxPrep = menuItems.Values.Max(m => m.PrepTimeMinutes > 0 ? m.PrepTimeMinutes : 15);
+        var activeKitchenTickets = await _db.Orders.CountAsync(o => o.RestaurantId == request.RestaurantId && (o.Status == OrderStatuses.New || o.Status == OrderStatuses.Preparing));
+        var prepMinutes = maxPrep + Math.Min(30, activeKitchenTickets * 2);
+        var readyAt = DateTime.UtcNow.AddMinutes(prepMinutes);
+
+        // Associate with active shared dining session for dine-in orders
+        Guid? activeSessionId = request.SessionId;
+        if (request.TableId.HasValue && request.Source == OrderSources.DineInQr && !activeSessionId.HasValue)
+        {
+            try
+            {
+                var currentSession = await _db.DiningSessions
+                    .Where(s => s.TableId == request.TableId.Value && s.Status == "ACTIVE")
+                    .OrderByDescending(s => s.CreatedAt)
+                    .FirstOrDefaultAsync();
+
+                if (currentSession == null)
                 {
-                    customerName = table.CurrentCustomerName;
+                    var tableForSession = await _db.Tables.FindAsync(request.TableId.Value);
+                    currentSession = new DiningSession
+                    {
+                        RestaurantId = request.RestaurantId,
+                        TableId = request.TableId.Value,
+                        SessionCode = $"SES-{tableForSession?.TableNumber ?? 1}-{DateTime.UtcNow:MMddHHmm}",
+                        Status = "ACTIVE",
+                        CreatedAt = DateTime.UtcNow
+                    };
+                    _db.DiningSessions.Add(currentSession);
+                    await _db.SaveChangesAsync();
                 }
-                table.UpdatedAt = DateTime.UtcNow;
+                activeSessionId = currentSession?.SessionId;
+            }
+            catch
+            {
+                // Gracefully detach and continue without session ID if dining_sessions table has any DB discrepancy
+                _db.ChangeTracker.Clear();
+                activeSessionId = null;
             }
         }
 
@@ -158,15 +289,18 @@ public class OrderService : IOrderService
             RestaurantId = request.RestaurantId,
             CustomerId = request.CustomerId,
             TableId = request.TableId,
+            SessionId = activeSessionId,
             Source = request.Source,
             Status = OrderStatuses.New,
             Subtotal = subtotal,
             Tax = tax,
             DeliveryFee = deliveryFee,
             Total = total,
+            EstimatedPrepTimeMinutes = prepMinutes,
+            EstimatedReadyAt = readyAt,
             DeliveryAddress = request.DeliveryAddressJson,
-            CustomerName = !string.IsNullOrWhiteSpace(customerName) ? customerName : "Guest",
-            CustomerPhone = customerPhone,
+            CustomerName = request.CustomerName,
+            CustomerPhone = request.CustomerPhone,
             IdempotencyKey = request.IdempotencyKey,
             TakeawayPickupTime = request.TakeawayPickupTime,
             SpecialInstructions = request.SpecialInstructions,
@@ -176,11 +310,28 @@ public class OrderService : IOrderService
         };
 
         _db.Orders.Add(order);
+
+        // If dine-in, update table status to OCCUPIED and set guest name
+        if (request.TableId.HasValue)
+        {
+            var table = await _db.Tables.FindAsync(request.TableId.Value);
+            if (table != null)
+            {
+                table.Status = TableStatuses.Occupied;
+                if (!string.IsNullOrWhiteSpace(request.CustomerName))
+                {
+                    table.CurrentCustomerName = request.CustomerName;
+                }
+                table.UpdatedAt = DateTime.UtcNow;
+            }
+        }
+
         await _db.SaveChangesAsync();
         await transaction.CommitAsync();
 
         // 4. Trigger Real-Time Notification (Kitchen receives separate ticket for each order placed)
-        var tableNum = table?.TableNumber;
+        var tableEntity = request.TableId.HasValue ? await _db.Tables.FindAsync(request.TableId.Value) : null;
+        var tableNum = tableEntity?.TableNumber;
 
         await _notifications.NotifyRoleAsync(
             request.RestaurantId,
@@ -199,6 +350,18 @@ public class OrderService : IOrderService
             tableNum.HasValue ? $"New dine-in order #{order.OrderNumber} for Table {tableNum}." : $"New {order.Source} order #{order.OrderNumber}.",
             new { order.OrderId, order.OrderNumber, order.Source, TableNumber = tableNum }
         );
+
+        if (request.TableId.HasValue)
+        {
+            await _notifications.NotifyTableAsync(
+                request.RestaurantId,
+                request.TableId.Value,
+                "NEW_ORDER",
+                $"New Table Order #{order.OrderNumber}",
+                $"A new order #{order.OrderNumber} was placed for this table.",
+                new { order.OrderId, order.OrderNumber, order.Source, TableId = request.TableId.Value, TableNumber = tableNum }
+            );
+        }
 
         await _audit.LogAsync(
             order.RestaurantId,
@@ -350,6 +513,18 @@ public class OrderService : IOrderService
         await _db.SaveChangesAsync();
         await transaction.CommitAsync();
 
+        if (order.TableId.HasValue)
+        {
+            await _notifications.NotifyTableAsync(
+                order.RestaurantId,
+                order.TableId.Value,
+                "ORDER_STATUS_CHANGED",
+                $"Table Order Status: {newStatus}",
+                $"Order #{order.OrderNumber} status changed to {newStatus}.",
+                new { order.OrderId, order.OrderNumber, TableId = order.TableId.Value, Status = newStatus }
+            );
+        }
+
         await _audit.LogAsync(
             order.RestaurantId,
             null,
@@ -394,6 +569,18 @@ public class OrderService : IOrderService
 
         await _db.SaveChangesAsync();
         await transaction.CommitAsync();
+
+        if (order.TableId.HasValue)
+        {
+            await _notifications.NotifyTableAsync(
+                order.RestaurantId,
+                order.TableId.Value,
+                "ORDER_STATUS_CHANGED",
+                "Table Order Status: CANCELLED",
+                $"Order #{order.OrderNumber} status changed to CANCELLED.",
+                new { order.OrderId, order.OrderNumber, TableId = order.TableId.Value, Status = OrderStatuses.Cancelled }
+            );
+        }
 
         await _notifications.NotifyRoleAsync(
             order.RestaurantId,
@@ -502,6 +689,32 @@ public class OrderService : IOrderService
 
         await _db.SaveChangesAsync();
         await transaction.CommitAsync();
+
+        if (order.TableId.HasValue)
+        {
+            if (confirmed)
+            {
+                await _notifications.NotifyTableAsync(
+                    order.RestaurantId,
+                    order.TableId.Value,
+                    "ORDER_STATUS_CHANGED",
+                    "Table Order Status: DELIVERED",
+                    $"Order #{order.OrderNumber} status changed to DELIVERED.",
+                    new { order.OrderId, order.OrderNumber, TableId = order.TableId.Value, Status = OrderStatuses.Delivered }
+                );
+            }
+            else
+            {
+                await _notifications.NotifyTableAsync(
+                    order.RestaurantId,
+                    order.TableId.Value,
+                    "ORDER_ISSUE_REPORTED",
+                    "Delivery Issue Reported",
+                    $"We notified reception regarding Order #{order.OrderNumber}.",
+                    new { order.OrderId, order.OrderNumber, TableId = order.TableId.Value, Status = order.Status }
+                );
+            }
+        }
         return true;
     }
 
@@ -509,32 +722,115 @@ public class OrderService : IOrderService
     {
         var price = item.Price;
         if (string.IsNullOrWhiteSpace(customizationJson)) return price;
-        using var selected = JsonDocument.Parse(customizationJson);
-        if (selected.RootElement.ValueKind != JsonValueKind.Object) throw new ArgumentException("Customizations must be an object.");
-        using var addOns = JsonDocument.Parse(item.AddOns);
-        if (selected.RootElement.TryGetProperty("addOns", out var requested))
+
+        try
         {
-            if (requested.ValueKind != JsonValueKind.Array) throw new ArgumentException("Add-ons must be a list.");
-            var seen = new HashSet<string>();
-            foreach (var addOn in requested.EnumerateArray())
+            using var selected = JsonDocument.Parse(customizationJson);
+            if (selected.RootElement.ValueKind != JsonValueKind.Object) return price;
+
+            // 1. Authoritative portion price resolution from database catalog (Section Phase 1.5)
+            if (selected.RootElement.TryGetProperty("portion", out var portionElem))
             {
-                var name = addOn.GetString() ?? "";
-                if (!seen.Add(name)) throw new ArgumentException("Duplicate add-on selected.");
-                var catalog = addOns.RootElement.EnumerateArray().FirstOrDefault(x => x.GetProperty("name").GetString() == name);
-                if (catalog.ValueKind == JsonValueKind.Undefined) throw new ArgumentException("Unknown add-on selected.");
-                price += catalog.GetProperty("price").GetDecimal();
+                string? targetPortionName = null;
+                if (portionElem.ValueKind == JsonValueKind.Object && portionElem.TryGetProperty("name", out var pName))
+                {
+                    targetPortionName = pName.GetString();
+                }
+                else if (portionElem.ValueKind == JsonValueKind.String)
+                {
+                    targetPortionName = portionElem.GetString();
+                }
+
+                if (!string.IsNullOrWhiteSpace(targetPortionName) && !string.IsNullOrWhiteSpace(item.Portions))
+                {
+                    try
+                    {
+                        using var portionsDoc = JsonDocument.Parse(item.Portions);
+                        if (portionsDoc.RootElement.ValueKind == JsonValueKind.Array)
+                        {
+                            var matched = portionsDoc.RootElement.EnumerateArray()
+                                .FirstOrDefault(p => p.TryGetProperty("name", out var pn) && string.Equals(pn.GetString(), targetPortionName, StringComparison.OrdinalIgnoreCase));
+                            if (matched.ValueKind != JsonValueKind.Undefined && matched.TryGetProperty("price", out var mp) && mp.TryGetDecimal(out var catalogPrice))
+                            {
+                                price = catalogPrice;
+                            }
+                        }
+                    }
+                    catch { }
+                }
             }
+
+            // 2. Add-Ons additions
+            if (selected.RootElement.TryGetProperty("addOns", out var requested) && requested.ValueKind == JsonValueKind.Array)
+            {
+                if (!string.IsNullOrWhiteSpace(item.AddOns))
+                {
+                    try
+                    {
+                        using var addOns = JsonDocument.Parse(item.AddOns);
+                        if (addOns.RootElement.ValueKind == JsonValueKind.Array)
+                        {
+                            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                            foreach (var addOn in requested.EnumerateArray())
+                            {
+                                var name = addOn.ValueKind == JsonValueKind.String ? addOn.GetString() ?? "" : "";
+                                if (!string.IsNullOrEmpty(name) && seen.Add(name))
+                                {
+                                    var catalog = addOns.RootElement.EnumerateArray()
+                                        .FirstOrDefault(x => x.TryGetProperty("name", out var n) && string.Equals(n.GetString(), name, StringComparison.OrdinalIgnoreCase));
+                                    if (catalog.ValueKind != JsonValueKind.Undefined && catalog.TryGetProperty("price", out var ap))
+                                    {
+                                        price += ap.GetDecimal();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
+
+            // 3. Customization Options (exclude portion, addOns, specialInstructions, notes)
+            var optRaw = string.IsNullOrWhiteSpace(item.CustomizationOptions) ? "[]" : item.CustomizationOptions;
+            try
+            {
+                using var options = JsonDocument.Parse(optRaw);
+                if (options.RootElement.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var choice in selected.RootElement.EnumerateObject().Where(x =>
+                        !string.Equals(x.Name, "addOns", StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(x.Name, "portion", StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(x.Name, "specialInstruction", StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(x.Name, "specialInstructions", StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(x.Name, "notes", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        var option = options.RootElement.EnumerateArray()
+                            .FirstOrDefault(x => x.TryGetProperty("name", out var n) && string.Equals(n.GetString(), choice.Name, StringComparison.OrdinalIgnoreCase));
+
+                        if (option.ValueKind == JsonValueKind.Undefined) continue; // Skip non-option keys gracefully
+                        if (choice.Value.ValueKind != JsonValueKind.String) continue;
+
+                        var text = choice.Value.GetString()!;
+                        if (option.TryGetProperty("choices", out var choicesProp) && choicesProp.ValueKind == JsonValueKind.Array)
+                        {
+                            var matchChoice = choicesProp.EnumerateArray()
+                                .FirstOrDefault(x => string.Equals(x.GetString(), text, StringComparison.OrdinalIgnoreCase));
+                            if (matchChoice.ValueKind != JsonValueKind.Undefined)
+                            {
+                                var charge = System.Text.RegularExpressions.Regex.Match(text, @"\(\+₹?(\d+(?:\.\d+)?)\)");
+                                if (charge.Success) price += decimal.Parse(charge.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
         }
-        using var options = JsonDocument.Parse(item.CustomizationOptions);
-        foreach (var choice in selected.RootElement.EnumerateObject().Where(x => x.Name != "addOns"))
+        catch
         {
-            var option = options.RootElement.EnumerateArray().FirstOrDefault(x => x.GetProperty("name").GetString() == choice.Name);
-            if (option.ValueKind == JsonValueKind.Undefined || choice.Value.ValueKind != JsonValueKind.String) throw new ArgumentException("Unknown customization selected.");
-            var text = choice.Value.GetString()!;
-            if (!option.GetProperty("choices").EnumerateArray().Any(x => x.GetString() == text)) throw new ArgumentException("Unknown customization choice.");
-            var charge = System.Text.RegularExpressions.Regex.Match(text, @"\(\+₹?(\d+(?:\.\d+)?)\)");
-            if (charge.Success) price += decimal.Parse(charge.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+            return item.Price;
         }
+
         return price;
     }
 
@@ -549,11 +845,11 @@ public class OrderService : IOrderService
     }
     private async Task<OrderDto> MapWithPaymentAsync(Order order, int? tableNumber)
     {
-        var paid = await _db.Payments.Where(p => p.OrderId == order.OrderId && p.Status == PaymentStatuses.Paid).SumAsync(p => (decimal?)p.Amount) ?? 0;
+        var paid = await _db.Payments.Where(p => p.OrderId == order.OrderId && p.Status == PaymentStatuses.Paid).SumAsync(p => (decimal?)(p.Amount - p.TipAmount)) ?? 0;
         var principal = _http.HttpContext?.User;
         var staff = principal?.Identity?.IsAuthenticated == true && !principal.IsInRole(UserRoles.Customer);
-        return MapToDto(order, tableNumber) with { AccessToken = staff ? null : _tokens.Create("order", order.OrderId), PaidAmount = paid,
-            PaymentStatus = paid >= order.Total ? "PAID" : paid > 0 ? "PARTIAL" : "UNPAID",
+        return MapToDto(order, tableNumber) with { AccessToken = staff ? null : _tokens.Create("order", order.OrderId), PaidAmount = Math.Max(0, paid),
+            PaymentStatus = paid >= order.Total - 0.05m ? "PAID" : paid > 0 ? "PARTIAL" : "UNPAID",
             CustomerName=order.CustomerName, CustomerPhone=order.CustomerPhone, DeliveryAddressJson=order.DeliveryAddress,
             TakeawayPickupTime=order.TakeawayPickupTime, ConfirmationRequestedAt=order.ConfirmationRequestedAt };
     }
@@ -620,7 +916,196 @@ public class OrderService : IOrderService
                 i.Quantity,
                 i.LineTotal,
                 i.Customization,
-                i.SpecialInstruction
-            )).ToList()
+                i.SpecialInstruction,
+                i.Course ?? "MAIN",
+                i.Station ?? "MAIN",
+                i.PreparationStatus ?? "PENDING"
+            )).ToList(),
+            EstimatedPrepTimeMinutes: o.EstimatedPrepTimeMinutes,
+            EstimatedReadyAt: o.EstimatedReadyAt,
+            SessionId: o.SessionId
         );
+
+    public async Task<bool> UpdateOrderItemStatusAsync(Guid orderItemId, string status)
+    {
+        var item = await _db.OrderItems.Include(i => i.Order).FirstOrDefaultAsync(i => i.OrderItemId == orderItemId);
+        if (item == null) return false;
+
+        var normalizedStatus = status.ToUpperInvariant();
+        item.PreparationStatus = normalizedStatus;
+        if (normalizedStatus == "READY")
+        {
+            item.PreparedAt = DateTime.UtcNow;
+        }
+
+        await _db.SaveChangesAsync();
+
+        var order = item.Order;
+        if (order != null)
+        {
+            var courseItems = await _db.OrderItems
+                .Where(i => i.OrderId == order.OrderId && i.Course == item.Course)
+                .ToListAsync();
+
+            bool allCourseReady = courseItems.All(i => i.PreparationStatus == "READY" || i.PreparationStatus == "SERVED");
+            if (allCourseReady)
+            {
+                var table = order.TableId.HasValue ? await _db.Tables.FindAsync(order.TableId.Value) : null;
+                var tableNum = table?.TableNumber;
+
+                await _notifications.NotifyRoleAsync(
+                    order.RestaurantId,
+                    UserRoles.Waiter,
+                    "COURSE_READY",
+                    $"Course Ready: Table A{tableNum}",
+                    $"All items for course '{item.Course}' in Order #{order.OrderNumber} (Table A{tableNum}) are ready to be served!",
+                    new { order.OrderId, order.OrderNumber, TableNumber = tableNum, Course = item.Course }
+                );
+            }
+
+            var allItems = await _db.OrderItems.Where(i => i.OrderId == order.OrderId).ToListAsync();
+            if (allItems.All(i => i.PreparationStatus == "READY" || i.PreparationStatus == "SERVED"))
+            {
+                if (order.Status == OrderStatuses.Preparing || order.Status == OrderStatuses.New || order.Status == OrderStatuses.Accepted)
+                {
+                    order.Status = OrderStatuses.Ready;
+                    order.UpdatedAt = DateTime.UtcNow;
+                    await _db.SaveChangesAsync();
+
+                    await _notifications.NotifyRoleAsync(
+                        order.RestaurantId,
+                        UserRoles.Waiter,
+                        "ORDER_READY",
+                        $"Order #{order.OrderNumber} Ready",
+                        $"All items for Order #{order.OrderNumber} are ready.",
+                        new { order.OrderId, order.OrderNumber }
+                    );
+                }
+            }
+        }
+
+        return true;
+    }
+
+    public async Task<List<TimeBudgetMenuDto>> GetTimeBudgetMenuAsync(Guid restaurantId, int maxMinutes)
+    {
+        var items = await _db.MenuItems.Include(m => m.Category)
+            .Where(m => m.RestaurantId == restaurantId && m.Availability)
+            .ToListAsync();
+
+        var activeQueuedItems = await _db.OrderItems
+            .Where(oi => oi.Order.RestaurantId == restaurantId && (oi.PreparationStatus == "PENDING" || oi.PreparationStatus == "PREPARING"))
+            .ToListAsync();
+
+        var stationQueues = activeQueuedItems
+            .GroupBy(oi => string.IsNullOrWhiteSpace(oi.Station) ? "MAIN" : oi.Station.ToUpperInvariant())
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        var result = new List<TimeBudgetMenuDto>();
+
+        foreach (var item in items)
+        {
+            var station = string.IsNullOrWhiteSpace(item.KitchenStation) ? "MAIN" : item.KitchenStation.ToUpperInvariant();
+            var queueCount = stationQueues.GetValueOrDefault(station, 0);
+
+            var basePrep = item.PrepTimeMinutes > 0 ? item.PrepTimeMinutes : 15;
+            var queueLag = Math.Min(20, queueCount * 2);
+            var totalEst = basePrep + queueLag;
+
+            var minEst = Math.Max(5, totalEst - 3);
+            var maxEst = totalEst + 4;
+
+            if (maxEst <= maxMinutes || (maxMinutes >= 20 && totalEst <= maxMinutes))
+            {
+                result.Add(new TimeBudgetMenuDto(
+                    item.MenuItemId,
+                    item.Name,
+                    item.Description,
+                    item.Price,
+                    item.Category?.Name ?? "Main",
+                    basePrep,
+                    totalEst,
+                    minEst,
+                    maxEst,
+                    station,
+                    item.Image,
+                    item.VegNonVeg
+                ));
+            }
+        }
+
+        return result.OrderBy(r => r.EstimatedTotalPrepMinutes).ThenBy(r => r.Price).ToList();
+    }
+
+    public async Task<List<PortionAvailabilityDto>> GetPortionsRemainingAsync(Guid restaurantId)
+    {
+        var items = await _db.MenuItems
+            .Where(m => m.RestaurantId == restaurantId)
+            .ToListAsync();
+
+        var inventory = await _db.InventoryItems
+            .Where(i => i.RestaurantId == restaurantId)
+            .ToListAsync();
+
+        var activeOrderItems = await _db.OrderItems
+            .Where(oi => oi.Order.RestaurantId == restaurantId && (oi.Order.Status == OrderStatuses.New || oi.Order.Status == OrderStatuses.Accepted || oi.Order.Status == OrderStatuses.Preparing))
+            .ToListAsync();
+
+        var reservedCount = activeOrderItems
+            .GroupBy(oi => oi.MenuItemId)
+            .ToDictionary(g => g.Key, g => g.Sum(x => x.Quantity));
+
+        var result = new List<PortionAvailabilityDto>();
+
+        foreach (var item in items)
+        {
+            int maxPortions = 50;
+
+            if (!string.IsNullOrWhiteSpace(item.Recipe) && item.Recipe != "[]")
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(item.Recipe);
+                    if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                    {
+                        int limitingFactor = 999;
+                        foreach (var el in doc.RootElement.EnumerateArray())
+                        {
+                            var ingName = el.TryGetProperty("name", out var np) ? np.GetString() : null;
+                            var qty = el.TryGetProperty("quantity", out var qp) ? qp.GetDecimal() : 0m;
+                            if (!string.IsNullOrWhiteSpace(ingName) && qty > 0)
+                            {
+                                var stockItem = inventory.FirstOrDefault(i => 
+                                    string.Equals(i.Name, ingName, StringComparison.OrdinalIgnoreCase));
+                                if (stockItem != null)
+                                {
+                                    var possible = (int)Math.Floor(stockItem.CurrentStock / qty);
+                                    if (possible < limitingFactor) limitingFactor = possible;
+                                }
+                            }
+                        }
+                        if (limitingFactor < 999) maxPortions = Math.Max(0, limitingFactor);
+                    }
+                }
+                catch { }
+            }
+
+            var reserved = reservedCount.GetValueOrDefault(item.MenuItemId, 0);
+            var remaining = Math.Max(0, maxPortions - reserved);
+
+            if (!item.Availability) remaining = 0;
+
+            var status = remaining <= 0 ? "SOLD_OUT" : (remaining <= 5 ? "LOW_STOCK" : "AVAILABLE");
+
+            result.Add(new PortionAvailabilityDto(
+                item.MenuItemId,
+                item.Name,
+                remaining,
+                remaining > 0,
+                status
+            ));
+        }
+
+        return result;
+    }
 }

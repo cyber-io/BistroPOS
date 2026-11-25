@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { api, getAuthToken, setAuthToken } from '../services/api';
+import { api, getAuthToken, setAuthToken, setActiveRestaurantId } from '../services/api';
 import { supabase } from '../services/supabaseClient';
 
 const AuthContext = createContext(null);
@@ -19,7 +19,13 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     let active = true;
     if (getAuthToken()) {
-      api.me().then(user => { if (active) setCurrentUser(normalizeUser(user)); })
+      api.me().then(user => {
+        if (active) {
+          const norm = normalizeUser(user);
+          if (norm.restaurantId) setActiveRestaurantId(norm.restaurantId);
+          setCurrentUser(norm);
+        }
+      })
         .catch(() => { if (active) logout(); })
         .finally(() => { if (active) setIsLoading(false); });
     }
@@ -32,6 +38,9 @@ export function AuthProvider({ children }) {
     if (!result?.success || !result.token || !result.user) return { success: false, message: result?.message || 'Unable to sign in. Please try again.' };
     setAuthToken(result.token);
     const user = normalizeUser(result.user);
+    if (user.restaurantId) {
+      setActiveRestaurantId(user.restaurantId);
+    }
     setCurrentUser(user);
     return { success: true, user };
   };

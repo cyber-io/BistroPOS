@@ -208,11 +208,6 @@ export default function PosShell({ children, alertCount = 0, onAlerts, menuDots 
             <span className="truncate max-w-[150px] font-bold text-slate-800">
               {currentRestaurant?.name || 'Bistro & Bloom'}
             </span>
-            {role === 'MANAGER' && (
-              <span className="text-[9px] bg-emerald-100 text-emerald-800 font-extrabold px-1.5 py-0.5 rounded tracking-wide uppercase">
-                Manager
-              </span>
-            )}
           </div>
         )}
 

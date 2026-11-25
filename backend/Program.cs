@@ -15,15 +15,26 @@ using RestaurantSystem.Api.Repositories;
 using RestaurantSystem.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+if (builder.Environment.IsDevelopment())
+{
+    builder.Configuration.AddJsonFile("appsettings.Development.local.json", optional: true, reloadOnChange: true);
+}
 if (string.IsNullOrEmpty(builder.Configuration["urls"])) builder.WebHost.UseUrls("http://127.0.0.1:5050");
 
 // 1. Strongly Typed Configuration Options
 builder.Services.Configure<SupabaseOptions>(builder.Configuration.GetSection(SupabaseOptions.SectionName));
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
+builder.Services.Configure<SecurityOptions>(builder.Configuration.GetSection(SecurityOptions.SectionName));
+builder.Services.Configure<FeaturesOptions>(builder.Configuration.GetSection(FeaturesOptions.SectionName));
 builder.Services.Configure<BusinessRulesOptions>(builder.Configuration.GetSection(BusinessRulesOptions.SectionName));
 builder.Services.Configure<PaymentGatewayOptions>(builder.Configuration.GetSection(PaymentGatewayOptions.SectionName));
 
 var jwtOptions = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>() ?? new JwtOptions();
+if (string.IsNullOrWhiteSpace(jwtOptions.SecretKey) || jwtOptions.SecretKey.Length < 32)
+{
+    throw new InvalidOperationException("Jwt:SecretKey must be configured (minimum 32 characters) via appsettings.Development.local.json, dotnet user-secrets, or Jwt__SecretKey.");
+}
+var securityOptions = builder.Configuration.GetSection(SecurityOptions.SectionName).Get<SecurityOptions>() ?? new SecurityOptions();
 
 // 2. Database Connection (PostgreSQL / Supabase)
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
@@ -47,12 +58,12 @@ builder.Services.AddAuthentication(options =>
 })
 .AddJwtBearer(options =>
 {
-    options.RequireHttpsMetadata = false;
+    options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
     options.SaveToken = true;
     options.TokenValidationParameters = new TokenValidationParameters
     {
         ValidateIssuerSigningKey = true,
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.SecretKey.PadRight(32))),
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.SecretKey)),
         ValidateIssuer = !string.IsNullOrEmpty(jwtOptions.Issuer),
         ValidIssuer = jwtOptions.Issuer,
         ValidateAudience = !string.IsNullOrEmpty(jwtOptions.Audience),
@@ -106,9 +117,14 @@ builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddScoped<IReservationService, ReservationService>();
 builder.Services.AddScoped<ITableService, TableService>();
 builder.Services.AddScoped<IHelpRequestService, HelpRequestService>();
+builder.Services.AddScoped<IInventoryService, InventoryService>();
+builder.Services.AddScoped<ILoyaltyService, LoyaltyService>();
+builder.Services.AddScoped<IFeedbackService, FeedbackService>();
 builder.Services.AddScoped<IPaymentService, PaymentService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<IAuditLogService, AuditLogService>();
+builder.Services.AddScoped<IEmailReceiptService, EmailReceiptService>();
+builder.Services.AddScoped<IWaitlistService, WaitlistService>();
 
 // 6. Controllers and OpenAPI Documentation
 builder.Services.AddControllers(options => options.Filters.AddService<ResourceAccessFilter>());
@@ -150,11 +166,15 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 // 7. CORS Configuration
+var allowedOrigins = securityOptions.CorsAllowedOrigins is { Length: > 0 }
+    ? securityOptions.CorsAllowedOrigins
+    : new[] { "http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000" };
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontendApp", policy =>
     {
-        policy.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000")
+        policy.WithOrigins(allowedOrigins)
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials();
@@ -164,6 +184,12 @@ builder.Services.AddCors(options =>
 var app = builder.Build();
 
 // 8. Middleware Pipeline
+app.UseForwardedHeaders();
+app.UseMiddleware<SecurityHeadersMiddleware>();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
+}
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseMiddleware<MemoryRateLimitingMiddleware>();
 
@@ -187,7 +213,7 @@ app.MapGet("/api/health", async (RestaurantDbContext db) => {
 app.MapControllers();
 app.MapHub<NotificationHub>("/hubs/notifications");
 
-// Ensure PostgreSQL constraints allow MANAGER role, CLEANING status & purge requested stale orders
+// Ensure PostgreSQL tables_status_check allows CLEANING status & purge requested stale orders
 try
 {
     using var scope = app.Services.CreateScope();
@@ -196,47 +222,11 @@ try
     {
         await db.Database.ExecuteSqlRawAsync(@"
             DO $$
-            DECLARE
-                r RECORD;
             BEGIN
-                -- 1. Ensure users_role_check is dropped across all schemas
-                FOR r IN (
-                    SELECT n.nspname AS schemaname, c.conname
-                    FROM pg_constraint c
-                    JOIN pg_namespace n ON n.oid = c.connamespace
-                    WHERE c.conname = 'users_role_check'
-                ) LOOP
-                    EXECUTE 'ALTER TABLE ' || quote_ident(r.schemaname) || '.users DROP CONSTRAINT IF EXISTS ' || quote_ident(r.conname);
-                END LOOP;
-
-                BEGIN
-                    ALTER TABLE restaurant_pos.users DROP CONSTRAINT IF EXISTS users_role_check;
-                EXCEPTION WHEN OTHERS THEN NULL;
-                END;
-
-                BEGIN
-                    ALTER TABLE public.users DROP CONSTRAINT IF EXISTS users_role_check;
-                EXCEPTION WHEN OTHERS THEN NULL;
-                END;
-
-                -- 2. Ensure tables_status_check allows CLEANING
-                BEGIN
-                    ALTER TABLE restaurant_pos.tables DROP CONSTRAINT IF EXISTS tables_status_check;
-                    ALTER TABLE restaurant_pos.tables ADD CONSTRAINT tables_status_check CHECK (status IN ('AVAILABLE', 'RESERVED', 'OCCUPIED', 'WAITING_FOR_CLEANING', 'CLEANING', 'OUT_OF_SERVICE'));
-                EXCEPTION WHEN OTHERS THEN NULL;
-                END;
-
-                BEGIN
-                    ALTER TABLE public.tables DROP CONSTRAINT IF EXISTS tables_status_check;
-                    ALTER TABLE public.tables ADD CONSTRAINT tables_status_check CHECK (status IN ('AVAILABLE', 'RESERVED', 'OCCUPIED', 'WAITING_FOR_CLEANING', 'CLEANING', 'OUT_OF_SERVICE'));
-                EXCEPTION WHEN OTHERS THEN NULL;
-                END;
-
-                -- 3. Ensure public.app_role enum has MANAGER if enum is present
-                BEGIN
-                    ALTER TYPE public.app_role ADD VALUE IF NOT EXISTS 'MANAGER';
-                EXCEPTION WHEN OTHERS THEN NULL;
-                END;
+                ALTER TABLE restaurant_pos.tables DROP CONSTRAINT IF EXISTS tables_status_check;
+                ALTER TABLE restaurant_pos.tables ADD CONSTRAINT tables_status_check CHECK (status IN ('AVAILABLE', 'RESERVED', 'OCCUPIED', 'WAITING_FOR_CLEANING', 'CLEANING', 'OUT_OF_SERVICE'));
+            EXCEPTION WHEN OTHERS THEN
+                NULL;
             END $$;
         ");
     }
@@ -262,7 +252,7 @@ try
 {
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<RestaurantDbContext>();
-    await UserProvisioning.EnsureDefaultDataAsync(db);
+    await UserProvisioning.EnsureDefaultDataAsync(db, allowDevSeedCredentials: app.Environment.IsDevelopment());
     await DiningAreaProvisioning.EnsureDefaultDiningAreasAsync(db);
 }
 catch (Exception exception)

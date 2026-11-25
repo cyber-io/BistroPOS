@@ -9,7 +9,7 @@ import PosShell from '../../components/pos/PosShell';
 import TableFloorPlan, { FloorPlanTable, getDiningAreaTables } from '../../components/pos/TableFloorPlan';
 import { Badge, Empty, Spinner, Modal, money, time, label } from '../../components/pos/PosUI';
 import ErrorBoundary from '../../components/common/ErrorBoundary';
-import { tableLabel, tableTitle } from '../../services/tablePresentation';
+import { getPublicOrigin, getTableQrUrl, tableLabel, tableTitle } from '../../services/tablePresentation';
 import { cleanPhone, getRescheduleNotificationText, getWhatsAppUrl, getSmsUrl, getCancelWhatsAppUrl, getCancelSmsUrl } from '../../services/notificationHelpers';
 
 const DONE = ['DELIVERED', 'PICKED_UP', 'CANCELLED', 'CONFIRMATION_TIMEOUT'];
@@ -145,7 +145,7 @@ function Totals({ order }) { return <div className="pos-detail-totals"><div><spa
 function OrderCard({ order, onDetails, onPay, paid = false }) {
   const items = order?.items || [];
   return (
-    <article className="pos-order-card">
+    <article className="pos-order-card" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div className="pos-order-card-top">
         <div style={{ width: '100%' }}>
           <div className="pos-order-number">
@@ -164,7 +164,7 @@ function OrderCard({ order, onDetails, onPay, paid = false }) {
           </div>
         </div>
       </div>
-      <div className="pos-order-items">
+      <div className="pos-order-items" style={{ flex: 1 }}>
         {items.slice(0, 3).map((i, idx) => (
           <div key={idx}>
             <span>{i.quantity}×</span>
@@ -174,7 +174,7 @@ function OrderCard({ order, onDetails, onPay, paid = false }) {
         ))}
         {items.length > 3 && <div><span>+{items.length - 3} more items</span></div>}
       </div>
-      <div className="pos-order-total">
+      <div className="pos-order-total" style={{ marginTop: 'auto' }}>
         <span>Total</span>
         <strong>{money(order?.total)}</strong>
       </div>
@@ -191,6 +191,56 @@ function OrderCard({ order, onDetails, onPay, paid = false }) {
     </article>
   );
 }
+
+const SECTION_FILTERS = {
+  orders: ['ALL', 'ACTIVE', 'READY', 'COMPLETED', 'CANCELLED', 'DINE_IN_QR', 'DELIVERY', 'TAKEAWAY'],
+  history: ['ALL', 'COMPLETED', 'CANCELLED', 'DINE_IN_QR', 'DELIVERY', 'TAKEAWAY'],
+  tables: ['ALL', 'AVAILABLE', 'OCCUPIED', 'RESERVED', 'WAITING_FOR_CLEANING'],
+  reservations: ['ALL', 'CONFIRMED', 'ARRIVED', 'SEATED', 'COMPLETED', 'CANCELLED'],
+  inventory: ['ALL', 'AVAILABLE', 'SOLD_OUT']
+};
+
+const getSavedFilter = (sec) => {
+  try {
+    const saved = localStorage.getItem(`bistro_pos_filter_${sec}`);
+    if (saved && SECTION_FILTERS[sec]?.includes(saved)) {
+      return saved;
+    }
+  } catch {
+    // ignore
+  }
+  return 'ALL';
+};
+
+const saveFilter = (sec, value) => {
+  try {
+    if (value) {
+      localStorage.setItem(`bistro_pos_filter_${sec}`, value);
+    }
+  } catch {
+    // ignore
+  }
+};
+
+const getSavedTableArea = () => {
+  try {
+    const saved = localStorage.getItem('bistro_pos_table_area');
+    if (saved && ['everyday', 'family', 'banquet', 'rooftop', 'bar'].includes(saved)) {
+      return saved;
+    }
+  } catch {
+    // ignore
+  }
+  return 'everyday';
+};
+
+const saveTableArea = (area) => {
+  try {
+    localStorage.setItem('bistro_pos_table_area', area);
+  } catch {
+    // ignore
+  }
+};
 
 function createSessionObj(type, orders, tableInfo, paidIds) {
   const firstOrder = orders[0];
@@ -709,7 +759,6 @@ export default function PosWorkspace() {
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('ALL');
-  const [staffRoleFilter, setStaffRoleFilter] = useState('ALL');
   const [tableArea, setTableArea] = useState('everyday');
   const [category, setCategory] = useState('ALL');
   const [dashboardDate, setDashboardDate] = useState(today());
@@ -718,24 +767,10 @@ export default function PosWorkspace() {
   const [historyDate, setHistoryDate] = useState(today());
   const [dialog, setDialog] = useState(null);
   const [selected, setSelected] = useState(null);
-  const [reservationEdit, setReservationEdit] = useState(null);
   const [editingCategory, setEditingCategory] = useState(null);
   const [editingItem, setEditingItem] = useState(null);
-
-  // Unread menu notification dot states
-  const [newOrderAlert, setNewOrderAlert] = useState(false);
-  const [newReservationAlert, setNewReservationAlert] = useState(false);
-  const [newTableAlert, setNewTableAlert] = useState(false);
-  const [lastViewedOrdersTime, setLastViewedOrdersTime] = useState(() => Date.now());
-  const [lastViewedReservationsTime, setLastViewedReservationsTime] = useState(() => Date.now());
-  const [lastViewedTablesTime, setLastViewedTablesTime] = useState(() => Date.now());
-
-  useEffect(() => {
-    const params = new URLSearchParams(search);
-    if (params.get('action') === 'add-manager') {
-      setDialog('add-manager');
-    }
-  }, [search]);
+  const [reservationEdit, setReservationEdit] = useState(null);
+  const [staffRoleFilter, setStaffRoleFilter] = useState('ALL');
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -779,16 +814,10 @@ export default function PosWorkspace() {
   useEffect(() => {
     load();
     const unsub = subscribeRealtimeEvents((type, payload) => {
-      if (type === 'NEW_ORDER') {
-        if (section !== 'orders') setNewOrderAlert(true);
-      } else if (type === 'NEW_TABLE_RESERVATION') {
-        if (section !== 'reservations') setNewReservationAlert(true);
+      if (type === 'NEW_TABLE_RESERVATION') {
         addToast(`New booking: ${payload?.bookingId || ''} (${payload?.customerName || 'Guest'}, ${tableTitle(payload)})`, 'info');
-      } else if (type === 'TABLE_STATUS_UPDATED' || type === 'CUSTOMER_HELP_REQUEST') {
-        if (section !== 'tables') setNewTableAlert(true);
-        if (type === 'TABLE_STATUS_UPDATED' && payload?.status === 'RESERVED') {
-          addToast(`${tableTitle(payload?.table || payload)} is now RESERVED for ${payload?.customerName || 'guest'} (10m before arrival)`, 'warning');
-        }
+      } else if (type === 'TABLE_STATUS_UPDATED' && payload?.status === 'RESERVED') {
+        addToast(`${tableTitle(payload?.table || payload)} is now RESERVED for ${payload?.customerName || 'guest'} (10m before arrival)`, 'warning');
       }
       load(true);
     });
@@ -804,21 +833,7 @@ export default function PosWorkspace() {
     };
   }, [load, addToast, section]);
 
-  useEffect(() => {
-    setFilter('ALL');
-    setQuery('');
-    setCategory('ALL');
-    if (section === 'orders') {
-      setNewOrderAlert(false);
-      setLastViewedOrdersTime(Date.now());
-    } else if (section === 'reservations') {
-      setNewReservationAlert(false);
-      setLastViewedReservationsTime(Date.now());
-    } else if (section === 'tables') {
-      setNewTableAlert(false);
-      setLastViewedTablesTime(Date.now());
-    }
-  }, [section]);
+  useEffect(() => { setFilter('ALL'); setQuery(''); setCategory('ALL'); }, [section]);
 
   const paidIds = useMemo(() => new Set(data.orders.filter(o => o.paymentStatus === 'PAID' || data.payments.filter(p => p.orderId === o.orderId && p.status === 'PAID').reduce((n, p) => n + Number(p.amount), 0) >= Number(o.total)).map(o => o.orderId)), [data.orders, data.payments]);
   const active = data.orders.filter(o => !DONE.includes(o.status));
@@ -909,6 +924,19 @@ export default function PosWorkspace() {
       () => api.updateOrderStatus(orderId, 'DELIVERED'),
       'Order marked as delivered to customer.'
     );
+  };
+  const handleToggleStaffStatus = async (member) => {
+    const nextStatus = member.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+    try {
+      setBusy(true);
+      await api.updateStaffStatus(member.userId, nextStatus);
+      addToast(`${member.name} marked as ${nextStatus.toLowerCase()}`, 'success');
+      await load(true);
+    } catch (err) {
+      addToast(err.message || 'Failed to update staff status', 'error');
+    } finally {
+      setBusy(false);
+    }
   };
   const newReservation = () => { setReservationEdit(null); setDialog('reservation'); };
   const tableOrders = t => data.orders.filter(o => o.tableId === t.tableId && !['CANCELLED', 'CONFIRMATION_TIMEOUT'].includes(o.status) && (!DONE.includes(o.status) || !paidIds.has(o.orderId)));
@@ -1084,53 +1112,30 @@ export default function PosWorkspace() {
     .filter(o => `${o.orderNumber} ${o.customerName} ${o.customerPhone || ''} ${o.tableNumber ? `${tableLabel(o)} Table ${o.tableNumber}` : ''}`.toLowerCase().includes(query.toLowerCase()));
 
   const filteredStaff = useMemo(() => {
-    const list = Array.isArray(data.staff) ? data.staff : [];
-    return list.filter(member => {
-      const matchRole = staffRoleFilter === 'ALL' || member.role === staffRoleFilter;
-      const q = String(query || '').toLowerCase().trim();
-      const matchQuery = !q || (
-        String(member.name || '').toLowerCase().includes(q) ||
-        String(member.email || '').toLowerCase().includes(q) ||
-        String(member.phone || '').toLowerCase().includes(q) ||
-        String(member.role || '').toLowerCase().includes(q)
+    let list = Array.isArray(data.staff) ? data.staff : [];
+    if (staffRoleFilter !== 'ALL') {
+      list = list.filter(s => s.role === staffRoleFilter);
+    }
+    if (query?.trim()) {
+      const q = query.trim().toLowerCase();
+      list = list.filter(s =>
+        (s.name || '').toLowerCase().includes(q) ||
+        (s.email || '').toLowerCase().includes(q) ||
+        (s.phone || '').toLowerCase().includes(q) ||
+        (s.role || '').toLowerCase().includes(q)
       );
-      return matchRole && matchQuery;
-    });
+    }
+    return list;
   }, [data.staff, staffRoleFilter, query]);
 
-  const handleToggleStaffStatus = async (member) => {
-    const nextStatus = member.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE';
-    const actionLabel = nextStatus === 'ACTIVE' ? 'activate' : 'deactivate';
-    if (!window.confirm(`Are you sure you want to ${actionLabel} ${member.name} (${member.role})?`)) {
-      return;
-    }
-    setBusy(true);
-    try {
-      await api.updateStaffStatus(member.userId, nextStatus);
-      addToast(`${member.name} is now ${nextStatus}`, 'success');
-      await load(true);
-    } catch (err) {
-      addToast(err.message || `Failed to update status for ${member.name}`, 'error');
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const menuDots = useMemo(() => ({
-    '/pos/orders': section !== 'orders' && (
-      newOrderAlert ||
-      data.orders.some(o => o.status === 'NEW' || (o.createdAt && new Date(o.createdAt).getTime() > lastViewedOrdersTime))
-    ),
-    '/pos/reservations': section !== 'reservations' && (
-      newReservationAlert ||
-      data.reservations.some(r => r.createdAt && new Date(r.createdAt).getTime() > lastViewedReservationsTime)
-    ),
+    '/pos/orders': section !== 'orders' && data.orders.some(o => o.status === 'NEW'),
+    '/pos/reservations': section !== 'reservations' && data.reservations.some(r => r.status === 'PENDING'),
     '/pos/tables': section !== 'tables' && (
-      newTableAlert ||
       data.tables.some(t => t.status === 'WAITING_FOR_CLEANING') ||
       data.help.some(h => h.status === 'PENDING')
     ),
-  }), [section, newOrderAlert, newReservationAlert, newTableAlert, lastViewedOrdersTime, lastViewedReservationsTime, data.orders, data.reservations, data.tables, data.help]);
+  }), [section, data.orders, data.reservations, data.tables, data.help]);
 
   return (
     <PosShell alertCount={openIssues.length + openHelp.length} onAlerts={() => navigate('/pos/notifications')} menuDots={menuDots}>
@@ -1549,41 +1554,14 @@ export default function PosWorkspace() {
                         📅 Showing: <strong style={{ color: 'var(--p-blue)' }}>{reservationDate ? (reservationDate === today() ? 'Today’s reservations' : reservationDate === yesterday() ? 'Yesterday’s reservations' : reservationDate === tomorrow() ? 'Tomorrow’s reservations' : `Reservations for ${shortDate(reservationDate)}`) : 'All reservation history'}</strong>
                         {visibleReservations.length > 0 ? ` (${visibleReservations.length} bookings)` : ''}
                       </span>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <button className={`pos-button small ${reservationDate === today() ? 'primary' : ''}`} onClick={() => setReservationDate(today())}>
-                          Today{resDateCounts.todayCount > 0 ? ` (${resDateCounts.todayCount})` : ''}
-                        </button>
-                        <button className={`pos-button small ${reservationDate === tomorrow() ? 'primary' : ''}`} onClick={() => setReservationDate(tomorrow())}>
-                          Tomorrow{resDateCounts.tomorrowCount > 0 ? ` (${resDateCounts.tomorrowCount})` : ''}
-                        </button>
-                        <button className={`pos-button small ${!reservationDate ? 'primary' : ''}`} onClick={() => setReservationDate('')}>
-                          All bookings{resDateCounts.totalCount > 0 ? ` (${resDateCounts.totalCount})` : ''}
-                        </button>
-                      </div>
+                      {reservationDate ? (
+                        <button className="pos-button small" onClick={() => setReservationDate('')}>View all history</button>
+                      ) : (
+                        <button className="pos-button small" onClick={() => setReservationDate(today())}>Show today only</button>
+                      )}
                     </div>
-                    <div className="pos-tabs">
-                      {[
-                        { id: 'ALL', name: 'All reservations' },
-                        { id: 'CONFIRMED', name: 'Confirmed' },
-                        { id: 'ARRIVED', name: 'Arrived' },
-                        { id: 'SEATED', name: 'Seated' },
-                        { id: 'COMPLETED', name: 'Completed' },
-                        { id: 'CANCELLED', name: 'Cancelled' },
-                      ].map(({ id, name }) => {
-                        const count = resStatusCounts[id] || 0;
-                        return (
-                          <button
-                            key={id}
-                            className={`pos-tab ${filter === id ? 'active' : ''}`}
-                            onClick={() => setFilter(id)}
-                          >
-                            {name}
-                            {count > 0 && <span className="pos-count">{count}</span>}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    {visibleReservations.length ? (
+                    <div className="pos-tabs">{['ALL', 'CONFIRMED', 'ARRIVED', 'SEATED', 'COMPLETED', 'CANCELLED'].map(id => <button key={id} className={`pos-tab ${filter === id ? 'active' : ''}`} onClick={() => setFilter(id)}>{id === 'ALL' ? 'All reservations' : label(id)}</button>)}</div>
+                    {data.reservations.filter(r => (!reservationDate || r.reservationDate?.slice(0, 10) === reservationDate) && (filter === 'ALL' || r.status === filter)).length ? (
                       <div className="pos-data-wrap">
                         <table className="pos-data-table">
                           <thead><tr><th>Reservation</th><th>Guest</th><th>Date & time</th><th>Table / party</th><th>Status</th><th>Actions</th></tr></thead>
@@ -1783,7 +1761,9 @@ export default function PosWorkspace() {
                         <p>{i.description}</p>
                         <footer>
                           <span>{time(i.createdAt)} · {i.orderNumber || i.orderId?.slice(0, 8)}</span>
-                          <button className="pos-button small" onClick={() => { setSelected(i); setDialog('resolve-issue'); }}>Resolve issue</button>
+                          {currentUser?.role !== 'RECEPTIONIST' && (
+                            <button className="pos-button small" onClick={() => { setSelected(i); setDialog('resolve-issue'); }}>Resolve issue</button>
+                          )}
                         </footer>
                       </article>
                     ))}
@@ -1793,10 +1773,8 @@ export default function PosWorkspace() {
                         <p>{h.message}</p>
                         <footer>
                           <span>{h.assignedWaiterName ? `Assigned to ${h.assignedWaiterName}` : `Requested at ${time(h.createdAt)}`}</span>
-                          {h.status === 'PENDING' ? (
+                          {h.status === 'PENDING' && (
                             <button className="pos-button small primary" disabled={busy} onClick={() => run(() => api.acceptHelpRequest(h.requestId, currentUser.name), 'Assistance assigned')}>Accept request</button>
-                          ) : (
-                            <button className="pos-button small" disabled={busy} onClick={() => run(() => api.resolveHelpRequest(h.requestId), 'Help request resolved')}>Mark resolved</button>
                           )}
                         </footer>
                       </article>
@@ -4140,7 +4118,6 @@ function OrderDetails({ order, paid, payments, restaurant, onClose, onPay, onUpd
       onUpdated();
     }
   };
-
   const items = order?.items || [];
   return (
     <Modal title={isSession ? `Session Details – ${order.tableName || 'Table'}` : "Order details"} onClose={onClose}>
@@ -4403,7 +4380,7 @@ function PaymentDialog({ order, restaurant, onClose, onPaid }) {
   const [key, setKey] = useState(() => uniqueKey());
 
   const upiId = 'bistroandbloom@okaxis';
-  const billRef = order?.sessionId || order?.orderNumber || (order?.tableNumber ? `Table A${order.tableNumber}` : 'Order');
+  const billRef = order?.sessionId || order?.orderNumber || (order?.tableNumber ? `Table ${order.tableNumber}` : 'Order');
   const upiUri = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(restaurant?.name || 'Bistro & Bloom')}&am=${due.toFixed(2)}&cu=INR&tn=${encodeURIComponent(`Bill ${billRef}`)}`;
 
   useEffect(() => {
@@ -4689,17 +4666,9 @@ function PaymentDialog({ order, restaurant, onClose, onPaid }) {
 function TableDialog({ restaurant, table, orders, reservations, onClose, busy, run, onOrder, onNew, onPay, paidIds, canManage, onDeleted }) {
   const [qr, setQr] = useState(false);
   const [qrImage, setQrImage] = useState('');
-  const site = restaurant?.settings?.publicWebsiteUrl || import.meta.env.VITE_PUBLIC_SITE_URL || window.location.origin;
-  let publicOrigin = '';
-  try {
-    const url = new URL(site);
-    if (['http:', 'https:'].includes(url.protocol)) publicOrigin = url.origin;
-  } catch {
-    publicOrigin = window.location.origin;
-  }
+  const publicOrigin = getPublicOrigin(restaurant);
   const isLocalHost = Boolean(publicOrigin && ['localhost', '127.0.0.1', '[::1]'].includes(new URL(publicOrigin).hostname));
-  const resId = table?.restaurantId || restaurant?.restaurantId || 'a0000000-0000-0000-0000-000000000001';
-  const qrUrl = publicOrigin ? `${publicOrigin}/qr/${resId}/${table.tableId}` : '';
+  const qrUrl = getTableQrUrl(restaurant, table);
 
   useEffect(() => {
     if (qrUrl) {
@@ -4809,8 +4778,22 @@ function TableDialog({ restaurant, table, orders, reservations, onClose, busy, r
                   <Printer /> Print QR
                 </button>
               </div>
-              <a className="pos-text-link" style={{ marginTop: 12, display: 'inline-block' }} href={qrUrl} target="_blank" rel="noreferrer">
-                Open table menu <ArrowUpRight size={11} />
+              <a
+                className="pos-text-link"
+                style={{
+                  marginTop: 12,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 4,
+                  whiteSpace: 'nowrap'
+                }}
+                href={`/qr/${table.restaurantId || restaurant?.restaurantId || 'a0000000-0000-0000-0000-000000000001'}/${table.tableId}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <span>Open table menu</span>
+                <ArrowUpRight size={12} style={{ flexShrink: 0 }} />
               </a>
               {isLocalHost && (
                 <p style={{ fontSize: 10, color: 'var(--p-muted)', marginTop: 8 }}>
