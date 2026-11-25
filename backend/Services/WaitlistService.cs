@@ -180,8 +180,8 @@ public class WaitlistService : IWaitlistService
             new { entry.WaitlistId, entry.CustomerName }
         );
 
-        _logger.LogInformation("Guest {Name} ({Phone}) alerted that table is ready for party size {Size}.",
-            entry.CustomerName, entry.CustomerPhone, entry.PartySize);
+        _logger.LogInformation("Guest notification dispatched for WaitlistId {WaitlistId}, party size {Size}.",
+            entry.WaitlistId, entry.PartySize);
 
         return true;
     }
@@ -189,10 +189,14 @@ public class WaitlistService : IWaitlistService
     public async Task<bool> SeatGuestAsync(Guid waitlistId, Guid tableId)
     {
         var entry = await _db.WalkInWaitlists.FindAsync(waitlistId);
-        if (entry == null) return false;
+        if (entry == null || entry.Status is "SEATED" or "CANCELLED") return false;
 
         var table = await _db.Tables.FindAsync(tableId);
-        if (table == null || table.Status == TableStatuses.OutOfService) return false;
+        if (table == null || table.RestaurantId != entry.RestaurantId ||
+            table.Status is TableStatuses.OutOfService or TableStatuses.Occupied)
+        {
+            return false;
+        }
 
         entry.Status = "SEATED";
         entry.SeatedTableId = tableId;

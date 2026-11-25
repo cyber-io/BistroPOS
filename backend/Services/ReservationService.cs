@@ -134,30 +134,29 @@ public class ReservationService(RestaurantDbContext db, IOptions<BusinessRulesOp
         var digits = new string(raw.Where(char.IsDigit).ToArray());
         var last10 = digits.Length >= 10 ? digits[^10..] : digits;
 
-        // 1. Direct or partial booking ID lookup
-        var reservation = await db.Reservations
-            .Include(r => r.Table)
-            .Where(r => r.BookingId.ToUpper() == upper
-                     || r.BookingId.ToUpper() == "RES-" + upper
-                     || r.BookingId.ToUpper().EndsWith(upper))
-            .OrderByDescending(r => r.CreatedAt)
-            .FirstOrDefaultAsync();
-
-        if (reservation != null) return Map(reservation, reservation.Table?.TableNumber);
-
-        // 2. Phone number lookup (supports raw, last 10 digits, formatted phones like +91 95168 51825)
-        if (!string.IsNullOrEmpty(digits))
+        // Direct booking ID match or valid 10-digit phone lookup only (no arbitrary substring enumeration)
+        Reservation? reservation = null;
+        if (upper.StartsWith("RES-") || raw.Length >= 6)
         {
-            // Direct DB match (raw or last10 substring)
             reservation = await db.Reservations
                 .Include(r => r.Table)
-                .Where(r => r.CustomerPhone == raw || (last10.Length >= 6 && r.CustomerPhone.Contains(last10)))
+                .Where(r => r.BookingId.ToUpper() == upper || r.BookingId.ToUpper() == "RES-" + upper)
+                .OrderByDescending(r => r.CreatedAt)
+                .FirstOrDefaultAsync();
+
+            if (reservation != null) return Map(reservation, reservation.Table?.TableNumber);
+        }
+
+        if (last10.Length >= 10)
+        {
+            reservation = await db.Reservations
+                .Include(r => r.Table)
+                .Where(r => r.CustomerPhone == raw || r.CustomerPhone.Contains(last10))
                 .OrderByDescending(r => r.CreatedAt)
                 .FirstOrDefaultAsync();
 
             if (reservation != null) return Map(reservation, reservation.Table?.TableNumber);
 
-            // In-memory digit comparison for numbers formatted with spaces or country codes in DB
             var recent = await db.Reservations
                 .Include(r => r.Table)
                 .OrderByDescending(r => r.CreatedAt)
@@ -167,22 +166,8 @@ public class ReservationService(RestaurantDbContext db, IOptions<BusinessRulesOp
             reservation = recent.FirstOrDefault(r => {
                 if (string.IsNullOrWhiteSpace(r.CustomerPhone)) return false;
                 var phoneDigits = new string(r.CustomerPhone.Where(char.IsDigit).ToArray());
-                return phoneDigits == digits 
-                    || (last10.Length >= 6 && phoneDigits.EndsWith(last10))
-                    || (phoneDigits.Length >= 10 && last10.EndsWith(phoneDigits[^10..]));
+                return phoneDigits == digits || phoneDigits.EndsWith(last10) || (phoneDigits.Length >= 10 && last10.EndsWith(phoneDigits[^10..]));
             });
-
-            if (reservation != null) return Map(reservation, reservation.Table?.TableNumber);
-        }
-
-        // 3. Fallback name lookup if query is not numeric
-        if (digits.Length < 4 && raw.Length >= 3)
-        {
-            reservation = await db.Reservations
-                .Include(r => r.Table)
-                .Where(r => r.CustomerName.ToLower().Contains(raw.ToLower()))
-                .OrderByDescending(r => r.CreatedAt)
-                .FirstOrDefaultAsync();
 
             if (reservation != null) return Map(reservation, reservation.Table?.TableNumber);
         }

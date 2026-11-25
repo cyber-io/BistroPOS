@@ -9,8 +9,8 @@ import PosShell from '../../components/pos/PosShell';
 import TableFloorPlan, { FloorPlanTable, getDiningAreaTables } from '../../components/pos/TableFloorPlan';
 import { Badge, Empty, Spinner, Modal, money, time, label } from '../../components/pos/PosUI';
 import ErrorBoundary from '../../components/common/ErrorBoundary';
-import { tableLabel, tableTitle } from '../../services/tablePresentation';
-import { cleanPhone, getRescheduleNotificationText, getWhatsAppUrl, getSmsUrl } from '../../services/notificationHelpers';
+import { getPublicOrigin, getTableQrUrl, tableLabel, tableTitle } from '../../services/tablePresentation';
+import { cleanPhone, getRescheduleNotificationText, getWhatsAppUrl, getSmsUrl, getCancelWhatsAppUrl, getCancelSmsUrl } from '../../services/notificationHelpers';
 
 const DONE = ['DELIVERED', 'PICKED_UP', 'CANCELLED', 'CONFIRMATION_TIMEOUT'];
 const SOURCES = { DINE_IN_QR: 'Dine in', TAKEAWAY: 'Takeaway', DELIVERY: 'Delivery' };
@@ -767,6 +767,8 @@ export default function PosWorkspace() {
   const [historyDate, setHistoryDate] = useState(today());
   const [dialog, setDialog] = useState(null);
   const [selected, setSelected] = useState(null);
+  const [editingCategory, setEditingCategory] = useState(null);
+  const [editingItem, setEditingItem] = useState(null);
   const [reservationEdit, setReservationEdit] = useState(null);
   const [staffRoleFilter, setStaffRoleFilter] = useState('ALL');
 
@@ -812,16 +814,10 @@ export default function PosWorkspace() {
   useEffect(() => {
     load();
     const unsub = subscribeRealtimeEvents((type, payload) => {
-      if (type === 'NEW_ORDER') {
-        if (section !== 'orders') setNewOrderAlert(true);
-      } else if (type === 'NEW_TABLE_RESERVATION') {
-        if (section !== 'reservations') setNewReservationAlert(true);
+      if (type === 'NEW_TABLE_RESERVATION') {
         addToast(`New booking: ${payload?.bookingId || ''} (${payload?.customerName || 'Guest'}, ${tableTitle(payload)})`, 'info');
-      } else if (type === 'TABLE_STATUS_UPDATED' || type === 'CUSTOMER_HELP_REQUEST') {
-        if (section !== 'tables') setNewTableAlert(true);
-        if (type === 'TABLE_STATUS_UPDATED' && payload?.status === 'RESERVED') {
-          addToast(`${tableTitle(payload?.table || payload)} is now RESERVED for ${payload?.customerName || 'guest'} (10m before arrival)`, 'warning');
-        }
+      } else if (type === 'TABLE_STATUS_UPDATED' && payload?.status === 'RESERVED') {
+        addToast(`${tableTitle(payload?.table || payload)} is now RESERVED for ${payload?.customerName || 'guest'} (10m before arrival)`, 'warning');
       }
       load(true);
     });

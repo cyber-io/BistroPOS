@@ -8,7 +8,7 @@ public record RegisterRequest(
     [Required, MaxLength(255)] string Name,
     [Required, EmailAddress, MaxLength(255)] string Email,
     [MaxLength(30)] string? Phone,
-    [Required, MinLength(6)] string Password,
+    [Required, MinLength(8)] string Password,
     string? Role,
     Guid? RestaurantId
 );
@@ -192,9 +192,9 @@ public record TableDto(
 )
 {
     // Capture display metadata before a public response removes its private QR identifier.
-    public string AreaName { get; init; } = DiningLayoutCatalog.Area(Capacity, QrIdentifier);
+    public string AreaName { get; init; } = DiningLayoutCatalog.Area(Capacity, QrIdentifier, TableNumber);
     public string DisplayName { get; init; } = DiningLayoutCatalog.DisplayName(TableNumber, QrIdentifier);
-    public string SeatingStyle { get; init; } = DiningLayoutCatalog.SeatingStyle(Capacity, QrIdentifier);
+    public string SeatingStyle { get; init; } = DiningLayoutCatalog.SeatingStyle(Capacity, QrIdentifier, TableNumber);
 }
 
 public record UpdateTablePositionDto(
@@ -379,7 +379,8 @@ public record PaymentDto(
     DateTime CreatedAt,
     decimal TipAmount = 0,
     int SplitCount = 1,
-    string SplitType = "FULL"
+    string SplitType = "FULL",
+    string? MockSignature = null
 );
 
 public record WebhookPayloadDto(
@@ -448,7 +449,7 @@ public record CreateStaffRequest(
     [Required, EmailAddress, MaxLength(255)] string Email,
     [MaxLength(30)] string? Phone,
     [Required, MaxLength(50)] string Role,
-    [Required, MinLength(6)] string Password,
+    [Required, MinLength(8)] string Password,
     Guid? RestaurantId = null
 );
 
@@ -465,7 +466,7 @@ public record CreateManagerRequest(
     [Required, MaxLength(150)] string Name,
     [Required, EmailAddress, MaxLength(255)] string Email,
     [MaxLength(30)] string? Phone,
-    [Required, MinLength(6)] string Password
+    [Required, MinLength(8)] string Password
 );
 
 public record StaffDto(
@@ -517,7 +518,8 @@ public record EarnLoyaltyPointsDto(
 public record RedeemLoyaltyPointsDto(
     Guid RestaurantId,
     [Required] string CustomerPhone,
-    int PointsToRedeem
+    int PointsToRedeem,
+    Guid? OrderId = null
 );
 
 public record CustomerFeedbackDto(

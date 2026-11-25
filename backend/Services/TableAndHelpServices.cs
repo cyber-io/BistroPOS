@@ -27,33 +27,73 @@ public class TableService : ITableService
             .OrderBy(t => t.TableNumber)
             .ToListAsync();
 
-        if (tables.Count == 0 && await _db.Restaurants.AnyAsync(r => r.RestaurantId == restaurantId))
+        var needsSave = false;
+        var missingStandardTables = tables.Count == 0;
+        var missingLayoutDefs = DiningLayoutCatalog.Definitions.Where(def => !tables.Any(t => t.TableNumber == def.TableNumber)).ToList();
+
+        if ((missingStandardTables || missingLayoutDefs.Count > 0) && await _db.Restaurants.AnyAsync(r => r.RestaurantId == restaurantId))
         {
-            var defaultCapacities = new[] { 2, 2, 4, 4, 4, 6, 6, 8, 2, 4, 4, 8 };
-            for (int i = 1; i <= 12; i++)
+            if (missingStandardTables)
             {
-                _db.Tables.Add(new TableEntity
+                var defaultCapacities = new[] { 2, 2, 4, 4, 4, 6, 6, 8, 2, 4, 4, 8 };
+                for (int i = 1; i <= 12; i++)
                 {
-                    TableId = Guid.NewGuid(),
+                    var newTbl = new TableEntity
+                    {
+                        TableId = Guid.NewGuid(),
+                        RestaurantId = restaurantId,
+                        TableNumber = i,
+                        Capacity = defaultCapacities[i - 1],
+                        Status = TableStatuses.Available,
+                        QrIdentifier = $"QR_{restaurantId:N}_TBL{i:D02}",
+                        DiningArea = (i == 6 || i == 7 || i == 8 || i == 12) ? "group" : "everyday",
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow
+                    };
+                    _db.Tables.Add(newTbl);
+                }
+                needsSave = true;
+            }
+
+            // Ensure Family dining tables (101-104) and Party Hall (201) are provisioned for this restaurant
+            foreach (var def in missingLayoutDefs)
+            {
+                var qrId = DiningLayoutCatalog.QrIdentifier(restaurantId, def);
+                var newId = restaurantId == DiningLayoutCatalog.DefaultRestaurantId
+                    ? def.TableId
+                    : Guid.NewGuid();
+
+                var newTbl = new TableEntity
+                {
+                    TableId = newId,
                     RestaurantId = restaurantId,
-                    TableNumber = i,
-                    Capacity = defaultCapacities[i - 1],
+                    TableNumber = def.TableNumber,
+                    Capacity = def.Capacity,
                     Status = TableStatuses.Available,
-                    QrIdentifier = $"QR_{restaurantId:N}_TBL{i:D02}",
+                    QrIdentifier = qrId,
+                    DiningArea = def.SeatingStyle == "hall" ? "party" : "family",
+                    Shape = def.SeatingStyle == "hall" ? "HALL" : "RECTANGLE",
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
-                });
+                };
+                _db.Tables.Add(newTbl);
+                needsSave = true;
             }
+        }
+
+        if (needsSave)
+        {
             try
             {
                 await _db.SaveChangesAsync();
-                tables = await _db.Tables
-                    .Include(t => t.AssignedWaiter)
-                    .Where(t => t.RestaurantId == restaurantId)
-                    .OrderBy(t => t.TableNumber)
-                    .ToListAsync();
             }
             catch { }
+
+            tables = await _db.Tables
+                .Include(t => t.AssignedWaiter)
+                .Where(t => t.RestaurantId == restaurantId)
+                .OrderBy(t => t.TableNumber)
+                .ToListAsync();
         }
 
         return tables.Select(t => new TableDto(
@@ -68,8 +108,8 @@ public class TableService : ITableService
             t.AssignedWaiter?.Name,
             t.PositionX,
             t.PositionY,
-            t.Shape ?? "SQUARE",
-            t.DiningArea ?? "everyday"
+            t.Shape ?? (t.TableNumber == 201 ? "HALL" : t.TableNumber >= 101 ? "RECTANGLE" : "SQUARE"),
+            !string.IsNullOrEmpty(t.DiningArea) && t.DiningArea != "everyday" ? t.DiningArea : DiningLayoutCatalog.Area(t.Capacity, t.QrIdentifier, t.TableNumber)
         )).ToList();
     }
 
@@ -93,8 +133,8 @@ public class TableService : ITableService
             t.AssignedWaiter?.Name,
             t.PositionX,
             t.PositionY,
-            t.Shape ?? "SQUARE",
-            t.DiningArea ?? "everyday"
+            t.Shape ?? (t.TableNumber == 201 ? "HALL" : t.TableNumber >= 101 ? "RECTANGLE" : "SQUARE"),
+            !string.IsNullOrEmpty(t.DiningArea) && t.DiningArea != "everyday" ? t.DiningArea : DiningLayoutCatalog.Area(t.Capacity, t.QrIdentifier, t.TableNumber)
         );
     }
 

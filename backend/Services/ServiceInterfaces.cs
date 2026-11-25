@@ -75,7 +75,7 @@ public interface IPaymentService
     Task<PaymentDto> InitiatePaymentAsync(InitiatePaymentRequest request);
     Task<PaymentDto> RecordPaymentAsync(InitiatePaymentRequest request);
     Task<bool> VerifyPaymentAsync(VerifyPaymentRequest request);
-    Task<bool> ProcessWebhookAsync(WebhookPayloadDto payload);
+    Task<bool> ProcessWebhookAsync(WebhookPayloadDto payload, string? headerSignature = null);
     Task<SplitCalculationDto> CalculateSplitAsync(CalculateSplitRequest request);
     Task<bool> ConfirmCashPaymentAsync(Guid paymentId, Guid? staffUserId);
 }

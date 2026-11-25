@@ -85,7 +85,18 @@ public class LoyaltyService : ILoyaltyService
 
     public async Task<(bool Success, CustomerLoyaltyDto? Loyalty, decimal DiscountAmount, string Message)> RedeemPointsAsync(RedeemLoyaltyPointsDto request)
     {
+        if (request.PointsToRedeem <= 0 || request.PointsToRedeem > 50000)
+        {
+            return (false, null, 0, "Points to redeem must be between 1 and 50,000.");
+        }
+
         var cleanPhone = request.CustomerPhone.Trim();
+        await using var transaction = _db.Database.IsRelational() ? await _db.Database.BeginTransactionAsync() : null;
+        if (_db.Database.IsRelational())
+        {
+            await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtext({$"loyalty:{request.RestaurantId}:{cleanPhone}"}))");
+        }
+
         var record = await _db.CustomerLoyalties
             .FirstOrDefaultAsync(l => l.RestaurantId == request.RestaurantId && l.CustomerPhone == cleanPhone);
 
@@ -96,10 +107,24 @@ public class LoyaltyService : ILoyaltyService
 
         // 100 points = 50 INR discount (0.5 INR per point)
         var discountAmount = request.PointsToRedeem * 0.5m;
+        if (request.OrderId is Guid targetOrderId)
+        {
+            var order = await _db.Orders.FirstOrDefaultAsync(o => o.OrderId == targetOrderId && o.RestaurantId == request.RestaurantId);
+            if (order == null || order.Status == OrderStatuses.Cancelled)
+            {
+                return (false, null, 0, "Target order was not found or is cancelled.");
+            }
+            discountAmount = Math.Min(discountAmount, order.Total);
+            order.Discount = Math.Round(order.Discount + discountAmount, 2);
+            order.Total = Math.Max(0, Math.Round(order.Subtotal + order.Tax + order.DeliveryFee - order.Discount, 2));
+            order.UpdatedAt = DateTime.UtcNow;
+        }
+
         record.PointsBalance -= request.PointsToRedeem;
         record.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
+        if (transaction != null) await transaction.CommitAsync();
         await _audit.LogAsync(request.RestaurantId, null, "CUSTOMER", "LOYALTY_REDEEM", "customer_loyalty", new { Redeemed = request.PointsToRedeem, Discount = discountAmount });
 
         var dto = new CustomerLoyaltyDto(

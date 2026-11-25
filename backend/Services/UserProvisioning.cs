@@ -10,45 +10,46 @@ public static class UserProvisioning
     public static readonly Guid RoyalPalaceRestaurantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
     public static readonly Guid CityRestaurantId = Guid.Parse("22222222-2222-2222-2222-222222222222");
 
-    // BCrypt hash for 'Password@123'
-    public const string DefaultPasswordHash = "$2a$11$w8/q3m2eA8zJ5m7nB3r9TuG4h.8Z.u2v8kP.vYg/H8K1.p2wEa2XW";
+    private static readonly SemaphoreSlim _initLock = new(1, 1);
+    private static int _initialized;
+    public static bool IsInitialized => Volatile.Read(ref _initialized) == 1;
 
-    public static async Task EnsureDefaultDataAsync(RestaurantDbContext db)
+    private const string LegacyPlaceholderHash = "$2a$11$w8/q3m2eA8zJ5m7nB3r9TuG4h.8Z.u2v8kP.vYg/H8K1.p2wEa2XW";
+
+    public static async Task EnsureDefaultDataAsync(RestaurantDbContext db, bool allowDevSeedCredentials = false)
     {
+        if (IsInitialized) return;
+        await _initLock.WaitAsync();
         try
         {
+            if (IsInitialized) return;
+            if (db.Database.IsRelational() && !await db.Database.CanConnectAsync())
+                return;
             if (db.Database.IsNpgsql())
             {
                 try
                 {
                     await db.Database.ExecuteSqlRawAsync(@"
                         DO $$
-                        DECLARE
-                            r RECORD;
                         BEGIN
-                            FOR r IN (
-                                SELECT n.nspname AS schemaname, c.conname
-                                FROM pg_constraint c
-                                JOIN pg_namespace n ON n.oid = c.connamespace
-                                WHERE c.conname = 'users_role_check'
-                            ) LOOP
-                                EXECUTE 'ALTER TABLE ' || quote_ident(r.schemaname) || '.users DROP CONSTRAINT IF EXISTS ' || quote_ident(r.conname);
-                            END LOOP;
-
-                            BEGIN
-                                ALTER TABLE restaurant_pos.users DROP CONSTRAINT IF EXISTS users_role_check;
-                            EXCEPTION WHEN OTHERS THEN NULL;
-                            END;
-
-                            BEGIN
-                                ALTER TABLE public.users DROP CONSTRAINT IF EXISTS users_role_check;
-                            EXCEPTION WHEN OTHERS THEN NULL;
-                            END;
+                            ALTER TABLE restaurant_pos.users DROP CONSTRAINT IF EXISTS users_role_check;
+                            ALTER TABLE restaurant_pos.users ADD CONSTRAINT users_role_check CHECK (role IN ('SUPER_ADMIN', 'MANAGER', 'RECEPTIONIST', 'KITCHEN', 'WAITER', 'CUSTOMER'));
+                        EXCEPTION WHEN OTHERS THEN NULL;
                         END $$;
                     ");
                 }
                 catch { /* Ignore if offline */ }
             }
+
+            if (!allowDevSeedCredentials)
+            {
+                await EnsureRestaurantDataAsync(db);
+                Volatile.Write(ref _initialized, 1);
+                return;
+            }
+
+            var devPasswordHash = BCrypt.Net.BCrypt.HashPassword(
+                Environment.GetEnvironmentVariable("DEV_DEMO_SEED_PASSWORD") ?? "Password@123");
 
             var restaurantsToSeed = new[]
             {
@@ -108,7 +109,7 @@ public static class UserProvisioning
                     Name = "Super Admin",
                     Email = "superadmin@sunrisecafe.com",
                     Phone = "+91 99999 00001",
-                    PasswordHash = DefaultPasswordHash,
+                    PasswordHash = devPasswordHash,
                     Role = UserRoles.SuperAdmin,
                     Status = "ACTIVE",
                     EmailVerified = true
@@ -120,7 +121,7 @@ public static class UserProvisioning
                     Name = "Rohit Mehta (Manager)",
                     Email = "manager@sunrisecafe.com",
                     Phone = "+91 99999 00010",
-                    PasswordHash = DefaultPasswordHash,
+                    PasswordHash = devPasswordHash,
                     Role = UserRoles.Manager,
                     Status = "ACTIVE",
                     EmailVerified = true
@@ -132,7 +133,7 @@ public static class UserProvisioning
                     Name = "Rahul Sharma (Manager)",
                     Email = "manager.rahul@royalpalace.com",
                     Phone = "+91 98111 00001",
-                    PasswordHash = DefaultPasswordHash,
+                    PasswordHash = devPasswordHash,
                     Role = UserRoles.Manager,
                     Status = "ACTIVE",
                     EmailVerified = true
@@ -144,7 +145,7 @@ public static class UserProvisioning
                     Name = "Amit Patel (Manager)",
                     Email = "manager.amit@cityrestaurant.com",
                     Phone = "+91 98222 00001",
-                    PasswordHash = DefaultPasswordHash,
+                    PasswordHash = devPasswordHash,
                     Role = UserRoles.Manager,
                     Status = "ACTIVE",
                     EmailVerified = true
@@ -156,7 +157,7 @@ public static class UserProvisioning
                     Name = "Ananya Sharma (Receptionist)",
                     Email = "receptionist@sunrisecafe.com",
                     Phone = "+91 99999 00002",
-                    PasswordHash = DefaultPasswordHash,
+                    PasswordHash = devPasswordHash,
                     Role = UserRoles.Receptionist,
                     Status = "ACTIVE",
                     EmailVerified = true
@@ -168,7 +169,7 @@ public static class UserProvisioning
                     Name = "Chef Vikram (Kitchen Head)",
                     Email = "kitchen@sunrisecafe.com",
                     Phone = "+91 99999 00003",
-                    PasswordHash = DefaultPasswordHash,
+                    PasswordHash = devPasswordHash,
                     Role = UserRoles.Kitchen,
                     Status = "ACTIVE",
                     EmailVerified = true
@@ -180,7 +181,7 @@ public static class UserProvisioning
                     Name = "Waiter Kunal",
                     Email = "waiter.kunal@sunrisecafe.com",
                     Phone = "+91 99999 00004",
-                    PasswordHash = DefaultPasswordHash,
+                    PasswordHash = devPasswordHash,
                     Role = UserRoles.Waiter,
                     Status = "ACTIVE",
                     EmailVerified = true
@@ -192,7 +193,7 @@ public static class UserProvisioning
                     Name = "Waiter",
                     Email = "waiter@sunrisecafe.com",
                     Phone = "+91 99999 00004",
-                    PasswordHash = DefaultPasswordHash,
+                    PasswordHash = devPasswordHash,
                     Role = UserRoles.Waiter,
                     Status = "ACTIVE",
                     EmailVerified = true
@@ -204,7 +205,7 @@ public static class UserProvisioning
                     Name = "Waiter Priya",
                     Email = "waiter.priya@sunrisecafe.com",
                     Phone = "+91 99999 00005",
-                    PasswordHash = DefaultPasswordHash,
+                    PasswordHash = devPasswordHash,
                     Role = UserRoles.Waiter,
                     Status = "ACTIVE",
                     EmailVerified = true
@@ -216,7 +217,7 @@ public static class UserProvisioning
                     Name = "Rahul Verma (Customer)",
                     Email = "customer.rahul@example.com",
                     Phone = "+91 98888 77777",
-                    PasswordHash = DefaultPasswordHash,
+                    PasswordHash = devPasswordHash,
                     Role = UserRoles.Customer,
                     Status = "ACTIVE",
                     EmailVerified = true
@@ -232,9 +233,11 @@ public static class UserProvisioning
                 }
                 else
                 {
-                    if (string.IsNullOrEmpty(existing.PasswordHash) || existing.PasswordHash == "SUPABASE_MANAGED")
+                    if (string.IsNullOrEmpty(existing.PasswordHash) ||
+                        existing.PasswordHash == "SUPABASE_MANAGED" ||
+                        existing.PasswordHash == LegacyPlaceholderHash)
                     {
-                        existing.PasswordHash = DefaultPasswordHash;
+                        existing.PasswordHash = devPasswordHash;
                     }
                     existing.Role = user.Role;
                     existing.RestaurantId = user.RestaurantId;
@@ -244,11 +247,17 @@ public static class UserProvisioning
             }
 
             await db.SaveChangesAsync();
+            await EnsureRestaurantDataAsync(db);
+            Volatile.Write(ref _initialized, 1);
         }
         catch (Exception ex)
         {
             // Fallback for migrations / constrained environments
             Console.WriteLine($"[UserProvisioning] Note: {ex.Message}");
+        }
+        finally
+        {
+            _initLock.Release();
         }
     }
 
@@ -275,6 +284,7 @@ public static class UserProvisioning
                         Capacity = defaultCapacities[i - 1],
                         Status = TableStatuses.Available,
                         QrIdentifier = $"QR_{r.RestaurantId:N}_TBL{i:D02}",
+                        DiningArea = (i == 6 || i == 7 || i == 8 || i == 12) ? "group" : "everyday",
                         CreatedAt = DateTime.UtcNow,
                         UpdatedAt = DateTime.UtcNow
                     });

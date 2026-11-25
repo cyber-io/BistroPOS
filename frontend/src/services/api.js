@@ -124,7 +124,7 @@ async function request(path, { method = 'GET', body, accessToken, signal } = {})
   let data;
   try { data = text ? JSON.parse(text) : null; } catch { data = null; }
   if (!response.ok) {
-    if (response.status === 429) {
+    if ([429, 502, 503].includes(response.status)) {
       rateLimitBackoffUntil = Date.now() + 15000;
     }
     if (response.status === 401 && token) {
@@ -132,7 +132,16 @@ async function request(path, { method = 'GET', body, accessToken, signal } = {})
       window.dispatchEvent(new Event('rs_session_expired'));
     }
     const validation = data?.errors ? Object.values(data.errors).flat().join(' ') : '';
-    const error = new Error(data?.detail || data?.Detail || data?.message || data?.Message || data?.title || data?.Title || validation || (response.status === 403 ? 'Your account does not have permission to perform this action.' : response.status === 404 ? 'This record could not be found.' : response.status === 401 ? 'Please sign in to continue.' : 'The request could not be completed. Please try again.'));
+    const fallbackMsg = response.status === 503
+      ? 'Database connection unavailable. Please ensure PostgreSQL / Docker is running and try again.'
+      : response.status === 403
+        ? 'Your account does not have permission to perform this action.'
+        : response.status === 404
+          ? 'This record could not be found.'
+          : response.status === 401
+            ? 'Please sign in to continue.'
+            : 'The request could not be completed. Please try again.';
+    const error = new Error(data?.detail || data?.Detail || data?.message || data?.Message || data?.title || data?.Title || validation || fallbackMsg);
     error.status = response.status;
     throw error;
   }
@@ -195,6 +204,7 @@ export function uniqueKey() { return globalThis.crypto?.randomUUID?.() || `${Dat
 const realtimeChannel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('restaurant_pos_realtime') : null;
 
 if (realtimeChannel) {
+  realtimeChannel.unref?.();
   realtimeChannel.onmessage = event => {
     const { type, payload } = event?.data || {};
     if (type) {
@@ -232,14 +242,15 @@ async function pollUpdates() {
   const generation = pollingGeneration;
   try {
     const jobs = [];
+    const onPollError = err => {
+      if ([429, 502, 503].includes(err?.status)) rateLimitBackoffUntil = Date.now() + 20000;
+    };
 
     // Poll menu items only every 10th cycle (~40s) since menu rarely changes mid-service
     if (pollCycle % 10 === 1) {
       jobs.push(api.getMenuItems().then(items => diffRecords('menu', items, 'menuItemId', null, (item, old) => {
         if (item.availability !== old.availability) broadcastEvent('FOOD_AVAILABILITY_CHANGED', { menuItemId: item.menuItemId, availability: item.availability });
-      }, generation)).catch(err => {
-        if (err?.status === 429) rateLimitBackoffUntil = Date.now() + 20000;
-      }));
+      }, generation)).catch(onPollError));
     }
 
     jobs.push(
@@ -249,23 +260,21 @@ async function pollUpdates() {
           broadcastEvent('ORDER_STATUS_CHANGED', payload);
           if (order.source === 'DINE_IN_QR' && order.status === 'READY') broadcastEvent('TABLE_ORDER_READY', payload);
         }
-      }, generation)).catch(err => {
-        if (err?.status === 429) rateLimitBackoffUntil = Date.now() + 20000;
-      }),
+      }, generation)).catch(onPollError),
       api.getTables().then(tables => diffRecords('tables', tables, 'tableId', null, (table, old) => {
         if (table.status !== old.status || table.currentCustomerName !== old.currentCustomerName) {
           broadcastEvent('TABLE_STATUS_UPDATED', { tableId: table.tableId, tableNumber: table.tableNumber, status: table.status, customerName: table.currentCustomerName, table });
         }
-      }, generation)).catch(err => {
-        if (err?.status === 429) rateLimitBackoffUntil = Date.now() + 20000;
-      })
+      }, generation)).catch(onPollError)
     );
     if (['SUPER_ADMIN', 'RECEPTIONIST', 'WAITER'].includes(jwtRole()) || (!isStaff() && stored(HELP_KEY).length)) jobs.push(api.getHelpRequests().then(requests => diffRecords('help', requests, 'requestId', help => broadcastEvent('CUSTOMER_HELP_REQUEST', help), (help, old) => {
       if (help.status !== old.status) broadcastEvent(help.status === 'ASSIGNED' ? 'WAITER_HELP_ACCEPTED' : 'HELP_REQUEST_RESOLVED', { ...help, waiterName: help.assignedWaiterName });
-    }, generation)).catch(() => {}));
-    if (isStaff()) {
-      jobs.push(api.getReservations().then(reservations => diffRecords('reservations', reservations, 'reservationId', reservation => broadcastEvent('NEW_TABLE_RESERVATION', reservation), reservation => broadcastEvent('RESERVATION_STATUS_CHANGED', reservation), generation)).catch(() => {}));
-      jobs.push(api.getIssues().then(issues => diffRecords('issues', issues, 'issueId', issue => broadcastEvent('CUSTOMER_ORDER_NOT_RECEIVED', { ...issue, message: issue.description }), null, generation)).catch(() => {}));
+    }, generation)).catch(onPollError));
+    if (['SUPER_ADMIN', 'MANAGER', 'RECEPTIONIST'].includes(jwtRole())) {
+      jobs.push(api.getReservations().then(reservations => diffRecords('reservations', reservations, 'reservationId', reservation => broadcastEvent('NEW_TABLE_RESERVATION', reservation), reservation => broadcastEvent('RESERVATION_STATUS_CHANGED', reservation), generation)).catch(onPollError));
+      jobs.push(api.getIssues().then(issues => diffRecords('issues', issues, 'issueId', issue => broadcastEvent('CUSTOMER_ORDER_NOT_RECEIVED', { ...issue, message: issue.description }), null, generation)).catch(onPollError));
+    } else if (isStaff()) {
+      jobs.push(api.getReservations().then(reservations => diffRecords('reservations', reservations, 'reservationId', reservation => broadcastEvent('NEW_TABLE_RESERVATION', reservation), reservation => broadcastEvent('RESERVATION_STATUS_CHANGED', reservation), generation)).catch(onPollError));
     }
     await Promise.allSettled(jobs);
   } finally { pollBusy = false; }
@@ -577,7 +586,7 @@ export const api = {
     return request(`/help/${requestId}/assign`, { method: 'POST', body: { waiterId: user.userId, waiterName: user.name } });
   },
   resolveHelpRequest: requestId => request(`/help/${requestId}/resolve`, { method: 'POST' }),
-  getIssues: () => request(`/issues${query({ restaurantId })}`),
+  getIssues: () => request(`/issues${query({ restaurantId })}`).catch(() => []),
   resolveIssue: (issueId, resolution, escalate = false) => request(`/issues/${issueId}/resolve`, { method: 'PATCH', body: typeof resolution === 'object' ? resolution : { resolution, escalate } }),
   getUsers: (role) => request(`/users${query({ restaurantId, role })}`),
   createStaffUser: details => request(`/users${query({ restaurantId })}`, { method: 'POST', body: details }),
@@ -595,14 +604,14 @@ export const api = {
   updateRestaurantWifi: (customRestId, body) => request(`/restaurants/${customRestId || restaurantId}/wifi`, { method: 'PATCH', body }),
   getLoyaltyBalance: phone => request(`/loyalty/balance${query({ restaurantId, phone })}`),
   earnLoyaltyPoints: body => request('/loyalty/earn', { method: 'POST', body: { restaurantId, ...body } }),
-  redeemLoyaltyPoints: body => request('/loyalty/redeem', { method: 'POST', body: { restaurantId, ...body } }),
-  submitFeedback: body => request('/feedback', { method: 'POST', body: { restaurantId, ...body } }),
+  redeemLoyaltyPoints: body => request(`/loyalty/redeem${query({ accessToken: body?.orderId ? orderAccess(body.orderId) : undefined })}`, { method: 'POST', accessToken: body?.orderId ? orderAccess(body.orderId) : undefined, body: { restaurantId, ...body } }),
+  submitFeedback: body => request(`/feedback${query({ accessToken: body?.orderId ? orderAccess(body.orderId) : undefined })}`, { method: 'POST', accessToken: body?.orderId ? orderAccess(body.orderId) : undefined, body: { restaurantId, ...body } }),
   getFeedbacks: () => request(`/feedback${query({ restaurantId })}`),
-  verifyPayment: details => request('/payments/verify', { method: 'POST', body: details }),
+  verifyPayment: details => request(`/payments/verify${query({ accessToken: details?.orderId ? orderAccess(details.orderId) : details?.accessToken })}`, { method: 'POST', accessToken: details?.orderId ? orderAccess(details.orderId) : details?.accessToken, body: details }),
   calculateSplit: details => request('/payments/calculate-split', { method: 'POST', body: { restaurantId, ...details } }),
   confirmCashPayment: (paymentId, staffUserId) => request(`/payments/${paymentId}/confirm-cash`, { method: 'POST', body: { staffUserId } }),
   updateOrderItemStatus: (orderItemId, status) => request(`/orders/items/${orderItemId}/status`, { method: 'PATCH', body: { status } }),
-  emailReceipt: (orderId, email) => request(`/orders/${orderId}/email-receipt`, { method: 'POST', body: { email } }),
+  emailReceipt: (orderId, email) => request(`/orders/${orderId}/email-receipt${query({ accessToken: orderAccess(orderId) })}`, { method: 'POST', accessToken: orderAccess(orderId), body: { email } }),
   getTimeBudgetMenu: (customRestId, minutes = 25) => request(`/menu/time-budget${query({ restaurantId: customRestId || restaurantId, minutes })}`),
   getPortionsRemaining: (customRestId) => request(`/menu/portions-remaining${query({ restaurantId: customRestId || restaurantId })}`),
   planEvent: (reservationId, plan) => request(`/reservations/${reservationId}/event-plan`, { method: 'POST', body: plan }),

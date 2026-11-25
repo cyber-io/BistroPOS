@@ -111,9 +111,8 @@ Thank you for dining with us!
       });
       setFeedbackSubmitted(true);
       addToast('Thank you! Your feedback has been received.', 'success');
-    } catch {
-      setFeedbackSubmitted(true);
-      addToast('Feedback saved. Thank you!', 'success');
+    } catch (err) {
+      addToast(err?.message || 'Unable to submit feedback right now. Please try again.', 'error');
     } finally {
       setIsSubmitting(false);
     }

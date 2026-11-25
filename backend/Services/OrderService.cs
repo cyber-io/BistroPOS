@@ -148,7 +148,7 @@ public class OrderService : IOrderService
             {
                 var paidSum = await _db.Payments
                     .Where(p => p.OrderId == cand.OrderId && p.Status == PaymentStatuses.Paid)
-                    .SumAsync(p => (decimal?)p.Amount) ?? 0;
+                    .SumAsync(p => (decimal?)(p.Amount - p.TipAmount)) ?? 0;
 
                 if (paidSum < cand.Total - 0.05m)
                 {
@@ -692,14 +692,28 @@ public class OrderService : IOrderService
 
         if (order.TableId.HasValue)
         {
-            await _notifications.NotifyTableAsync(
-                order.RestaurantId,
-                order.TableId.Value,
-                "ORDER_STATUS_CHANGED",
-                "Table Order Status: DELIVERED",
-                $"Order #{order.OrderNumber} status changed to DELIVERED.",
-                new { order.OrderId, order.OrderNumber, TableId = order.TableId.Value, Status = OrderStatuses.Delivered }
-            );
+            if (confirmed)
+            {
+                await _notifications.NotifyTableAsync(
+                    order.RestaurantId,
+                    order.TableId.Value,
+                    "ORDER_STATUS_CHANGED",
+                    "Table Order Status: DELIVERED",
+                    $"Order #{order.OrderNumber} status changed to DELIVERED.",
+                    new { order.OrderId, order.OrderNumber, TableId = order.TableId.Value, Status = OrderStatuses.Delivered }
+                );
+            }
+            else
+            {
+                await _notifications.NotifyTableAsync(
+                    order.RestaurantId,
+                    order.TableId.Value,
+                    "ORDER_ISSUE_REPORTED",
+                    "Delivery Issue Reported",
+                    $"We notified reception regarding Order #{order.OrderNumber}.",
+                    new { order.OrderId, order.OrderNumber, TableId = order.TableId.Value, Status = order.Status }
+                );
+            }
         }
         return true;
     }
@@ -831,11 +845,11 @@ public class OrderService : IOrderService
     }
     private async Task<OrderDto> MapWithPaymentAsync(Order order, int? tableNumber)
     {
-        var paid = await _db.Payments.Where(p => p.OrderId == order.OrderId && p.Status == PaymentStatuses.Paid).SumAsync(p => (decimal?)p.Amount) ?? 0;
+        var paid = await _db.Payments.Where(p => p.OrderId == order.OrderId && p.Status == PaymentStatuses.Paid).SumAsync(p => (decimal?)(p.Amount - p.TipAmount)) ?? 0;
         var principal = _http.HttpContext?.User;
         var staff = principal?.Identity?.IsAuthenticated == true && !principal.IsInRole(UserRoles.Customer);
-        return MapToDto(order, tableNumber) with { AccessToken = staff ? null : _tokens.Create("order", order.OrderId), PaidAmount = paid,
-            PaymentStatus = paid >= order.Total ? "PAID" : paid > 0 ? "PARTIAL" : "UNPAID",
+        return MapToDto(order, tableNumber) with { AccessToken = staff ? null : _tokens.Create("order", order.OrderId), PaidAmount = Math.Max(0, paid),
+            PaymentStatus = paid >= order.Total - 0.05m ? "PAID" : paid > 0 ? "PARTIAL" : "UNPAID",
             CustomerName=order.CustomerName, CustomerPhone=order.CustomerPhone, DeliveryAddressJson=order.DeliveryAddress,
             TakeawayPickupTime=order.TakeawayPickupTime, ConfirmationRequestedAt=order.ConfirmationRequestedAt };
     }

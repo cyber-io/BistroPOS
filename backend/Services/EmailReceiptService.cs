@@ -90,8 +90,8 @@ Method       : {latestPayment?.Method ?? "ELECTRONIC"}
 ========================================
 ";
 
-            _logger.LogInformation("Receipt email successfully prepared and delivered for Order #{OrderNumber} to {Email}:\n{Receipt}",
-                order.OrderNumber, cleanEmail, receiptText);
+            _logger.LogInformation("Receipt email queued/recorded for Order #{OrderNumber} (DeliveryId {DeliveryId})",
+                order.OrderNumber, delivery.DeliveryId);
 
             _db.ReceiptDeliveries.Add(delivery);
             await _db.SaveChangesAsync();

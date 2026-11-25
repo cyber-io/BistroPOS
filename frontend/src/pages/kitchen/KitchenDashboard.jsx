@@ -4,7 +4,7 @@ import { tableTitle } from '../../services/tablePresentation';
 import { useNotification } from '../../context/NotificationContext';
 import { soundEffects } from '../../services/soundEffects';
 import { Badge, Empty, Modal, Spinner, label, money, time } from '../../components/pos/PosUI';
-import { ChefHat, Clock, Bell, RefreshCw, Search, Check, Ban, AlertCircle } from 'lucide-react';
+import { ChefHat, Clock, Bell, RefreshCw, Search, Check, Ban, AlertCircle, Package, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
 
 const tabs = [
   ['NEW', 'New orders', ['NEW', 'ACCEPTED']],
@@ -13,8 +13,44 @@ const tabs = [
   ['SERVICE', 'In service', ['PENDING_CONFIRMATION', 'CONFIRMATION_TIMEOUT', 'OUT_FOR_DELIVERY']],
   ['DELIVERED', 'Completed', ['DELIVERED', 'PICKED_UP']], ['CANCELLED', 'Cancelled', ['CANCELLED']]
 ];
+
+function getLocalDateString(value = new Date()) {
+  if (!value) return '';
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? String(value).slice(0, 10) : parsed.toLocaleDateString('en-CA');
+}
+
+function getShiftedDate(dateStr, days) {
+  const base = dateStr ? new Date(`${dateStr}T12:00:00`) : new Date();
+  base.setDate(base.getDate() + days);
+  return base.toLocaleDateString('en-CA');
+}
+
+function formatDisplayDate(dateStr) {
+  if (!dateStr) return '';
+  const parsed = new Date(`${String(dateStr).slice(0, 10)}T12:00:00`);
+  return Number.isNaN(parsed.getTime())
+    ? String(dateStr)
+    : parsed.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function getItemStation(item) {
+  const explicit = String(item?.station || '').trim().toUpperCase();
+  if (['MAIN', 'GRILL', 'BEVERAGES', 'DESSERTS'].includes(explicit)) return explicit;
+  const labelText = `${item?.categoryName || ''} ${item?.name || ''}`.toLowerCase();
+  if (/coffee|tea|latte|shake|juice|mocktail|mojito|soda|lemonade|drink|beverage/.test(labelText)) return 'BEVERAGES';
+  if (/cake|brownie|tiramisu|ice cream|pastry|gulab|jamun|halwa|cheesecake|dessert|sweet/.test(labelText)) return 'DESSERTS';
+  if (/grill|tikka|kebab|tandoor|steak|burger|bbq|skewers|roast/.test(labelText)) return 'GRILL';
+  return 'MAIN';
+}
+
 export default function KitchenDashboard() {
   const { addToast } = useNotification();
+  const todayStr = getLocalDateString(new Date());
+  const yesterdayStr = getShiftedDate(todayStr, -1);
+  const [selectedDate, setSelectedDate] = useState(todayStr);
+  const [dateFilterMode, setDateFilterMode] = useState('DATE');
   const [orders, setOrders] = useState([]);
   const [menu, setMenu] = useState([]);
   const [inventory, setInventory] = useState([]);
@@ -71,6 +107,49 @@ export default function KitchenDashboard() {
   const [busy, setBusy] = useState(null);
   const [rejectOrder, setRejectOrder] = useState(null);
   const [reason, setReason] = useState('Ingredients out of stock');
+  const [stockModal, setStockModal] = useState(false);
+  const [stockSubmitting, setStockSubmitting] = useState(false);
+  const [stockItemType, setStockItemType] = useState('DISH');
+  const [selectedMenuItemId, setSelectedMenuItemId] = useState('');
+  const [customItemName, setCustomItemName] = useState('');
+  const [shortageReason, setShortageReason] = useState('Out of stock');
+  const [urgency, setUrgency] = useState('HIGH');
+  const [markSoldOut, setMarkSoldOut] = useState(true);
+
+  const handleReportShortage = async (e) => {
+    e.preventDefault();
+    if (stockSubmitting) return;
+    setStockSubmitting(true);
+    try {
+      const selectedDish = stockItemType === 'DISH' ? menu.find(m => m.menuItemId === selectedMenuItemId) : null;
+      const itemName = stockItemType === 'DISH'
+        ? selectedDish?.name || 'Dish'
+        : customItemName.trim();
+
+      await api.reportShortage({
+        itemType: stockItemType,
+        menuItemId: stockItemType === 'DISH' && selectedMenuItemId ? selectedMenuItemId : null,
+        ingredientName: stockItemType === 'INGREDIENT' ? customItemName.trim() : itemName,
+        shortageStatus: shortageReason === 'Out of stock' ? 'OUT_OF_STOCK' : 'LOW_STOCK',
+        urgencyLevel: urgency,
+        markDishSoldOut: stockItemType === 'DISH' && markSoldOut && Boolean(selectedMenuItemId)
+      });
+
+      if (stockItemType === 'DISH' && markSoldOut && selectedMenuItemId) {
+        setMenu(prev => prev.map(m => m.menuItemId === selectedMenuItemId ? { ...m, availability: false } : m));
+      }
+
+      addToast(`Reported shortage for "${itemName}" (${shortageReason})`, 'success');
+      setStockModal(false);
+      setSelectedMenuItemId('');
+      setCustomItemName('');
+      load(true);
+    } catch (err) {
+      addToast(err.message || 'Failed to report shortage', 'error');
+    } finally {
+      setStockSubmitting(false);
+    }
+  };
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
@@ -192,7 +271,7 @@ export default function KitchenDashboard() {
     </div>
 
     <div className="pos-toolbar" style={{ gap: 12, marginBottom: 19 }}>
-      <div className="pos-segment" style={{ flexWrap: 'wrap' }}>{tabs.map(([key, title, states]) => { const count = filtered.filter(order => states.includes(order.status)).length; return <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{title}{count > 0 && <span className="pos-count" style={{ marginLeft: 7 }}>{count}</span>}</button>; })}<button className={tab === 'AVAILABILITY' ? 'active' : ''} onClick={() => setTab('AVAILABILITY')}>Dish availability</button></div>
+      <div className="pos-segment" style={{ flexWrap: 'wrap' }}>{tabs.map(([key, title, states]) => { const count = getTabCount(key, states); return <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{title}{count > 0 && <span className="pos-count" style={{ marginLeft: 7 }}>{count}</span>}</button>; })}<button className={tab === 'AVAILABILITY' ? 'active' : ''} onClick={() => setTab('AVAILABILITY')}>Dish availability</button></div>
       <div className="pos-toolbar-actions" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <div className="pos-search" style={{ minWidth: 260 }}>
           <Search size={15} />

@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import QRCode from 'qrcode';
 import { api, subscribeRealtimeEvents } from '../../services/api';
 import { tableTitle, getTableQrUrl } from '../../services/tablePresentation';
+import { useAuth } from '../../context/AuthContext';
 import { useNotification } from '../../context/NotificationContext';
 import {
   LayoutDashboard,
@@ -50,6 +51,7 @@ function LocalTableQrImage({ url, title }) {
 }
 
 export default function ReceptionistDashboard() {
+  const { currentUser } = useAuth();
   const { addToast } = useNotification();
   const [activeModule, setActiveModuleState] = useState(() => {
     try {
@@ -173,12 +175,15 @@ export default function ReceptionistDashboard() {
       try {
         const wl = await api.getWaitlist();
         if (Array.isArray(wl)) setWaitlist(wl);
-      } catch {}
-      setHelpRequests(help);
+      } catch (wlErr) {
+        console.warn('Waitlist load error:', wlErr);
+      }
       try {
         const waiterList = await api.getUsers('WAITER');
         if (Array.isArray(waiterList)) setWaiters(waiterList);
-      } catch {}
+      } catch (staffErr) {
+        console.warn('Waiter list load error:', staffErr);
+      }
     } catch (e) {
       console.warn('Receptionist load error:', e);
     } finally {
@@ -383,16 +388,16 @@ export default function ReceptionistDashboard() {
           orderId: ord.orderId,
           amount: due > 0 ? due : Number(ord.total || 0),
           method: 'CASH'
-        }).catch(() => {});
+        });
       }
-      await api.closeTableSession(table.tableId).catch(() => {});
+      await api.closeTableSession(table.tableId).catch((closeErr) => console.warn('Close session notice:', closeErr));
       // Move table to cleaning
       await api.updateTableStatus(table.tableId, 'WAITING_FOR_CLEANING', null);
       addToast(`Payment received for ${tableTitle(table)}. Table marked WAITING_FOR_CLEANING.`, 'success');
       loadData();
       setSelectedTable(null);
-    } catch {
-      addToast('Failed to checkout table.', 'error');
+    } catch (err) {
+      addToast(err?.message || 'Failed to checkout table.', 'error');
     }
   };
 

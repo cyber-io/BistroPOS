@@ -96,6 +96,7 @@ public class PaymentService(
     IAuditLogService audit,
     INotificationService notifications,
     IOptions<PaymentGatewayOptions> gatewayOptions,
+    IHostEnvironment env,
     ILogger<PaymentService> logger) : IPaymentService
 {
     public async Task<PaymentDto> InitiatePaymentAsync(InitiatePaymentRequest request)
@@ -107,6 +108,19 @@ public class PaymentService(
 
         // Keep UPI, card, and other online payments pending until backend confirms provider capture
         var payment = await CreatePayment(request, collected: false);
+
+        if (method != "CASH"
+            && payment.Status == PaymentStatuses.Pending
+            && env.IsDevelopment()
+            && string.Equals(gatewayOptions.Value.Provider, "RazorpayMock", StringComparison.OrdinalIgnoreCase))
+        {
+            var secret = gatewayOptions.Value.SecretKey;
+            if (!string.IsNullOrWhiteSpace(secret) && secret != "dev-secret-change-in-production")
+            {
+                var mockSignature = ComputeHmacHex(secret, $"{payment.PaymentId}|{payment.TransactionId}");
+                payment = payment with { MockSignature = mockSignature };
+            }
+        }
 
         if (method == "CASH" && request.OrderId.HasValue)
         {
@@ -176,27 +190,32 @@ public class PaymentService(
                 return Map(previous);
             }
         }
-        var paid = await db.Payments.Where(p => p.OrderId == order.OrderId && p.Status == PaymentStatuses.Paid).SumAsync(p => (decimal?)p.Amount) ?? 0;
-        
-        var remaining = Math.Round(order.Total - paid, 2);
+        var paidTowardBill = await db.Payments
+            .Where(p => p.OrderId == order.OrderId && p.Status == PaymentStatuses.Paid)
+            .SumAsync(p => (decimal?)(p.Amount - p.TipAmount)) ?? 0;
+
+        var remaining = Math.Round(Math.Max(0, order.Total - paidTowardBill), 2);
+        var tip = Math.Max(0, Math.Round(request.TipAmount, 2));
         var reqAmount = Math.Round(request.Amount, 2);
         if (remaining <= 0)
             throw new InvalidOperationException("This order has already been fully paid.");
         if (reqAmount <= 0)
             throw new ArgumentException("Amount must be positive.");
-        if (reqAmount > remaining)
+        var maxAllowed = remaining + tip;
+        if (reqAmount > maxAllowed)
         {
-            if (reqAmount - remaining <= 1.0m)
-                reqAmount = remaining;
+            if (reqAmount - maxAllowed <= 1.0m)
+                reqAmount = maxAllowed;
             else
-                throw new ArgumentException($"Amount cannot exceed the order balance of ₹{remaining:F2}.");
+                throw new ArgumentException($"Amount cannot exceed the order balance + tip of ₹{maxAllowed:F2}.");
         }
+        var storedTip = Math.Min(tip, reqAmount);
 
         var payment = new Payment { 
             RestaurantId = restaurantId, 
             OrderId = order.OrderId, 
             Amount = reqAmount,
-            TipAmount = request.TipAmount,
+            TipAmount = storedTip,
             SplitCount = request.SplitCount > 0 ? request.SplitCount : 1,
             SplitType = string.IsNullOrWhiteSpace(request.SplitType) ? "FULL" : request.SplitType,
             Method = normalizedMethod, 
@@ -211,7 +230,7 @@ public class PaymentService(
         List<Reservation> autoCompletedReservations = new();
 
         // After payment, if order is fully paid and tied to a table, directly send table for cleaning and complete active reservation
-        if (collected && (paid + reqAmount >= order.Total - 0.05m))
+        if (collected && (paidTowardBill + Math.Max(0, reqAmount - storedTip) >= order.Total - 0.05m))
         {
             if (order.TableId.HasValue)
             {
@@ -270,7 +289,10 @@ public class PaymentService(
                         if (!autoCompletedReservations.Contains(directRes)) autoCompletedReservations.Add(directRes);
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Could not auto-complete reservation {ReservationId} during payment", request.ReservationId);
+                }
             }
         }
 
@@ -342,18 +364,19 @@ public class PaymentService(
             return false;
         }
 
-        // Validate HMAC signature if gateway secret is configured
+        // Always enforce HMAC signature check (fail closed when gateway secret is missing).
         var secret = gatewayOptions.Value.SecretKey;
-        if (!string.IsNullOrEmpty(secret) && secret != "dev-secret-change-in-production")
+        if (string.IsNullOrWhiteSpace(secret) || secret == "dev-secret-change-in-production")
         {
-            var expectedPayload = $"{payment.PaymentId}|{request.TransactionId}";
-            using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
-            var hash = Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(expectedPayload)));
-            if (!string.Equals(hash, request.Signature, StringComparison.OrdinalIgnoreCase))
-            {
-                logger.LogWarning("Invalid payment signature for PaymentId {PaymentId}", payment.PaymentId);
-                return false;
-            }
+            logger.LogWarning("Payment verification rejected because PaymentGateway:SecretKey is not configured.");
+            return false;
+        }
+
+        var expectedPayload = $"{payment.PaymentId}|{request.TransactionId}";
+        if (!VerifyHmacHex(secret, expectedPayload, request.Signature))
+        {
+            logger.LogWarning("Invalid payment signature for PaymentId {PaymentId}", payment.PaymentId);
+            return false;
         }
 
         payment.Status = PaymentStatuses.Paid;
@@ -371,8 +394,23 @@ public class PaymentService(
         return true;
     }
 
-    public async Task<bool> ProcessWebhookAsync(WebhookPayloadDto payload)
+    public async Task<bool> ProcessWebhookAsync(WebhookPayloadDto payload, string? headerSignature = null)
     {
+        var webhookSecret = gatewayOptions.Value.WebhookSecret;
+        if (string.IsNullOrWhiteSpace(webhookSecret) || webhookSecret == "whsec_mock_webhook_secret_signature")
+        {
+            logger.LogWarning("Webhook rejected because PaymentGateway:WebhookSecret is not configured.");
+            return false;
+        }
+
+        var suppliedSig = string.IsNullOrWhiteSpace(headerSignature) ? payload.Signature : headerSignature;
+        var canonicalPayload = $"{payload.Event}|{payload.PaymentId}|{payload.TransactionId}|{payload.Amount:F2}";
+        if (!VerifyHmacHex(webhookSecret, canonicalPayload, suppliedSig))
+        {
+            logger.LogWarning("Rejected payment webhook with invalid signature for PaymentId {PaymentId}", payload.PaymentId);
+            return false;
+        }
+
         Payment? payment = null;
         if (Guid.TryParse(payload.PaymentId, out var paymentGuid))
         {
@@ -475,10 +513,10 @@ public class PaymentService(
 
         var subtotal = order.Subtotal;
         var tax = order.Tax;
-        var tip = request.TipAmount > 0 
-            ? request.TipAmount 
+        var tip = request.TipAmount > 0
+            ? Math.Round(request.TipAmount, 2)
             : (request.TipPercent > 0 ? Math.Round(subtotal * request.TipPercent / 100m, 2) : 0m);
-        var discount = request.LoyaltyDiscount;
+        var discount = Math.Min(subtotal + tax, Math.Max(0m, Math.Round(request.LoyaltyDiscount, 2)));
         var totalBill = Math.Round(Math.Max(0, subtotal + tax + tip - discount), 2);
 
         var existingPaid = await db.Payments
@@ -493,40 +531,94 @@ public class PaymentService(
             .OrderBy(p => p.CreatedAt)
             .ToListAsync();
 
+        var consumedPaidIds = new HashSet<Guid>();
+        var consumedPendingIds = new HashSet<Guid>();
+
         if (string.Equals(request.SplitType, "ITEMIZED", StringComparison.OrdinalIgnoreCase) && request.ItemShares != null && request.ItemShares.Any())
         {
-            var dinerItemGroups = request.ItemShares.GroupBy(s => s.DinerIndex).OrderBy(g => g.Key).ToList();
-            var totalDinerSubtotal = request.ItemShares.Sum(s =>
+            var validShares = request.ItemShares
+                .Where(s => s.Quantity > 0 && s.DinerIndex >= 0 && order.Items.Any(i => i.OrderItemId == s.OrderItemId))
+                .ToList();
+
+            if (!validShares.Any())
             {
-                var item = order.Items.FirstOrDefault(i => i.OrderItemId == s.OrderItemId);
-                return (item?.PriceSnapshot ?? 0m) * s.Quantity;
+                throw new ArgumentException("Itemized split requires valid order items with positive quantities.");
+            }
+
+            var dinerItemGroups = validShares.GroupBy(s => s.DinerIndex).OrderBy(g => g.Key).ToList();
+            var totalDinerSubtotal = validShares.Sum(s =>
+            {
+                var item = order.Items.First(i => i.OrderItemId == s.OrderItemId);
+                return item.PriceSnapshot * s.Quantity;
             });
 
-            foreach (var group in dinerItemGroups)
+            decimal runningAllocated = 0m;
+            decimal runningPaid = existingPaid;
+
+            for (int idx = 0; idx < dinerItemGroups.Count; idx++)
             {
+                var group = dinerItemGroups[idx];
+                var isLast = idx == dinerItemGroups.Count - 1;
                 var dinerSubtotal = group.Sum(s =>
                 {
-                    var item = order.Items.FirstOrDefault(i => i.OrderItemId == s.OrderItemId);
-                    return (item?.PriceSnapshot ?? 0m) * s.Quantity;
+                    var item = order.Items.First(i => i.OrderItemId == s.OrderItemId);
+                    return item.PriceSnapshot * s.Quantity;
                 });
 
-                var proportion = totalDinerSubtotal > 0 ? dinerSubtotal / totalDinerSubtotal : 1m / dinerItemGroups.Count;
-                var dinerAmount = Math.Round(totalBill * proportion, 2);
+                decimal dinerAmount;
+                if (isLast)
+                {
+                    dinerAmount = Math.Round(Math.Max(0m, totalBill - runningAllocated), 2);
+                }
+                else
+                {
+                    var proportion = totalDinerSubtotal > 0 ? dinerSubtotal / totalDinerSubtotal : 1m / dinerItemGroups.Count;
+                    dinerAmount = Math.Round(totalBill * proportion, 2);
+                    runningAllocated += dinerAmount;
+                }
 
-                var matchPayment = existingPayments.FirstOrDefault(p => Math.Abs(p.Amount - dinerAmount) <= 0.05m);
+                string status = "UNPAID";
+                Guid? paymentId = null;
+
+                var exactPaid = existingPayments.FirstOrDefault(p =>
+                    p.Status == PaymentStatuses.Paid &&
+                    !consumedPaidIds.Contains(p.PaymentId) &&
+                    Math.Abs(p.Amount - dinerAmount) <= 0.05m);
+
+                if (exactPaid != null && dinerAmount > 0 && runningPaid >= dinerAmount - 0.05m)
+                {
+                    status = "PAID";
+                    paymentId = exactPaid.PaymentId;
+                    consumedPaidIds.Add(exactPaid.PaymentId);
+                    runningPaid -= dinerAmount;
+                }
+                else
+                {
+                    var pendingMatch = existingPayments.FirstOrDefault(p =>
+                        p.Status == PaymentStatuses.Pending &&
+                        !consumedPendingIds.Contains(p.PaymentId) &&
+                        Math.Abs(p.Amount - dinerAmount) <= 0.05m);
+                    if (pendingMatch != null)
+                    {
+                        status = "PENDING";
+                        paymentId = pendingMatch.PaymentId;
+                        consumedPendingIds.Add(pendingMatch.PaymentId);
+                    }
+                }
+
                 shares.Add(new DinerShareDto(
                     group.Key,
                     $"Diner {group.Key + 1}",
                     dinerAmount,
-                    matchPayment?.Status ?? "UNPAID",
-                    matchPayment?.PaymentId
+                    status,
+                    paymentId
                 ));
             }
         }
         else
         {
             // Equal Split
-            int count = Math.Max(1, request.SplitCount);
+            int count = Math.Clamp(request.SplitCount, 1, 50);
             decimal baseShare = Math.Round(totalBill / count, 2);
             decimal roundingDifference = totalBill - (baseShare * count);
 
@@ -537,20 +629,31 @@ public class PaymentService(
                 string status = "UNPAID";
                 Guid? paymentId = null;
 
-                if (runningPaid >= dinerAmount - 0.05m)
+                if (dinerAmount > 0 && existingPaid > 0 && runningPaid >= dinerAmount - 0.05m)
                 {
                     status = "PAID";
                     runningPaid -= dinerAmount;
-                    var match = existingPayments.FirstOrDefault(p => p.Status == PaymentStatuses.Paid && Math.Abs(p.Amount - dinerAmount) <= 0.05m);
-                    paymentId = match?.PaymentId;
+                    var match = existingPayments.FirstOrDefault(p =>
+                        p.Status == PaymentStatuses.Paid &&
+                        !consumedPaidIds.Contains(p.PaymentId) &&
+                        Math.Abs(p.Amount - dinerAmount) <= 0.05m);
+                    if (match != null)
+                    {
+                        paymentId = match.PaymentId;
+                        consumedPaidIds.Add(match.PaymentId);
+                    }
                 }
                 else
                 {
-                    var pendingMatch = existingPayments.FirstOrDefault(p => p.Status == PaymentStatuses.Pending && Math.Abs(p.Amount - dinerAmount) <= 0.05m);
+                    var pendingMatch = existingPayments.FirstOrDefault(p =>
+                        p.Status == PaymentStatuses.Pending &&
+                        !consumedPendingIds.Contains(p.PaymentId) &&
+                        Math.Abs(p.Amount - dinerAmount) <= 0.05m);
                     if (pendingMatch != null)
                     {
                         status = "PENDING";
                         paymentId = pendingMatch.PaymentId;
+                        consumedPendingIds.Add(pendingMatch.PaymentId);
                     }
                 }
 
@@ -585,7 +688,7 @@ public class PaymentService(
         var order = await db.Orders.FindAsync(orderId);
         if (order == null) return;
 
-        var paid = await db.Payments.Where(p => p.OrderId == orderId && p.Status == PaymentStatuses.Paid).SumAsync(p => (decimal?)p.Amount) ?? 0;
+        var paid = await db.Payments.Where(p => p.OrderId == orderId && p.Status == PaymentStatuses.Paid).SumAsync(p => (decimal?)(p.Amount - p.TipAmount)) ?? 0;
         if (paid < order.Total - 0.05m) return;
 
         if (order.TableId.HasValue)
@@ -600,25 +703,38 @@ public class PaymentService(
                     tableToClean.AssignedWaiterId = null;
                     tableToClean.UpdatedAt = DateTime.UtcNow;
 
-                    var cleaningReq = new HelpRequest
-                    {
-                        RestaurantId = restaurantId,
-                        TableId = tableToClean.TableId,
-                        Message = $"Payment completed for Table A{tableToClean.TableNumber} (Order {order.OrderNumber}). Table automatically marked for cleaning (2-min auto-release).",
-                        Status = "PENDING",
-                        CreatedAt = DateTime.UtcNow
-                    };
-                    db.HelpRequests.Add(cleaningReq);
-                    await db.SaveChangesAsync();
+                    var existingCleaning = await db.HelpRequests.AnyAsync(h =>
+                        h.RestaurantId == restaurantId &&
+                        h.TableId == tableToClean.TableId &&
+                        h.Status == "PENDING" &&
+                        h.Message.Contains("cleaning"));
 
-                    await notifications.NotifyRoleAsync(
-                        restaurantId,
-                        UserRoles.Waiter,
-                        "CUSTOMER_HELP_REQUEST",
-                        $"Table A{tableToClean.TableNumber} needs cleaning",
-                        $"Payment completed for Table A{tableToClean.TableNumber}. Table marked for cleaning.",
-                        new { cleaningReq.RequestId, TableNumber = tableToClean.TableNumber, TableId = tableToClean.TableId, IsCleaning = true, Status = TableStatuses.WaitingForCleaning }
-                    );
+                    if (!existingCleaning)
+                    {
+                        var cleaningReq = new HelpRequest
+                        {
+                            RestaurantId = restaurantId,
+                            TableId = tableToClean.TableId,
+                            Message = $"Payment completed for Table A{tableToClean.TableNumber} (Order {order.OrderNumber}). Table automatically marked for cleaning (2-min auto-release).",
+                            Status = "PENDING",
+                            CreatedAt = DateTime.UtcNow
+                        };
+                        db.HelpRequests.Add(cleaningReq);
+                        await db.SaveChangesAsync();
+
+                        await notifications.NotifyRoleAsync(
+                            restaurantId,
+                            UserRoles.Waiter,
+                            "CUSTOMER_HELP_REQUEST",
+                            $"Table A{tableToClean.TableNumber} needs cleaning",
+                            $"Payment completed for Table A{tableToClean.TableNumber}. Table marked for cleaning.",
+                            new { cleaningReq.RequestId, TableNumber = tableToClean.TableNumber, TableId = tableToClean.TableId, IsCleaning = true, Status = TableStatuses.WaitingForCleaning }
+                        );
+                    }
+                    else
+                    {
+                        await db.SaveChangesAsync();
+                    }
 
                     await notifications.NotifyRoleAsync(
                         restaurantId,
@@ -660,6 +776,20 @@ public class PaymentService(
                 logger.LogError(ex, "Error completing table/reservation for order {OrderId}", orderId);
             }
         }
+    }
+
+    private static string ComputeHmacHex(string secret, string payload)
+    {
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
+        return Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(payload))).ToLowerInvariant();
+    }
+
+    private static bool VerifyHmacHex(string secret, string payload, string? suppliedSignature)
+    {
+        if (string.IsNullOrWhiteSpace(suppliedSignature)) return false;
+        var expected = Encoding.UTF8.GetBytes(ComputeHmacHex(secret, payload));
+        var supplied = Encoding.UTF8.GetBytes(suppliedSignature.Trim().ToLowerInvariant());
+        return supplied.Length == expected.Length && CryptographicOperations.FixedTimeEquals(supplied, expected);
     }
 
     public static PaymentDto Map(Payment p) => new(p.PaymentId,p.RestaurantId,p.OrderId,p.Amount,p.Currency,p.Method,p.Status,p.TransactionId,p.CreatedAt,p.TipAmount,p.SplitCount,p.SplitType);

@@ -18,6 +18,8 @@ public class AuthService(
     RestaurantDbContext db,
     IOptions<JwtOptions> jwt,
     IOptions<SupabaseOptions> supabase,
+    IOptions<FeaturesOptions> features,
+    IHostEnvironment env,
     IHttpClientFactory clients,
     IAuditLogService audit,
     ITenantContext tenant) : IAuthService
@@ -77,12 +79,6 @@ public class AuthService(
 
         if (user != null)
         {
-            if (string.Equals(user.Status, "DISABLED", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(user.Status, "INACTIVE", StringComparison.OrdinalIgnoreCase))
-            {
-                return new(false, "", null, "This account has been disabled by management.");
-            }
-
             bool passwordValid = false;
             try
             {
@@ -93,13 +89,7 @@ public class AuthService(
             }
             catch
             {
-                // Non-standard bcrypt hash
-            }
-
-            // Universal fallback for seed / demo accounts with default password
-            if (!passwordValid && request.Password == "Password@123")
-            {
-                passwordValid = true;
+                // Invalid or non-standard hash format fails closed
             }
 
             if (passwordValid)
@@ -156,11 +146,19 @@ public class AuthService(
 
     public async Task<AuthResponse> DemoLoginAsync(string role, Guid? restaurantId = null)
     {
+        if (!env.IsDevelopment() || !features.Value.EnableDemoLogin)
+        {
+            return new(false, "", null, "Demonstration login is disabled in this environment.");
+        }
+
         var targetRole = role.Trim().ToUpperInvariant();
         if (targetRole is not (UserRoles.SuperAdmin or UserRoles.Manager or UserRoles.Receptionist or UserRoles.Kitchen or UserRoles.Waiter or UserRoles.Customer))
             return new(false, "", null, "Unknown demo role.");
 
-        await EnsureUsersRoleConstraintAllowsManagerAsync();
+        if (!UserProvisioning.IsInitialized)
+        {
+            await UserProvisioning.EnsureDefaultDataAsync(db, allowDevSeedCredentials: true);
+        }
 
         User? user = null;
         if (restaurantId.HasValue && targetRole != UserRoles.SuperAdmin)
@@ -170,14 +168,23 @@ public class AuthService(
 
         if (user == null)
         {
-            user = await db.Users.FirstOrDefaultAsync(u => u.Role == targetRole);
+            if (targetRole == UserRoles.Manager)
+            {
+                // Prefer the default restaurant manager (Rohit Mehta at Bistro & Bloom) matching Receptionist demo experience
+                user = await db.Users.FirstOrDefaultAsync(u => u.Role == targetRole && u.RestaurantId == UserProvisioning.DefaultRestaurantId)
+                    ?? await db.Users.FirstOrDefaultAsync(u => u.Role == targetRole);
+            }
+            else
+            {
+                user = await db.Users.FirstOrDefaultAsync(u => u.Role == targetRole);
+            }
         }
 
-        // If no user exists yet for MANAGER role in demo database, auto-provision
+        var devSecret = Environment.GetEnvironmentVariable("DEV_DEMO_SEED_PASSWORD") ?? "Password@123";
         if (user == null && targetRole == UserRoles.Manager)
         {
-            var firstRestaurant = restaurantId.HasValue 
-                ? await db.Restaurants.FindAsync(restaurantId.Value) 
+            var firstRestaurant = restaurantId.HasValue
+                ? await db.Restaurants.FindAsync(restaurantId.Value)
                 : await db.Restaurants.FirstOrDefaultAsync();
 
             var existingByEmail = await db.Users.FirstOrDefaultAsync(u => u.Email.ToLower() == "manager.rahul@royalpalace.com" || u.Email.ToLower() == "manager@sunrisecafe.com");
@@ -198,21 +205,13 @@ public class AuthService(
                     Phone = "+91 98000 00010",
                     Role = UserRoles.Manager,
                     Status = "ACTIVE",
-                    PasswordHash = BCrypt.Net.BCrypt.HashPassword("Password@123"),
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword(devSecret),
                     EmailVerified = true
                 };
                 db.Users.Add(user);
             }
 
-            try
-            {
-                await db.SaveChangesAsync();
-            }
-            catch
-            {
-                await EnsureUsersRoleConstraintAllowsManagerAsync();
-                await db.SaveChangesAsync();
-            }
+            await db.SaveChangesAsync();
         }
 
         return user == null
@@ -312,8 +311,6 @@ public class AuthService(
             return (false, null, "Only SUPER_ADMIN can create a Restaurant Manager.");
         }
 
-        await EnsureUsersRoleConstraintAllowsManagerAsync();
-
         var restaurant = await db.Restaurants.FindAsync(request.RestaurantId);
         if (restaurant == null)
         {
@@ -343,16 +340,7 @@ public class AuthService(
         };
 
         db.Users.Add(managerUser);
-
-        try
-        {
-            await db.SaveChangesAsync();
-        }
-        catch (Exception ex) when (ex.Message.Contains("users_role_check") || ex.InnerException?.Message.Contains("users_role_check") == true)
-        {
-            await EnsureUsersRoleConstraintAllowsManagerAsync();
-            await db.SaveChangesAsync();
-        }
+        await db.SaveChangesAsync();
 
         await audit.LogAsync(request.RestaurantId, managerUser.UserId, tenant.CurrentRole, "MANAGER_CREATED", "users");
 
@@ -516,6 +504,11 @@ public class AuthService(
             claims.Add(new("restaurant_id", user.RestaurantId.Value.ToString()));
         }
 
+        if (string.IsNullOrWhiteSpace(jwt.Value.SecretKey) || jwt.Value.SecretKey.Length < 32)
+        {
+            throw new InvalidOperationException("Jwt:SecretKey must be configured with at least 32 characters.");
+        }
+
         return new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(
             jwt.Value.Issuer,
             jwt.Value.Audience,
@@ -526,47 +519,5 @@ public class AuthService(
                 SecurityAlgorithms.HmacSha256
             )
         ));
-    }
-
-    private async Task EnsureUsersRoleConstraintAllowsManagerAsync()
-    {
-        try
-        {
-            if (db.Database.IsNpgsql())
-            {
-                await db.Database.ExecuteSqlRawAsync(@"
-                    DO $$
-                    DECLARE
-                        r RECORD;
-                    BEGIN
-                        -- Drop and recreate any constraint named users_role_check across all schemas
-                        FOR r IN (
-                            SELECT n.nspname AS schemaname, c.conname
-                            FROM pg_constraint c
-                            JOIN pg_namespace n ON n.oid = c.connamespace
-                            WHERE c.conname = 'users_role_check'
-                        ) LOOP
-                            EXECUTE 'ALTER TABLE ' || quote_ident(r.schemaname) || '.users DROP CONSTRAINT IF EXISTS ' || quote_ident(r.conname);
-                        END LOOP;
-
-                        -- Explicitly for restaurant_pos.users
-                        BEGIN
-                            ALTER TABLE restaurant_pos.users DROP CONSTRAINT IF EXISTS users_role_check;
-                        EXCEPTION WHEN OTHERS THEN NULL;
-                        END;
-
-                        -- Explicitly for public.users
-                        BEGIN
-                            ALTER TABLE public.users DROP CONSTRAINT IF EXISTS users_role_check;
-                        EXCEPTION WHEN OTHERS THEN NULL;
-                        END;
-                    END $$;
-                ");
-            }
-        }
-        catch
-        {
-            // Ignore if offline
-        }
     }
 }
