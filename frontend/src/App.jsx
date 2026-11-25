@@ -24,6 +24,7 @@ import ReceptionistDashboard from './pages/receptionist/ReceptionistDashboard';
 import LoginPage from './pages/auth/LoginPage';
 import CustomerLoginPage from './pages/auth/CustomerLoginPage';
 import PosWorkspace from './pages/pos/PosWorkspace';
+import SuperAdminDashboard from './pages/admin/SuperAdminDashboard';
 import PosShell from './components/pos/PosShell';
 import { Spinner } from './components/pos/PosUI';
 import './styles/website.css';
@@ -44,6 +45,7 @@ function RoleRoute({ allowedRoles, children }) {
   if (!allowedRoles.includes(role)) {
     const getRoleDestination = (userRole) => {
       switch (userRole) {
+        case 'SUPER_ADMIN': return { name: 'SaaS Admin Console', path: '/admin', badge: '👑 SUPER ADMIN' };
         case 'MANAGER': return { name: 'Manager Portal / POS', path: '/pos', badge: '👔 MANAGER' };
         case 'WAITER': return { name: 'Waiter Dashboard', path: '/waiter', badge: '🤵 WAITER' };
         case 'KITCHEN': return { name: 'Kitchen KDS Display', path: '/kitchen', badge: '👨‍🍳 KITCHEN' };
@@ -104,13 +106,14 @@ function SmartPortalRedirect() {
     return <Navigate to="/pos/login" replace />;
   }
   switch (role) {
+    case 'SUPER_ADMIN':
+      return <Navigate to="/admin" replace />;
     case 'WAITER':
       return <Navigate to="/waiter" replace />;
     case 'KITCHEN':
       return <Navigate to="/kitchen" replace />;
     case 'RECEPTIONIST':
     case 'MANAGER':
-    case 'SUPER_ADMIN':
       return <Navigate to="/pos" replace />;
     case 'CUSTOMER':
       return <Navigate to="/menu" replace />;
@@ -123,7 +126,7 @@ function MainApp() {
   const [isCartOpen, setIsCartOpen] = useState(false);
   const location = useLocation();
   const isStaffLogin = location.pathname === '/pos/login' || location.pathname === '/staff/login';
-  const isWorkspace = /^\/(pos|kitchen|waiter|receptionist)(\/|$)/.test(location.pathname);
+  const isWorkspace = /^\/(pos|kitchen|waiter|receptionist|admin)(\/|$)/.test(location.pathname);
   const isQrMenu = location.pathname.startsWith('/qr/');
   const isPublicWebsite = !isStaffLogin && !isWorkspace && !isQrMenu;
 
@@ -198,6 +201,16 @@ function MainApp() {
           />
 
           <Route path="/pos/*" element={<RoleRoute allowedRoles={['RECEPTIONIST', 'MANAGER', 'SUPER_ADMIN']}><PosWorkspace /></RoleRoute>} />
+
+          {/* Super Admin SaaS Platform Control Plane */}
+          <Route
+            path="/admin/*"
+            element={
+              <RoleRoute allowedRoles={['SUPER_ADMIN']}>
+                <SuperAdminDashboard />
+              </RoleRoute>
+            }
+          />
 
           {/* Smart Portal & Dashboard Route Redirectors */}
           <Route path="/portal" element={<SmartPortalRedirect />} />

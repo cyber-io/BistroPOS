@@ -132,8 +132,41 @@ public class RestaurantsController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetRestaurants()
     {
-        var restaurants = await _db.Restaurants.Where(r => r.Status == "ACTIVE").ToListAsync();
+        var isSuperAdmin = User.IsInRole(UserRoles.SuperAdmin);
+        var query = isSuperAdmin ? _db.Restaurants.AsQueryable() : _db.Restaurants.Where(r => r.Status == "ACTIVE");
+        var restaurants = await query.OrderByDescending(r => r.CreatedAt).ToListAsync();
         return Ok(restaurants);
+    }
+
+    [Authorize(Roles = UserRoles.SuperAdmin)]
+    [HttpGet("summary")]
+    public async Task<IActionResult> GetPlatformSummary()
+    {
+        var totalRestaurants = await _db.Restaurants.CountAsync();
+        var activeRestaurants = await _db.Restaurants.CountAsync(r => r.Status == "ACTIVE");
+        var totalTables = await _db.Tables.CountAsync();
+        var totalManagers = await _db.Users.CountAsync(u => u.Role == UserRoles.Manager);
+        var totalOrders = await _db.Orders.CountAsync();
+        return Ok(new
+        {
+            totalRestaurants,
+            activeRestaurants,
+            totalTables,
+            totalManagers,
+            totalOrders
+        });
+    }
+
+    [Authorize(Roles = UserRoles.SuperAdmin)]
+    [HttpPut("{id:guid}/status")]
+    public async Task<IActionResult> UpdateRestaurantStatus(Guid id, [FromBody] UpdateRestaurantStatusDto dto)
+    {
+        var restaurant = await _db.Restaurants.FindAsync(id);
+        if (restaurant == null) return NotFound();
+        restaurant.Status = dto.Status.ToUpperInvariant();
+        restaurant.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+        return Ok(restaurant);
     }
 
     [HttpGet("{id:guid}")]
@@ -162,6 +195,77 @@ public class RestaurantsController : ControllerBase
         await _db.SaveChangesAsync();
         return Ok(restaurant);
     }
+
+    [Authorize(Roles = UserRoles.SuperAdmin)]
+    [HttpPost]
+    public async Task<IActionResult> CreateRestaurant([FromBody] CreateRestaurantDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Name))
+            return BadRequest(new { message = "Restaurant name is required." });
+        if (string.IsNullOrWhiteSpace(dto.Address))
+            return BadRequest(new { message = "Restaurant address is required." });
+        if (string.IsNullOrWhiteSpace(dto.Phone))
+            return BadRequest(new { message = "Contact phone is required." });
+        if (string.IsNullOrWhiteSpace(dto.Email))
+            return BadRequest(new { message = "Contact email is required." });
+
+        var restaurant = new Restaurant
+        {
+            RestaurantId = Guid.NewGuid(),
+            Name = dto.Name.Trim(),
+            Address = dto.Address.Trim(),
+            Phone = dto.Phone.Trim(),
+            Email = dto.Email.Trim().ToLowerInvariant(),
+            Logo = dto.Logo?.Trim(),
+            OpeningHours = dto.OpeningHours ?? "{\"mon\":\"09:00 - 22:00\",\"tue\":\"09:00 - 22:00\",\"wed\":\"09:00 - 22:00\",\"thu\":\"09:00 - 22:00\",\"fri\":\"09:00 - 23:00\",\"sat\":\"09:00 - 23:00\",\"sun\":\"09:00 - 22:00\"}",
+            Settings = System.Text.Json.JsonSerializer.Serialize(new { taxRate = dto.TaxRate ?? 0.05m, currency = "INR" }),
+            Status = "ACTIVE",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        _db.Restaurants.Add(restaurant);
+
+        // Auto-seed initial tables if specified
+        var tableCount = dto.InitialTableCount ?? 10;
+        if (tableCount > 0)
+        {
+            for (int i = 1; i <= Math.Min(tableCount, 50); i++)
+            {
+                _db.Tables.Add(new TableEntity
+                {
+                    TableId = Guid.NewGuid(),
+                    RestaurantId = restaurant.RestaurantId,
+                    TableNumber = i,
+                    Capacity = (i % 4 == 0) ? 6 : (i % 2 == 0) ? 2 : 4,
+                    Status = TableStatuses.Available,
+                    QrIdentifier = $"rest_{restaurant.RestaurantId.ToString("N")[..8]}_tbl_{i:D2}",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
+            }
+        }
+
+        // Auto-seed starter menu categories
+        var defaultCategories = new[] { "Starters & Appetizers", "Main Course", "Breads & Rice", "Desserts", "Beverages" };
+        int sort = 0;
+        foreach (var catName in defaultCategories)
+        {
+            _db.MenuCategories.Add(new MenuCategory
+            {
+                CategoryId = Guid.NewGuid(),
+                RestaurantId = restaurant.RestaurantId,
+                Name = catName,
+                SortOrder = sort++,
+                Status = "ACTIVE",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+        }
+
+        await _db.SaveChangesAsync();
+        return CreatedAtAction(nameof(GetRestaurantById), new { id = restaurant.RestaurantId }, restaurant);
+    }
 }
 
 [ApiController]
@@ -169,10 +273,12 @@ public class RestaurantsController : ControllerBase
 public class TablesController : ControllerBase
 {
     private readonly ITableService _tables;
+    private readonly ITenantContext _tenant;
 
-    public TablesController(ITableService tables)
+    public TablesController(ITableService tables, ITenantContext tenant)
     {
         _tables = tables;
+        _tenant = tenant;
     }
 
     [HttpGet]
@@ -200,6 +306,53 @@ public class TablesController : ControllerBase
         var success = await _tables.UpdateTableStatusAsync(id, request);
         if (!success) return NotFound();
         return Ok(new { success = true, message = "Table status updated successfully." });
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
+    [HttpPost]
+    public async Task<IActionResult> CreateTable([FromBody] CreateTableRequest request, [FromQuery] Guid? restaurantId)
+    {
+        Guid targetRestaurantId;
+        if (_tenant.IsManager)
+        {
+            targetRestaurantId = _tenant.GetRequiredRestaurantId();
+        }
+        else if (_tenant.IsSuperAdmin)
+        {
+            targetRestaurantId = request.RestaurantId ?? restaurantId ?? _tenant.RestaurantId ?? UserProvisioning.DefaultRestaurantId;
+        }
+        else
+        {
+            return Forbid();
+        }
+
+        var created = await _tables.CreateTableAsync(request, targetRestaurantId);
+        return CreatedAtAction(nameof(GetTableById), new { id = created.TableId }, created);
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
+    [HttpPut("{id:guid}")]
+    public async Task<IActionResult> UpdateTable(Guid id, [FromBody] UpdateTableRequest request)
+    {
+        var updated = await _tables.UpdateTableAsync(id, request);
+        if (updated == null) return NotFound();
+        return Ok(updated);
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> DeleteTable(Guid id)
+    {
+        try
+        {
+            var success = await _tables.DeleteTableAsync(id);
+            if (!success) return NotFound();
+            return Ok(new { success = true, message = "Table deleted successfully." });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 }
 
@@ -836,6 +989,30 @@ public class UsersController : ControllerBase
         var users = await query.ToListAsync();
         var dtos = users.Select(u => new UserDto(u.UserId, u.RestaurantId, u.Name, u.Email, u.Phone, u.Role, u.Status)).ToList();
         return Ok(dtos);
+    }
+
+    [Authorize(Roles = UserRoles.SuperAdmin)]
+    [HttpGet("managers")]
+    public async Task<IActionResult> GetAllManagers()
+    {
+        var managers = await _db.Users
+            .Include(u => u.Restaurant)
+            .Where(u => u.Role == UserRoles.Manager)
+            .OrderBy(u => u.Name)
+            .Select(u => new
+            {
+                u.UserId,
+                u.RestaurantId,
+                RestaurantName = u.Restaurant != null ? u.Restaurant.Name : "Unassigned",
+                u.Name,
+                u.Email,
+                u.Phone,
+                u.Role,
+                u.Status,
+                u.CreatedAt
+            })
+            .ToListAsync();
+        return Ok(managers);
     }
 
     [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]

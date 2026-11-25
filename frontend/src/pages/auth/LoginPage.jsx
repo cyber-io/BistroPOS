@@ -21,12 +21,13 @@ export default function LoginPage() {
   const location = useLocation();
   const redirect = new URLSearchParams(location.search).get('redirect');
   const nextPath = userRole => {
-    const defaultPath = userRole === 'KITCHEN' ? '/kitchen' : userRole === 'WAITER' ? '/waiter' : ['RECEPTIONIST', 'MANAGER', 'SUPER_ADMIN'].includes(userRole) ? '/pos' : '/menu';
+    const defaultPath = userRole === 'SUPER_ADMIN' ? '/admin' : userRole === 'KITCHEN' ? '/kitchen' : userRole === 'WAITER' ? '/waiter' : ['RECEPTIONIST', 'MANAGER'].includes(userRole) ? '/pos' : '/menu';
     if (!redirect || !redirect.startsWith('/') || redirect.startsWith('//')) return defaultPath;
     const staffPath = redirect.startsWith('/pos') || redirect.startsWith('/receptionist');
     if (staffPath && !['RECEPTIONIST', 'MANAGER', 'SUPER_ADMIN'].includes(userRole)) return defaultPath;
     if (redirect.startsWith('/kitchen') && !['KITCHEN', 'SUPER_ADMIN'].includes(userRole)) return defaultPath;
     if (redirect.startsWith('/waiter') && !['WAITER', 'SUPER_ADMIN'].includes(userRole)) return defaultPath;
+    if (redirect.startsWith('/admin') && userRole !== 'SUPER_ADMIN') return defaultPath;
     return redirect;
   };
   const submit = async event => {

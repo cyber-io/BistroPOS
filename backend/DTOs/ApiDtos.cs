@@ -191,6 +191,20 @@ public record UpdateTableStatusRequest(
     Guid? AssignedWaiterId
 );
 
+public record CreateTableRequest(
+    int? TableNumber,
+    int? Capacity,
+    string? Area,
+    Guid? RestaurantId
+);
+
+public record UpdateTableRequest(
+    int? TableNumber,
+    int? Capacity,
+    string? Area,
+    string? Status
+);
+
 public record QrValidationResponse(
     bool IsValid,
     Guid? RestaurantId,
@@ -352,6 +366,21 @@ public record ResolveIssueDto(
 public record DemoLoginRequest(string Role, Guid? RestaurantId = null);
 
 // --- RESTAURANT & STAFF MANAGEMENT DTOS (PHASE 2 RBAC) ---
+public record CreateRestaurantDto(
+    [Required, MaxLength(255)] string Name,
+    [Required, MaxLength(255)] string Address,
+    [Required, MaxLength(30)] string Phone,
+    [Required, EmailAddress, MaxLength(255)] string Email,
+    string? Logo = null,
+    string? OpeningHours = null,
+    decimal? TaxRate = null,
+    int? InitialTableCount = null
+);
+
+public record UpdateRestaurantStatusDto(
+    [Required] string Status
+);
+
 public record UpdateRestaurantSettingsDto(
     string? Name,
     string? Phone,

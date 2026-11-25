@@ -180,6 +180,102 @@ public class TableService : ITableService
 
         return true;
     }
+
+    public async Task<TableDto> CreateTableAsync(CreateTableRequest request, Guid targetRestaurantId)
+    {
+        int tableNumber = request.TableNumber ?? 0;
+        if (tableNumber <= 0)
+        {
+            var maxNumber = await _db.Tables
+                .Where(t => t.RestaurantId == targetRestaurantId)
+                .Select(t => (int?)t.TableNumber)
+                .MaxAsync() ?? 0;
+            tableNumber = maxNumber + 1;
+        }
+
+        int capacity = request.Capacity.GetValueOrDefault(4);
+        if (capacity <= 0) capacity = 4;
+
+        var table = new TableEntity
+        {
+            TableId = Guid.NewGuid(),
+            RestaurantId = targetRestaurantId,
+            TableNumber = tableNumber,
+            Capacity = capacity,
+            Status = TableStatuses.Available,
+            QrIdentifier = $"rest_{targetRestaurantId.ToString("N")[..8]}_tbl_{tableNumber:D02}",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        _db.Tables.Add(table);
+        await _db.SaveChangesAsync();
+
+        return new TableDto(
+            table.TableId,
+            table.RestaurantId,
+            table.TableNumber,
+            table.Capacity,
+            table.Status,
+            table.QrIdentifier,
+            table.CurrentCustomerName,
+            table.AssignedWaiterId,
+            null
+        );
+    }
+
+    public async Task<bool> DeleteTableAsync(Guid tableId)
+    {
+        var table = await _db.Tables.FindAsync(tableId);
+        if (table == null) return false;
+
+        var hasActiveOrders = await _db.Orders.AnyAsync(o => o.TableId == tableId && o.Status != "COMPLETED" && o.Status != "CANCELLED");
+        if (hasActiveOrders)
+        {
+            throw new InvalidOperationException("Cannot delete table with active orders. Complete or cancel active orders first.");
+        }
+
+        _db.Tables.Remove(table);
+        await _db.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<TableDto?> UpdateTableAsync(Guid tableId, UpdateTableRequest request)
+    {
+        var table = await _db.Tables.Include(t => t.AssignedWaiter).FirstOrDefaultAsync(t => t.TableId == tableId);
+        if (table == null) return null;
+
+        if (request.TableNumber.HasValue && request.TableNumber.Value > 0)
+        {
+            table.TableNumber = request.TableNumber.Value;
+            table.QrIdentifier = $"rest_{table.RestaurantId.ToString("N")[..8]}_tbl_{table.TableNumber:D02}";
+        }
+
+        if (request.Capacity.HasValue && request.Capacity.Value > 0)
+        {
+            table.Capacity = request.Capacity.Value;
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Status))
+        {
+            table.Status = request.Status;
+        }
+
+        table.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        return new TableDto(
+            table.TableId,
+            table.RestaurantId,
+            table.TableNumber,
+            table.Capacity,
+            table.Status,
+            table.QrIdentifier,
+            table.CurrentCustomerName,
+            table.AssignedWaiterId,
+            table.AssignedWaiter?.Name
+        );
+    }
 }
 
 public class HelpRequestService : IHelpRequestService

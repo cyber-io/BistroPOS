@@ -44,6 +44,9 @@ public interface ITableService
     Task<TableDto?> GetTableByIdAsync(Guid tableId);
     Task<QrValidationResponse> ValidateQrAsync(string qrIdentifier);
     Task<bool> UpdateTableStatusAsync(Guid tableId, UpdateTableStatusRequest request);
+    Task<TableDto> CreateTableAsync(CreateTableRequest request, Guid targetRestaurantId);
+    Task<bool> DeleteTableAsync(Guid tableId);
+    Task<TableDto?> UpdateTableAsync(Guid tableId, UpdateTableRequest request);
 }
 
 public interface IHelpRequestService

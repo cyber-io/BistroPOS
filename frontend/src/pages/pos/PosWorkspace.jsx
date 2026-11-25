@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Plus, Search, RefreshCw, ArrowUpRight, CreditCard, Banknote, Timer, Check, ClipboardCheck, ClipboardList, Package, Armchair, CalendarDays, History, LayoutGrid, Info, AlertCircle, Bell, SlidersHorizontal, UtensilsCrossed, ShoppingBag, Truck, Minus, Trash2, Printer, QrCode, ArrowLeft, CheckCircle2, X, Users, HandPlatter, Coffee, MapPin, Download, Sparkles, ChevronLeft, ChevronRight, Calendar, ChevronDown, ChevronUp, Clock, Phone, User, UserPlus, ShieldCheck, FolderPlus, Pencil, Building2, Lock, Mail, Eye, EyeOff, ChefHat, UserCheck, Flame } from 'lucide-react';
 import QRCode from 'qrcode';
-import { api, subscribeRealtimeEvents, uniqueKey, getActiveRestaurantId } from '../../services/api';
+import { api, subscribeRealtimeEvents, uniqueKey, getActiveRestaurantId, setActiveRestaurantId } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useNotification } from '../../context/NotificationContext';
 import PosShell from '../../components/pos/PosShell';
@@ -1481,13 +1481,23 @@ export default function PosWorkspace() {
                           })}
                         </div>
                       </div>
-                      <div className="pos-floor-header">
+                      <div className="pos-floor-header" style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
                         <div className="pos-legend">
                           <span><i /> Available</span>
                           <span><i className="occupied" /> Occupied</span>
                           <span><i className="reserved" /> Reserved</span>
                           <span><i className="cleaning" /> Cleaning</span>
                         </div>
+                        {['SUPER_ADMIN', 'MANAGER'].includes(currentUser?.role) && (
+                          <button
+                            type="button"
+                            className="pos-button primary small"
+                            onClick={() => setDialog('add-table')}
+                            style={{ gap: 6, padding: '6px 14px', fontSize: 12, borderRadius: 8, whiteSpace: 'nowrap' }}
+                          >
+                            <Plus size={13} /> Add Table
+                          </button>
+                        )}
                       </div>
                     </div>
                     <TableFloorPlan
@@ -2027,6 +2037,25 @@ export default function PosWorkspace() {
               onNew={() => newOrder(selected)}
               onPay={pay}
               paidIds={paidIds}
+              canManage={['SUPER_ADMIN', 'MANAGER'].includes(currentUser?.role)}
+              onDeleted={async () => {
+                close();
+                addToast('Table removed successfully', 'success');
+                await load(true);
+              }}
+            />
+          </ErrorBoundary>
+        )}
+        {dialog === 'add-table' && (
+          <ErrorBoundary onReset={close}>
+            <AddTableModal
+              tables={data.tables}
+              onClose={close}
+              onCreated={async (newTable) => {
+                close();
+                addToast(`Table ${newTable.tableNumber} (${newTable.capacity} seats) added`, 'success');
+                await load(true);
+              }}
             />
           </ErrorBoundary>
         )}
@@ -2323,6 +2352,156 @@ function AddManagerModal({ restaurants = [], defaultRestaurantId, onClose, onSuc
           >
             {busy ? <RefreshCw className="pos-spin" size={14} /> : <UserPlus size={15} />}
             {busy ? 'Assigning Manager…' : 'Assign General Manager'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function AddTableModal({ tables = [], onClose, onCreated }) {
+  const nextNumber = useMemo(() => {
+    return tables.reduce((max, t) => Math.max(max, Number(t.tableNumber) || 0), 0) + 1;
+  }, [tables]);
+
+  const [tableNumber, setTableNumber] = useState(nextNumber);
+  const [capacity, setCapacity] = useState(4);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const capacityPresets = [2, 4, 6, 8, 10, 12];
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!tableNumber || Number(tableNumber) <= 0) {
+      setError('Please enter a valid table number.');
+      return;
+    }
+    if (!capacity || Number(capacity) <= 0) {
+      setError('Please enter seating capacity.');
+      return;
+    }
+
+    try {
+      setBusy(true);
+      setError(null);
+      const res = await api.createTable({
+        tableNumber: Number(tableNumber),
+        capacity: Number(capacity)
+      });
+      onCreated(res);
+    } catch (err) {
+      setError(err.message || 'Failed to create table.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title="Add New Dining Table" onClose={onClose}>
+      <form onSubmit={handleSubmit} style={{ padding: '24px' }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          padding: '14px 16px',
+          background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(37, 99, 235, 0.06))',
+          borderRadius: 12,
+          border: '1px solid rgba(59, 130, 246, 0.25)',
+          marginBottom: 20
+        }}>
+          <div style={{
+            width: 40,
+            height: 40,
+            borderRadius: 10,
+            background: 'linear-gradient(135deg, #3b82f6, #2563eb)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#fff',
+            boxShadow: '0 4px 12px rgba(59, 130, 246, 0.3)',
+            flexShrink: 0
+          }}>
+            <Armchair size={22} />
+          </div>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: 'var(--p-text)' }}>
+              Configure Custom Dining Table
+            </h3>
+            <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--p-muted)', lineHeight: 1.4 }}>
+              Set custom seating capacity (2-seater, 4-seater, VIP) and table number. A unique QR ordering code will be auto-generated.
+            </p>
+          </div>
+        </div>
+
+        {error && (
+          <div className="pos-error" style={{ marginBottom: 16 }} role="alert">
+            <AlertCircle size={15} /> {error}
+          </div>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 18 }}>
+          <label className="pos-field">
+            <span>Table Number / Identifier *</span>
+            <input
+              type="number"
+              min={1}
+              max={999}
+              className="pos-input"
+              value={tableNumber}
+              onChange={e => setTableNumber(e.target.value)}
+              placeholder="e.g. 1"
+              required
+              autoFocus
+            />
+            <small style={{ fontSize: 11, color: 'var(--p-muted)', marginTop: 4 }}>
+              Suggested: Table {nextNumber}
+            </small>
+          </label>
+
+          <label className="pos-field">
+            <span>Custom Seating Capacity (Seats) *</span>
+            <input
+              type="number"
+              min={1}
+              max={100}
+              className="pos-input"
+              value={capacity}
+              onChange={e => setCapacity(e.target.value)}
+              placeholder="e.g. 4"
+              required
+            />
+            <small style={{ fontSize: 11, color: 'var(--p-muted)', marginTop: 4 }}>
+              Number of guests accommodated
+            </small>
+          </label>
+        </div>
+
+        {/* Quick Capacity Presets */}
+        <div style={{ marginBottom: 20 }}>
+          <span style={{ display: 'block', fontSize: 11, fontWeight: 650, color: 'var(--p-muted)', textTransform: 'uppercase', marginBottom: 8 }}>
+            Quick Seating Presets
+          </span>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {capacityPresets.map(preset => (
+              <button
+                key={preset}
+                type="button"
+                className={`pos-button small ${Number(capacity) === preset ? 'primary' : ''}`}
+                style={{ borderRadius: 8, padding: '6px 14px', fontSize: 12 }}
+                onClick={() => setCapacity(preset)}
+              >
+                {preset} Seats {preset === 2 ? '👫' : preset === 4 ? '👨‍👩‍👧‍👦' : preset >= 8 ? '🎉' : '🍽️'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="pos-modal-footer" style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', paddingTop: 16, borderTop: '1px solid var(--p-border)' }}>
+          <button type="button" className="pos-button" onClick={onClose} disabled={busy}>Cancel</button>
+          <button type="submit" className="pos-button primary" disabled={busy}>
+            {busy ? <RefreshCw size={14} className="pos-spin" /> : <Plus size={14} />}
+            {busy ? 'Creating Table…' : 'Add Table & Generate QR'}
           </button>
         </div>
       </form>
@@ -4507,7 +4686,7 @@ function PaymentDialog({ order, restaurant, onClose, onPaid }) {
   );
 }
 
-function TableDialog({ restaurant, table, orders, reservations, onClose, busy, run, onOrder, onNew, onPay, paidIds }) {
+function TableDialog({ restaurant, table, orders, reservations, onClose, busy, run, onOrder, onNew, onPay, paidIds, canManage, onDeleted }) {
   const [qr, setQr] = useState(false);
   const [qrImage, setQrImage] = useState('');
   const site = restaurant?.settings?.publicWebsiteUrl || import.meta.env.VITE_PUBLIC_SITE_URL || window.location.origin;
@@ -4669,6 +4848,27 @@ function TableDialog({ restaurant, table, orders, reservations, onClose, busy, r
           </select>
           <small>After checkout, the table is automatically sent for cleaning. Make it available once it is sanitized and ready for the next guest.</small>
         </label>
+        {canManage && orders.length === 0 && (
+          <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--p-border)', display: 'flex', justifyContent: 'flex-end' }}>
+            <button
+              className="pos-button small"
+              style={{ color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)', background: 'rgba(239, 68, 68, 0.05)', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              disabled={busy}
+              onClick={async () => {
+                if (window.confirm(`Are you sure you want to delete Table ${table.tableNumber}?`)) {
+                  try {
+                    await api.deleteTable(table.tableId);
+                    if (onDeleted) onDeleted();
+                  } catch (err) {
+                    alert(err.message || 'Failed to delete table');
+                  }
+                }
+              }}
+            >
+              <Trash2 size={13} /> Delete Table
+            </button>
+          </div>
+        )}
       </div>
     </Modal>
   );
