@@ -513,10 +513,14 @@ public class MenuController : ControllerBase
     }
 
     [HttpGet("categories")]
-    public async Task<IActionResult> GetCategories([FromQuery] Guid restaurantId)
+    public async Task<IActionResult> GetCategories([FromQuery] Guid? restaurantId)
     {
+        var targetId = (restaurantId.HasValue && restaurantId.Value != Guid.Empty)
+            ? restaurantId.Value
+            : UserProvisioning.DefaultRestaurantId;
+
         var categories = await _db.MenuCategories
-            .Where(c => c.RestaurantId == restaurantId && c.Status == "ACTIVE")
+            .Where(c => c.RestaurantId == targetId && c.Status == "ACTIVE")
             .OrderBy(c => c.SortOrder)
             .ToListAsync();
         return Ok(categories);
@@ -614,9 +618,13 @@ public class MenuController : ControllerBase
     }
 
     [HttpGet("items")]
-    public async Task<IActionResult> GetMenuItems([FromQuery] Guid restaurantId, [FromQuery] Guid? categoryId, [FromQuery] string? vegFilter)
+    public async Task<IActionResult> GetMenuItems([FromQuery] Guid? restaurantId, [FromQuery] Guid? categoryId, [FromQuery] string? vegFilter)
     {
-        var query = _db.MenuItems.Include(m => m.Category).Where(m => m.RestaurantId == restaurantId);
+        var targetId = (restaurantId.HasValue && restaurantId.Value != Guid.Empty)
+            ? restaurantId.Value
+            : UserProvisioning.DefaultRestaurantId;
+
+        var query = _db.MenuItems.Include(m => m.Category).Where(m => m.RestaurantId == targetId);
 
         if (categoryId.HasValue)
         {
