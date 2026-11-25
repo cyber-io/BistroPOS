@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Users, DollarSign, Sparkles, X, Check, Calculator, Receipt, Gift } from 'lucide-react';
 import { api } from '../../services/api';
 import { useNotification } from '../../context/NotificationContext';
@@ -29,15 +29,41 @@ export default function BillSplitAndTipModal({
   // Itemized assignments: itemId -> personIndex (0, 1, 2, ...)
   const [itemAssignments, setItemAssignments] = useState({});
 
+  useEffect(() => {
+    setItemAssignments(prev => {
+      const cleaned = {};
+      let changed = false;
+      Object.entries(prev).forEach(([k, v]) => {
+        if (v >= splitCount) {
+          cleaned[k] = 0;
+          changed = true;
+        } else {
+          cleaned[k] = v;
+        }
+      });
+      return changed ? cleaned : prev;
+    });
+  }, [splitCount]);
+
+  useEffect(() => {
+    if (splitMode === 'ITEMIZED' && splitCount > 4) {
+      setSplitCount(4);
+    }
+  }, [splitMode, splitCount]);
+
   if (!isOpen) return null;
 
-  // Tip calculation
+  // Tip calculation (clamp negative custom tip)
   const computedTip = tipPercent === -1
-    ? (Number(customTip) || 0)
+    ? Math.max(0, Number(customTip) || 0)
     : Math.round((subtotal * tipPercent) / 100);
 
-  const grandTotal = Math.max(0, subtotal + tax + computedTip - loyaltyDiscount);
-  const perPersonEqual = (grandTotal / splitCount).toFixed(2);
+  const effectiveDiscount = Math.min(subtotal + tax + computedTip, Math.max(0, loyaltyDiscount));
+  const grandTotal = Math.max(0, subtotal + tax + computedTip - effectiveDiscount);
+  const baseEqualShare = Math.round((grandTotal / splitCount) * 100) / 100;
+  const lastEqualShare = Math.round(Math.max(0, grandTotal - baseEqualShare * (splitCount - 1)) * 100) / 100;
+  const perPersonEqual = baseEqualShare.toFixed(2);
+  const hasRoundingRemainder = Math.abs(lastEqualShare - baseEqualShare) >= 0.005;
 
   // Handle Loyalty Check
   const handleCheckLoyalty = async (e) => {
@@ -55,30 +81,56 @@ export default function BillSplitAndTipModal({
       } else {
         addToast('No active points yet. You will earn points on this order!', 'info');
       }
-    } catch {
-      addToast('Unable to fetch loyalty account. Please continue.', 'warning');
+    } catch (err) {
+      addToast(err?.message || 'Unable to fetch loyalty account. Please continue.', 'warning');
     } finally {
       setIsCheckingLoyalty(false);
     }
   };
 
-  // Redeem Loyalty points (100 points = ₹50 off)
+  // Redeem Loyalty points estimate (100 points = ₹50 off; toggles off on repeat click)
   const handleRedeemPoints = (points) => {
+    if (redeemedPoints === points) {
+      setRedeemedPoints(0);
+      setLoyaltyDiscount(0);
+      addToast('Loyalty discount cleared.', 'info');
+      return;
+    }
     const discount = (points * 0.5);
     setRedeemedPoints(points);
     setLoyaltyDiscount(discount);
-    addToast(`Applied ₹${discount} discount from ${points} points!`, 'success');
+    addToast(`Applied ₹${discount} estimated discount from ${points} points!`, 'success');
   };
 
-  // Itemized Calculations
-  const getItemDinerTotal = (dinerIndex) => {
-    const assignedItems = items.filter((_, idx) => (itemAssignments[idx] ?? 0) === dinerIndex);
-    const dinerSubtotal = assignedItems.reduce((acc, item) => acc + (Number(item.price || item.priceSnapshot || item.unitPrice || 0) * (item.quantity || 1)), 0);
-    const taxShare = (tax * (dinerSubtotal / (subtotal || 1)));
-    const tipShare = (computedTip * (dinerSubtotal / (subtotal || 1)));
-    const discountShare = (loyaltyDiscount * (dinerSubtotal / (subtotal || 1)));
-    return Math.max(0, dinerSubtotal + taxShare + tipShare - discountShare).toFixed(2);
-  };
+  // Itemized Calculations (reconciled so shares always sum to grandTotal)
+  const itemLineTotal = (item) => Number(
+    item.lineTotal ?? ((Number(item.price || item.priceSnapshot || item.unitPrice || 0)) * (item.quantity || 1))
+  );
+  const totalAssignedBase = items.reduce((acc, item) => acc + itemLineTotal(item), 0);
+  const itemizedDenominator = totalAssignedBase > 0 ? totalAssignedBase : (subtotal || 1);
+
+  const itemizedDinerTotals = (() => {
+    const totals = [];
+    let allocated = 0;
+    for (let dIdx = 0; dIdx < splitCount; dIdx++) {
+      if (dIdx === splitCount - 1) {
+        totals.push(Math.max(0, grandTotal - allocated).toFixed(2));
+      } else {
+        const assignedItems = items.filter((_, idx) => {
+          const assigned = itemAssignments[idx] ?? 0;
+          const clamped = assigned < splitCount ? assigned : 0;
+          return clamped === dIdx;
+        });
+        const dinerSubtotal = assignedItems.reduce((acc, item) => acc + itemLineTotal(item), 0);
+        const share = Math.round((grandTotal * (dinerSubtotal / itemizedDenominator)) * 100) / 100;
+        allocated += share;
+        totals.push(Math.max(0, share).toFixed(2));
+      }
+    }
+    return totals;
+  })();
+
+  const getItemDinerTotal = (dinerIndex) => itemizedDinerTotals[dinerIndex] ?? '0.00';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs">
@@ -162,7 +214,9 @@ export default function BillSplitAndTipModal({
               <div className="p-3 bg-purple-50/80 rounded-xl border border-purple-200 text-center">
                 <p className="text-[10px] text-purple-700 font-bold uppercase tracking-wider">Each Diner Pays:</p>
                 <p className="text-xl font-black text-purple-950 mt-0.5">₹{perPersonEqual}</p>
-                <p className="text-[10px] text-slate-400 mt-0.5">Includes taxes and staff tip</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">
+                  Includes taxes and staff tip{hasRoundingRemainder ? ` (Diner ${splitCount}: ₹${lastEqualShare.toFixed(2)} for exact total)` : ''}
+                </p>
               </div>
             </div>
           ) : (
@@ -266,9 +320,14 @@ export default function BillSplitAndTipModal({
             {tipPercent === -1 && (
               <input
                 type="number"
+                min="0"
+                step="1"
                 placeholder="Enter custom tip amount in ₹"
                 value={customTip}
-                onChange={(e) => setCustomTip(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setCustomTip(val === '' ? '' : String(Math.max(0, Number(val) || 0)));
+                }}
                 className="w-full p-2.5 rounded-xl border border-slate-300 text-xs font-semibold focus:ring-2 focus:ring-purple-500 focus:outline-none bg-white text-slate-800"
               />
             )}
@@ -309,9 +368,22 @@ export default function BillSplitAndTipModal({
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-[11px] text-indigo-900">
                   <span>Available Points: <strong>{loyaltyAccount.pointsBalance} pts</strong></span>
-                  <span>Value: <strong>₹{(loyaltyAccount.pointsBalance * 0.5).toFixed(0)}</strong></span>
+                  <div className="flex items-center gap-2">
+                    <span>Value: <strong>₹{(loyaltyAccount.pointsBalance * 0.5).toFixed(0)}</strong></span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLoyaltyAccount(null);
+                        setRedeemedPoints(0);
+                        setLoyaltyDiscount(0);
+                      }}
+                      className="text-[10px] font-bold text-indigo-600 hover:underline"
+                    >
+                      Change
+                    </button>
+                  </div>
                 </div>
-                {loyaltyAccount.pointsBalance >= 100 && (
+                {loyaltyAccount.pointsBalance >= 100 ? (
                   <div className="flex flex-wrap gap-2 pt-1">
                     {[100, 200, 500].filter(pts => pts <= loyaltyAccount.pointsBalance).map(pts => (
                       <button
@@ -328,6 +400,8 @@ export default function BillSplitAndTipModal({
                       </button>
                     ))}
                   </div>
+                ) : (
+                  <p className="text-[10px] text-indigo-700 font-medium">Minimum 100 points required to redeem a discount.</p>
                 )}
                 {loyaltyDiscount > 0 && (
                   <p className="text-[11px] text-emerald-700 font-bold flex items-center gap-1">

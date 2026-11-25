@@ -13,3 +13,5 @@ tmp/
 Library/
 backend/.local/
 backend/.nuget/
+backend/appsettings.Development.local.json
+backend/appsettings.*.local.json

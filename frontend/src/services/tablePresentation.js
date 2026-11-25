@@ -2,10 +2,12 @@ const defaultRestaurantId = 'a0000000-0000-0000-0000-000000000001';
 
 export function diningAreaForTable(table) {
   const explicit = String(table?.diningArea || '').trim().toLowerCase();
-  if (['everyday', 'group', 'family', 'party'].includes(explicit)) return explicit;
+  const num = Number(table?.tableNumber);
   const qr = String(table?.qrIdentifier || '');
-  if (qr.endsWith('_PARTY_HALL') || table?.tableId === 'c2000000-0000-0000-0000-000000000001' || Number(table?.tableNumber) === 201) return 'party';
-  if (/_FAMILY_C[1-4]$/.test(qr) || /^c1000000-0000-0000-0000-00000000000[1-4]$/.test(table?.tableId || '') || (Number(table?.tableNumber) >= 101 && Number(table?.tableNumber) <= 104)) return 'family';
+  if (qr.endsWith('_PARTY_HALL') || table?.tableId === 'c2000000-0000-0000-0000-000000000001' || num === 201) return 'party';
+  if (/_FAMILY_C[1-4]$/.test(qr) || /^c1000000-0000-0000-0000-00000000000[1-4]$/.test(table?.tableId || '') || (num >= 101 && num <= 104)) return 'family';
+  if ([6, 7, 8, 12].includes(num)) return 'group';
+  if (['everyday', 'group', 'family', 'party'].includes(explicit)) return explicit;
   const capacity = Number(table?.capacity);
   return capacity > 10 ? 'family' : capacity > 4 ? 'group' : 'everyday';
 }
@@ -14,20 +16,23 @@ export function tableLabel(table) {
   if (!table) return 'Table';
   if (table.displayName) return table.displayName;
   if (table.tableDisplayName) return table.tableDisplayName;
-  const family = String(table.qrIdentifier || '').match(/_FAMILY_(C[1-4])$/)
-    || String(table.tableId || '').match(/^c1000000-0000-0000-0000-00000000000([1-4])$/);
-  if (family) return family[1].startsWith('C') ? family[1] : `C${family[1]}`;
-  if (String(table.qrIdentifier || '').endsWith('_PARTY_HALL') || table.tableId === 'c2000000-0000-0000-0000-000000000001') return 'Party hall';
-  if (table.restaurantId === defaultRestaurantId) {
-    if (Number(table.tableNumber) >= 101 && Number(table.tableNumber) <= 104) return `C${Number(table.tableNumber) - 100}`;
-    if (Number(table.tableNumber) === 201) return 'Party hall';
+  const num = Number(table.tableNumber);
+  const qr = String(table.qrIdentifier || '');
+  if (qr.endsWith('_PARTY_HALL') || table.tableId === 'c2000000-0000-0000-0000-000000000001' || num === 201) {
+    return 'Party Hall';
   }
-  return table.tableNumber ? `A${table.tableNumber}` : 'Table';
+  if (num >= 101 && num <= 104) {
+    return `C${num - 100}`;
+  }
+  if (!isNaN(num) && num > 0) {
+    return `A${num}`;
+  }
+  return 'Table';
 }
 
 export function tableTitle(table) {
   const name = tableLabel(table);
-  return name === 'Party hall' || name === 'Table' ? name : `Table ${name}`;
+  return name === 'Party Hall' || name === 'Party hall' || name === 'Table' ? name : `Table ${name}`;
 }
 
 export function getPublicOrigin(restaurant) {

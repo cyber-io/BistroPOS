@@ -74,8 +74,14 @@ export default function AiRecommendationsRail({ menuItems = [], cartItems = [], 
                 <span className="text-[9px] font-bold uppercase tracking-wider text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded truncate">
                   {item.categoryName || 'Chef Choice'}
                 </span>
-                <span className="text-[9px] shrink-0 font-medium">
-                  {item.dietaryTags?.includes('VEGAN') ? '🌱 Vegan' : item.vegNonveg === 'VEG' ? '🟢 Veg' : '🔴 Non-Veg'}
+                <span className="shrink-0 flex items-center">
+                  <span className={`inline-block w-3.5 h-3.5 rounded-sm border p-0.5 flex items-center justify-center ${
+                    item.vegNonveg === 'VEG' ? 'border-emerald-600 bg-emerald-50' : 'border-rose-600 bg-rose-50'
+                  }`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${
+                      item.vegNonveg === 'VEG' ? 'bg-emerald-600' : 'bg-rose-600'
+                    }`} />
+                  </span>
                 </span>
               </div>
 

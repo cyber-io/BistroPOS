@@ -16,16 +16,73 @@ public static class DiningLayoutCatalog
         new DiningLayoutDefinition(Guid.Parse("c2000000-0000-0000-0000-000000000001"), 201, 70, "Party hall", "hall", "PARTY_HALL"),
     };
 
-    public static string QrIdentifier(DiningLayoutDefinition definition) => $"DINING_{DefaultRestaurantId:N}_{definition.QrSuffix}";
+    public static string QrIdentifier(DiningLayoutDefinition definition) => QrIdentifier(DefaultRestaurantId, definition);
 
-    public static DiningLayoutDefinition? Find(string qrIdentifier) => Definitions.FirstOrDefault(definition =>
-        string.Equals(qrIdentifier, QrIdentifier(definition), StringComparison.Ordinal));
+    public static string QrIdentifier(Guid restaurantId, DiningLayoutDefinition definition) => $"DINING_{restaurantId:N}_{definition.QrSuffix}";
 
-    public static string Area(int capacity, string qrIdentifier) => Find(qrIdentifier)?.SeatingStyle == "hall"
-        ? "party" : capacity > 10 ? "family" : capacity > 4 ? "group" : "everyday";
+    public static DiningLayoutDefinition? Find(string? qrIdentifier, int tableNumber = 0)
+    {
+        if (!string.IsNullOrEmpty(qrIdentifier))
+        {
+            var match = Definitions.FirstOrDefault(d =>
+                string.Equals(qrIdentifier, QrIdentifier(d), StringComparison.OrdinalIgnoreCase) ||
+                qrIdentifier.EndsWith(d.QrSuffix, StringComparison.OrdinalIgnoreCase));
+            if (match != null) return match;
+        }
 
-    public static string DisplayName(int tableNumber, string qrIdentifier) => Find(qrIdentifier)?.DisplayName ?? $"A{tableNumber}";
+        if (tableNumber > 0)
+        {
+            return Definitions.FirstOrDefault(d => d.TableNumber == tableNumber);
+        }
 
-    public static string SeatingStyle(int capacity, string qrIdentifier) => Find(qrIdentifier)?.SeatingStyle
-        ?? (capacity > 10 ? "chairs" : "standard");
+        return null;
+    }
+
+    public static string Area(int capacity, string? qrIdentifier = null, int tableNumber = 0)
+    {
+        if (tableNumber == 201 || (qrIdentifier != null && qrIdentifier.EndsWith("PARTY_HALL", StringComparison.OrdinalIgnoreCase)))
+            return "party";
+
+        if ((tableNumber >= 101 && tableNumber <= 104) || (qrIdentifier != null && qrIdentifier.Contains("FAMILY_C", StringComparison.OrdinalIgnoreCase)) || capacity > 10)
+            return "family";
+
+        if (tableNumber is 6 or 7 or 8 or 12 || capacity > 4)
+            return "group";
+
+        return "everyday";
+    }
+
+    public static string DisplayName(int tableNumber, string? qrIdentifier = null)
+    {
+        if (tableNumber == 201 || (qrIdentifier != null && qrIdentifier.EndsWith("PARTY_HALL", StringComparison.OrdinalIgnoreCase)))
+            return "Party hall";
+
+        if (tableNumber >= 101 && tableNumber <= 104)
+            return $"C{tableNumber - 100}";
+
+        if (qrIdentifier != null && qrIdentifier.Contains("FAMILY_C", StringComparison.OrdinalIgnoreCase))
+        {
+            var found = Find(qrIdentifier, tableNumber);
+            if (found != null) return found.DisplayName;
+        }
+
+        return $"A{tableNumber}";
+    }
+
+    public static string SeatingStyle(int capacity, string? qrIdentifier = null, int tableNumber = 0)
+    {
+        if (tableNumber == 201 || (qrIdentifier != null && qrIdentifier.EndsWith("PARTY_HALL", StringComparison.OrdinalIgnoreCase)))
+            return "hall";
+
+        if (tableNumber == 103 || (qrIdentifier != null && qrIdentifier.EndsWith("FAMILY_C3", StringComparison.OrdinalIgnoreCase)))
+            return "sofas";
+
+        if (tableNumber == 104 || (qrIdentifier != null && qrIdentifier.EndsWith("FAMILY_C4", StringComparison.OrdinalIgnoreCase)))
+            return "mixed";
+
+        if ((tableNumber >= 101 && tableNumber <= 104) || capacity > 10)
+            return "chairs";
+
+        return "standard";
+    }
 }

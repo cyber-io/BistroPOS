@@ -128,6 +128,17 @@ export default function Navbar({ onOpenCart }) {
                   <Compass size={15} aria-hidden="true" />
                   <span>Track Live Order</span>
                 </Link>
+                {['SUPER_ADMIN', 'MANAGER', 'RECEPTIONIST'].includes(role) && (
+                  <Link
+                    to="/pos"
+                    className="website-account-link"
+                    onClick={() => setUserDropdownOpen(false)}
+                  >
+                    <PackageCheck size={15} aria-hidden="true" />
+                    <span>{role === 'MANAGER' ? 'Manager POS Portal' : role === 'SUPER_ADMIN' ? 'Platform POS Workspace' : 'Front Desk POS'}</span>
+                    <ArrowUpRight size={13} className="ml-auto opacity-60" aria-hidden="true" />
+                  </Link>
+                )}
                 <button type="button" onClick={signOut} className="website-signout"><LogOut size={15} aria-hidden="true" />Sign out</button>
               </div>
             )}
@@ -163,6 +174,17 @@ export default function Navbar({ onOpenCart }) {
                 <Link to="/profile" className="website-account-link" onClick={closeNavigation}>
                   <User size={15} aria-hidden="true" />My Profile &amp; Orders<ArrowUpRight size={14} className="ml-auto" aria-hidden="true" />
                 </Link>
+                {['SUPER_ADMIN', 'MANAGER', 'RECEPTIONIST'].includes(role) && (
+                  <Link
+                    to="/pos"
+                    className="website-account-link"
+                    onClick={() => setUserDropdownOpen(false)}
+                  >
+                    <PackageCheck size={15} aria-hidden="true" />
+                    <span>{role === 'MANAGER' ? 'Manager POS Portal' : role === 'SUPER_ADMIN' ? 'Platform POS Workspace' : 'Front Desk POS'}</span>
+                    <ArrowUpRight size={13} className="ml-auto opacity-60" aria-hidden="true" />
+                  </Link>
+                )}
                 <button type="button" onClick={signOut} className="website-signout"><LogOut size={15} aria-hidden="true" />Sign out</button>
               </>
             ) : <Link to="/login" className="website-account-link" onClick={closeNavigation}>Sign in to your account<ArrowUpRight size={15} aria-hidden="true" /></Link>}

@@ -7,16 +7,53 @@ namespace RestaurantSystem.Api.Services;
 public static class UserProvisioning
 {
     public static readonly Guid DefaultRestaurantId = Guid.Parse("a0000000-0000-0000-0000-000000000001");
-    // BCrypt hash for 'Password@123'
-    public const string DefaultPasswordHash = "$2a$11$w8/q3m2eA8zJ5m7nB3r9TuG4h.8Z.u2v8kP.vYg/H8K1.p2wEa2XW";
+    public static readonly Guid RoyalPalaceRestaurantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+    public static readonly Guid CityRestaurantId = Guid.Parse("22222222-2222-2222-2222-222222222222");
 
-    public static async Task EnsureDefaultDataAsync(RestaurantDbContext db)
+    private static readonly SemaphoreSlim _initLock = new(1, 1);
+    private static int _initialized;
+    public static bool IsInitialized => Volatile.Read(ref _initialized) == 1;
+
+    private const string LegacyPlaceholderHash = "$2a$11$w8/q3m2eA8zJ5m7nB3r9TuG4h.8Z.u2v8kP.vYg/H8K1.p2wEa2XW";
+
+    public static async Task EnsureDefaultDataAsync(RestaurantDbContext db, bool allowDevSeedCredentials = false)
     {
+        if (IsInitialized) return;
+        await _initLock.WaitAsync();
         try
         {
-            if (!await db.Restaurants.AnyAsync(r => r.RestaurantId == DefaultRestaurantId))
+            if (IsInitialized) return;
+            if (db.Database.IsRelational() && !await db.Database.CanConnectAsync())
+                return;
+            if (db.Database.IsNpgsql())
             {
-                var restaurant = new Restaurant
+                try
+                {
+                    await db.Database.ExecuteSqlRawAsync(@"
+                        DO $$
+                        BEGIN
+                            ALTER TABLE restaurant_pos.users DROP CONSTRAINT IF EXISTS users_role_check;
+                            ALTER TABLE restaurant_pos.users ADD CONSTRAINT users_role_check CHECK (role IN ('SUPER_ADMIN', 'MANAGER', 'RECEPTIONIST', 'KITCHEN', 'WAITER', 'CUSTOMER'));
+                        EXCEPTION WHEN OTHERS THEN NULL;
+                        END $$;
+                    ");
+                }
+                catch { /* Ignore if offline */ }
+            }
+
+            if (!allowDevSeedCredentials)
+            {
+                await EnsureRestaurantDataAsync(db);
+                Volatile.Write(ref _initialized, 1);
+                return;
+            }
+
+            var devPasswordHash = BCrypt.Net.BCrypt.HashPassword(
+                Environment.GetEnvironmentVariable("DEV_DEMO_SEED_PASSWORD") ?? "Password@123");
+
+            var restaurantsToSeed = new[]
+            {
+                new Restaurant
                 {
                     RestaurantId = DefaultRestaurantId,
                     Name = "Bistro & Bloom",
@@ -27,22 +64,89 @@ public static class UserProvisioning
                     Status = "ACTIVE",
                     OpeningHours = "{\"monday\": {\"open\": \"10:00\", \"close\": \"23:00\"}}",
                     Settings = "{\"tax_rate\": 0.05, \"delivery_fee\": 40.00, \"currency\": \"INR\"}"
-                };
-                db.Restaurants.Add(restaurant);
-                await db.SaveChangesAsync();
+                },
+                new Restaurant
+                {
+                    RestaurantId = RoyalPalaceRestaurantId,
+                    Name = "Royal Palace",
+                    Logo = "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=300&q=80",
+                    Address = "Heritage Mile, Civil Lines, Jaipur, RJ - 302006",
+                    Phone = "+91 98000 00001",
+                    Email = "contact@royalpalace.com",
+                    Status = "ACTIVE",
+                    OpeningHours = "{\"monday\": {\"open\": \"11:00\", \"close\": \"23:30\"}}",
+                    Settings = "{\"tax_rate\": 0.05, \"delivery_fee\": 50.00, \"currency\": \"INR\"}"
+                },
+                new Restaurant
+                {
+                    RestaurantId = CityRestaurantId,
+                    Name = "City Restaurant",
+                    Logo = "https://images.unsplash.com/photo-1550966871-3ed3cdb5ed0c?auto=format&fit=crop&w=300&q=80",
+                    Address = "Inner Circle, Connaught Place, New Delhi, DL - 110001",
+                    Phone = "+91 98000 00002",
+                    Email = "contact@cityrestaurant.com",
+                    Status = "ACTIVE",
+                    OpeningHours = "{\"monday\": {\"open\": \"10:00\", \"close\": \"23:00\"}}",
+                    Settings = "{\"tax_rate\": 0.05, \"delivery_fee\": 40.00, \"currency\": \"INR\"}"
+                }
+            };
+
+            foreach (var r in restaurantsToSeed)
+            {
+                if (!await db.Restaurants.AnyAsync(x => x.RestaurantId == r.RestaurantId))
+                {
+                    db.Restaurants.Add(r);
+                }
             }
+            await db.SaveChangesAsync();
 
             var defaultUsers = new[]
             {
                 new User
                 {
                     UserId = Guid.Parse("b0000000-0000-0000-0000-000000000001"),
-                    RestaurantId = DefaultRestaurantId,
-                    Name = "Super Admin Admin",
+                    RestaurantId = null, // Super Admin is platform-wide
+                    Name = "Super Admin",
                     Email = "superadmin@sunrisecafe.com",
                     Phone = "+91 99999 00001",
-                    PasswordHash = DefaultPasswordHash,
+                    PasswordHash = devPasswordHash,
                     Role = UserRoles.SuperAdmin,
+                    Status = "ACTIVE",
+                    EmailVerified = true
+                },
+                new User
+                {
+                    UserId = Guid.Parse("b0000000-0000-0000-0000-000000000010"),
+                    RestaurantId = DefaultRestaurantId,
+                    Name = "Rohit Mehta (Manager)",
+                    Email = "manager@sunrisecafe.com",
+                    Phone = "+91 99999 00010",
+                    PasswordHash = devPasswordHash,
+                    Role = UserRoles.Manager,
+                    Status = "ACTIVE",
+                    EmailVerified = true
+                },
+                new User
+                {
+                    UserId = Guid.Parse("a1111111-0000-0000-0000-000000000001"),
+                    RestaurantId = RoyalPalaceRestaurantId,
+                    Name = "Rahul Sharma (Manager)",
+                    Email = "manager.rahul@royalpalace.com",
+                    Phone = "+91 98111 00001",
+                    PasswordHash = devPasswordHash,
+                    Role = UserRoles.Manager,
+                    Status = "ACTIVE",
+                    EmailVerified = true
+                },
+                new User
+                {
+                    UserId = Guid.Parse("b2222222-0000-0000-0000-000000000001"),
+                    RestaurantId = CityRestaurantId,
+                    Name = "Amit Patel (Manager)",
+                    Email = "manager.amit@cityrestaurant.com",
+                    Phone = "+91 98222 00001",
+                    PasswordHash = devPasswordHash,
+                    Role = UserRoles.Manager,
                     Status = "ACTIVE",
                     EmailVerified = true
                 },
@@ -53,7 +157,7 @@ public static class UserProvisioning
                     Name = "Ananya Sharma (Receptionist)",
                     Email = "receptionist@sunrisecafe.com",
                     Phone = "+91 99999 00002",
-                    PasswordHash = DefaultPasswordHash,
+                    PasswordHash = devPasswordHash,
                     Role = UserRoles.Receptionist,
                     Status = "ACTIVE",
                     EmailVerified = true
@@ -65,7 +169,7 @@ public static class UserProvisioning
                     Name = "Chef Vikram (Kitchen Head)",
                     Email = "kitchen@sunrisecafe.com",
                     Phone = "+91 99999 00003",
-                    PasswordHash = DefaultPasswordHash,
+                    PasswordHash = devPasswordHash,
                     Role = UserRoles.Kitchen,
                     Status = "ACTIVE",
                     EmailVerified = true
@@ -77,7 +181,7 @@ public static class UserProvisioning
                     Name = "Waiter Kunal",
                     Email = "waiter.kunal@sunrisecafe.com",
                     Phone = "+91 99999 00004",
-                    PasswordHash = DefaultPasswordHash,
+                    PasswordHash = devPasswordHash,
                     Role = UserRoles.Waiter,
                     Status = "ACTIVE",
                     EmailVerified = true
@@ -89,7 +193,7 @@ public static class UserProvisioning
                     Name = "Waiter",
                     Email = "waiter@sunrisecafe.com",
                     Phone = "+91 99999 00004",
-                    PasswordHash = DefaultPasswordHash,
+                    PasswordHash = devPasswordHash,
                     Role = UserRoles.Waiter,
                     Status = "ACTIVE",
                     EmailVerified = true
@@ -101,7 +205,7 @@ public static class UserProvisioning
                     Name = "Waiter Priya",
                     Email = "waiter.priya@sunrisecafe.com",
                     Phone = "+91 99999 00005",
-                    PasswordHash = DefaultPasswordHash,
+                    PasswordHash = devPasswordHash,
                     Role = UserRoles.Waiter,
                     Status = "ACTIVE",
                     EmailVerified = true
@@ -113,7 +217,7 @@ public static class UserProvisioning
                     Name = "Rahul Verma (Customer)",
                     Email = "customer.rahul@example.com",
                     Phone = "+91 98888 77777",
-                    PasswordHash = DefaultPasswordHash,
+                    PasswordHash = devPasswordHash,
                     Role = UserRoles.Customer,
                     Status = "ACTIVE",
                     EmailVerified = true
@@ -129,21 +233,128 @@ public static class UserProvisioning
                 }
                 else
                 {
-                    if (string.IsNullOrEmpty(existing.PasswordHash) || existing.PasswordHash == "SUPABASE_MANAGED")
+                    if (string.IsNullOrEmpty(existing.PasswordHash) ||
+                        existing.PasswordHash == "SUPABASE_MANAGED" ||
+                        existing.PasswordHash == LegacyPlaceholderHash)
                     {
-                        existing.PasswordHash = DefaultPasswordHash;
+                        existing.PasswordHash = devPasswordHash;
                     }
+                    existing.Role = user.Role;
+                    existing.RestaurantId = user.RestaurantId;
                     existing.Status = "ACTIVE";
                     existing.EmailVerified = true;
                 }
             }
 
             await db.SaveChangesAsync();
-            await EnsurePhase1MenuDataAsync(db);
+            await EnsureRestaurantDataAsync(db);
+            Volatile.Write(ref _initialized, 1);
         }
-        catch
+        catch (Exception ex)
         {
             // Fallback for migrations / constrained environments
+            Console.WriteLine($"[UserProvisioning] Note: {ex.Message}");
+        }
+        finally
+        {
+            _initLock.Release();
+        }
+    }
+
+    private static async Task EnsureRestaurantDataAsync(RestaurantDbContext db)
+    {
+        var activeRestaurants = await db.Restaurants.Where(r => r.Status == "ACTIVE").ToListAsync();
+        if (!activeRestaurants.Any()) return;
+
+        var defaultCapacities = new[] { 2, 2, 4, 4, 4, 6, 6, 8, 2, 4, 4, 8 };
+
+        // 1. Ensure 12 tables for every active restaurant
+        foreach (var r in activeRestaurants)
+        {
+            var hasTables = await db.Tables.AnyAsync(t => t.RestaurantId == r.RestaurantId);
+            if (!hasTables)
+            {
+                for (int i = 1; i <= 12; i++)
+                {
+                    db.Tables.Add(new TableEntity
+                    {
+                        TableId = Guid.NewGuid(),
+                        RestaurantId = r.RestaurantId,
+                        TableNumber = i,
+                        Capacity = defaultCapacities[i - 1],
+                        Status = TableStatuses.Available,
+                        QrIdentifier = $"QR_{r.RestaurantId:N}_TBL{i:D02}",
+                        DiningArea = (i == 6 || i == 7 || i == 8 || i == 12) ? "group" : "everyday",
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow
+                    });
+                }
+                await db.SaveChangesAsync();
+            }
+        }
+
+        // 2. Ensure menu categories & items for every active restaurant
+        var defaultCats = await db.MenuCategories
+            .Where(c => c.RestaurantId == DefaultRestaurantId)
+            .OrderBy(c => c.SortOrder)
+            .ToListAsync();
+
+        var defaultItems = await db.MenuItems
+            .Where(m => m.RestaurantId == DefaultRestaurantId)
+            .ToListAsync();
+
+        foreach (var r in activeRestaurants)
+        {
+            if (r.RestaurantId == DefaultRestaurantId) continue;
+
+            var hasCategories = await db.MenuCategories.AnyAsync(c => c.RestaurantId == r.RestaurantId);
+            if (!hasCategories && defaultCats.Any())
+            {
+                var categoryMap = new Dictionary<Guid, Guid>();
+                foreach (var cat in defaultCats)
+                {
+                    var newCatId = Guid.NewGuid();
+                    categoryMap[cat.CategoryId] = newCatId;
+                    db.MenuCategories.Add(new MenuCategory
+                    {
+                        CategoryId = newCatId,
+                        RestaurantId = r.RestaurantId,
+                        Name = cat.Name,
+                        Description = cat.Description,
+                        SortOrder = cat.SortOrder,
+                        Status = "ACTIVE",
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow
+                    });
+                }
+                await db.SaveChangesAsync();
+
+                foreach (var item in defaultItems)
+                {
+                    if (categoryMap.TryGetValue(item.CategoryId, out var newCatId))
+                    {
+                        db.MenuItems.Add(new MenuItem
+                        {
+                            MenuItemId = Guid.NewGuid(),
+                            RestaurantId = r.RestaurantId,
+                            CategoryId = newCatId,
+                            Name = item.Name,
+                            Description = item.Description,
+                            Price = item.Price,
+                            Image = item.Image,
+                            VegNonVeg = item.VegNonVeg,
+                            Availability = true,
+                            SpiceLevel = item.SpiceLevel,
+                            IsSweet = item.IsSweet,
+                            CustomizationOptions = item.CustomizationOptions,
+                            AddOns = item.AddOns,
+                            CreatedAt = DateTime.UtcNow,
+                            UpdatedAt = DateTime.UtcNow
+                        });
+                    }
+                }
+                await db.SaveChangesAsync();
+            }
         }
     }
 

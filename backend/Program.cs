@@ -15,15 +15,26 @@ using RestaurantSystem.Api.Repositories;
 using RestaurantSystem.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+if (builder.Environment.IsDevelopment())
+{
+    builder.Configuration.AddJsonFile("appsettings.Development.local.json", optional: true, reloadOnChange: true);
+}
 if (string.IsNullOrEmpty(builder.Configuration["urls"])) builder.WebHost.UseUrls("http://127.0.0.1:5050");
 
 // 1. Strongly Typed Configuration Options
 builder.Services.Configure<SupabaseOptions>(builder.Configuration.GetSection(SupabaseOptions.SectionName));
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
+builder.Services.Configure<SecurityOptions>(builder.Configuration.GetSection(SecurityOptions.SectionName));
+builder.Services.Configure<FeaturesOptions>(builder.Configuration.GetSection(FeaturesOptions.SectionName));
 builder.Services.Configure<BusinessRulesOptions>(builder.Configuration.GetSection(BusinessRulesOptions.SectionName));
 builder.Services.Configure<PaymentGatewayOptions>(builder.Configuration.GetSection(PaymentGatewayOptions.SectionName));
 
 var jwtOptions = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>() ?? new JwtOptions();
+if (string.IsNullOrWhiteSpace(jwtOptions.SecretKey) || jwtOptions.SecretKey.Length < 32)
+{
+    throw new InvalidOperationException("Jwt:SecretKey must be configured (minimum 32 characters) via appsettings.Development.local.json, dotnet user-secrets, or Jwt__SecretKey.");
+}
+var securityOptions = builder.Configuration.GetSection(SecurityOptions.SectionName).Get<SecurityOptions>() ?? new SecurityOptions();
 
 // 2. Database Connection (PostgreSQL / Supabase)
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
@@ -47,12 +58,12 @@ builder.Services.AddAuthentication(options =>
 })
 .AddJwtBearer(options =>
 {
-    options.RequireHttpsMetadata = false;
+    options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
     options.SaveToken = true;
     options.TokenValidationParameters = new TokenValidationParameters
     {
         ValidateIssuerSigningKey = true,
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.SecretKey.PadRight(32))),
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.SecretKey)),
         ValidateIssuer = !string.IsNullOrEmpty(jwtOptions.Issuer),
         ValidIssuer = jwtOptions.Issuer,
         ValidateAudience = !string.IsNullOrEmpty(jwtOptions.Audience),
@@ -80,9 +91,14 @@ builder.Services.AddAuthentication(options =>
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("SuperAdminOnly", policy => policy.RequireRole(UserRoles.SuperAdmin));
-    options.AddPolicy("ReceptionistOrAdmin", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Receptionist));
-    options.AddPolicy("KitchenStaff", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Kitchen));
-    options.AddPolicy("WaiterStaff", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Waiter));
+    options.AddPolicy("ManagerOnly", policy => policy.RequireRole(UserRoles.Manager));
+    options.AddPolicy("ManagerOrAdmin", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Manager));
+    options.AddPolicy("ReceptionistOrManagerOrAdmin", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Manager, UserRoles.Receptionist));
+    options.AddPolicy("ReceptionistOrAdmin", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Manager, UserRoles.Receptionist));
+    options.AddPolicy("KitchenStaff", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Manager, UserRoles.Kitchen));
+    options.AddPolicy("WaiterStaff", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Manager, UserRoles.Waiter));
+    options.AddPolicy("OperationalStaff", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Manager, UserRoles.Receptionist, UserRoles.Kitchen, UserRoles.Waiter));
+    options.AddPolicy("StaffOnly", policy => policy.RequireRole(UserRoles.SuperAdmin, UserRoles.Manager, UserRoles.Receptionist, UserRoles.Kitchen, UserRoles.Waiter));
     options.AddPolicy("CustomerAccess", policy => policy.RequireRole(UserRoles.Customer, UserRoles.SuperAdmin));
 });
 
@@ -95,6 +111,7 @@ builder.Services.AddHttpClient();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton<ResourceTokens>();
 builder.Services.AddScoped<ResourceAccessFilter>();
+builder.Services.AddScoped<ITenantContext, TenantContext>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddScoped<IReservationService, ReservationService>();
@@ -106,6 +123,8 @@ builder.Services.AddScoped<IFeedbackService, FeedbackService>();
 builder.Services.AddScoped<IPaymentService, PaymentService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<IAuditLogService, AuditLogService>();
+builder.Services.AddScoped<IEmailReceiptService, EmailReceiptService>();
+builder.Services.AddScoped<IWaitlistService, WaitlistService>();
 
 // 6. Controllers and OpenAPI Documentation
 builder.Services.AddControllers(options => options.Filters.AddService<ResourceAccessFilter>());
@@ -147,11 +166,15 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 // 7. CORS Configuration
+var allowedOrigins = securityOptions.CorsAllowedOrigins is { Length: > 0 }
+    ? securityOptions.CorsAllowedOrigins
+    : new[] { "http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000" };
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontendApp", policy =>
     {
-        policy.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000")
+        policy.WithOrigins(allowedOrigins)
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials();
@@ -161,6 +184,12 @@ builder.Services.AddCors(options =>
 var app = builder.Build();
 
 // 8. Middleware Pipeline
+app.UseForwardedHeaders();
+app.UseMiddleware<SecurityHeadersMiddleware>();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
+}
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseMiddleware<MemoryRateLimitingMiddleware>();
 
@@ -191,114 +220,15 @@ try
     var db = scope.ServiceProvider.GetRequiredService<RestaurantDbContext>();
     if (db.Database.IsNpgsql())
     {
-        var migrations = new[]
-        {
-            "ALTER TABLE restaurant_pos.tables DROP CONSTRAINT IF EXISTS tables_status_check;",
-            "ALTER TABLE restaurant_pos.tables ADD CONSTRAINT tables_status_check CHECK (status IN ('AVAILABLE', 'RESERVED', 'OCCUPIED', 'WAITING_FOR_CLEANING', 'CLEANING', 'OUT_OF_SERVICE'));",
-
-            // Phase 1 Schema extensions
-            "ALTER TABLE restaurant_pos.menu_items ADD COLUMN IF NOT EXISTS allergens JSONB DEFAULT '[]'::jsonb;",
-            "ALTER TABLE restaurant_pos.menu_items ADD COLUMN IF NOT EXISTS ingredients TEXT;",
-            "ALTER TABLE restaurant_pos.menu_items ADD COLUMN IF NOT EXISTS portions JSONB DEFAULT '[]'::jsonb;",
-            "ALTER TABLE restaurant_pos.menu_items ADD COLUMN IF NOT EXISTS dietary_tags JSONB DEFAULT '[]'::jsonb;",
-            "ALTER TABLE restaurant_pos.menu_items ADD COLUMN IF NOT EXISTS is_special BOOLEAN DEFAULT FALSE;",
-            "ALTER TABLE restaurant_pos.menu_items ADD COLUMN IF NOT EXISTS prep_time_minutes INT DEFAULT 15;",
-
-            @"CREATE TABLE IF NOT EXISTS restaurant_pos.dining_sessions (
-                session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                restaurant_id UUID NOT NULL REFERENCES restaurant_pos.restaurants(restaurant_id) ON DELETE CASCADE,
-                table_id UUID NOT NULL REFERENCES restaurant_pos.tables(table_id) ON DELETE CASCADE,
-                session_code VARCHAR(50) NOT NULL,
-                status VARCHAR(50) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'CLOSED')),
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                closed_at TIMESTAMPTZ
-            );",
-            "CREATE INDEX IF NOT EXISTS idx_dining_sessions_table ON restaurant_pos.dining_sessions(table_id, status);",
-
-            "ALTER TABLE restaurant_pos.orders ADD COLUMN IF NOT EXISTS session_id UUID REFERENCES restaurant_pos.dining_sessions(session_id) ON DELETE SET NULL;",
-            "ALTER TABLE restaurant_pos.orders ADD COLUMN IF NOT EXISTS estimated_prep_time_minutes INT DEFAULT 15;",
-            "ALTER TABLE restaurant_pos.orders ADD COLUMN IF NOT EXISTS estimated_ready_at TIMESTAMPTZ;",
-
-            "ALTER TABLE restaurant_pos.help_requests ADD COLUMN IF NOT EXISTS request_type VARCHAR(50) DEFAULT 'CUSTOM';",
-
-            // Phase 2 Schema extensions
-            "ALTER TABLE restaurant_pos.tables ADD COLUMN IF NOT EXISTS position_x INT DEFAULT 0;",
-            "ALTER TABLE restaurant_pos.tables ADD COLUMN IF NOT EXISTS position_y INT DEFAULT 0;",
-            "ALTER TABLE restaurant_pos.tables ADD COLUMN IF NOT EXISTS shape VARCHAR(50) DEFAULT 'SQUARE';",
-            "ALTER TABLE restaurant_pos.tables ADD COLUMN IF NOT EXISTS dining_area VARCHAR(50) DEFAULT 'everyday';",
-
-            @"CREATE TABLE IF NOT EXISTS restaurant_pos.inventory_items (
-                item_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                restaurant_id UUID NOT NULL REFERENCES restaurant_pos.restaurants(restaurant_id) ON DELETE CASCADE,
-                name VARCHAR(150) NOT NULL,
-                category VARCHAR(100) DEFAULT 'GENERAL',
-                unit VARCHAR(50) NOT NULL,
-                current_stock NUMERIC(10,2) NOT NULL DEFAULT 0,
-                min_threshold NUMERIC(10,2) NOT NULL DEFAULT 5,
-                cost_per_unit NUMERIC(10,2) NOT NULL DEFAULT 0,
-                status VARCHAR(50) NOT NULL DEFAULT 'IN_STOCK',
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );",
-            "CREATE INDEX IF NOT EXISTS idx_inventory_restaurant ON restaurant_pos.inventory_items(restaurant_id, status);",
-
-            @"CREATE TABLE IF NOT EXISTS restaurant_pos.customer_loyalty (
-                loyalty_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                restaurant_id UUID NOT NULL REFERENCES restaurant_pos.restaurants(restaurant_id) ON DELETE CASCADE,
-                customer_phone VARCHAR(20) NOT NULL,
-                customer_name VARCHAR(100),
-                customer_email VARCHAR(100),
-                points_balance INT NOT NULL DEFAULT 0,
-                lifetime_points INT NOT NULL DEFAULT 0,
-                tier VARCHAR(20) NOT NULL DEFAULT 'BRONZE',
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                updated_at TIMESTAMPTZ DEFAULT NOW(),
-                CONSTRAINT uq_customer_loyalty_phone UNIQUE (restaurant_id, customer_phone)
-            );",
-
-            @"CREATE TABLE IF NOT EXISTS restaurant_pos.customer_feedbacks (
-                feedback_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                restaurant_id UUID NOT NULL REFERENCES restaurant_pos.restaurants(restaurant_id) ON DELETE CASCADE,
-                order_id UUID REFERENCES restaurant_pos.orders(order_id) ON DELETE SET NULL,
-                customer_name VARCHAR(100),
-                customer_phone VARCHAR(20),
-                rating INT NOT NULL DEFAULT 5,
-                food_rating INT DEFAULT 5,
-                service_rating INT DEFAULT 5,
-                ambiance_rating INT DEFAULT 5,
-                comment TEXT,
-                google_review_clicked BOOLEAN DEFAULT FALSE,
-                created_at TIMESTAMPTZ DEFAULT NOW()
-            );",
-
-            "ALTER TABLE restaurant_pos.restaurants ADD COLUMN IF NOT EXISTS wifi_ssid VARCHAR(100) DEFAULT 'Bistro-HighSpeed-Guest';",
-            "ALTER TABLE restaurant_pos.restaurants ADD COLUMN IF NOT EXISTS wifi_password VARCHAR(100) DEFAULT 'Bistro@2026';",
-            "ALTER TABLE restaurant_pos.restaurants ADD COLUMN IF NOT EXISTS wifi_enabled BOOLEAN DEFAULT TRUE;",
-            "ALTER TABLE restaurant_pos.restaurants ADD COLUMN IF NOT EXISTS google_review_url VARCHAR(255) DEFAULT 'https://maps.google.com';",
-            "ALTER TABLE restaurant_pos.restaurants ADD COLUMN IF NOT EXISTS subscription_tier VARCHAR(50) DEFAULT 'PRO';",
-
-            "ALTER TABLE restaurant_pos.payments ADD COLUMN IF NOT EXISTS tip_amount NUMERIC(10,2) DEFAULT 0.00;",
-            "ALTER TABLE restaurant_pos.payments ADD COLUMN IF NOT EXISTS split_count INT DEFAULT 1;",
-            "ALTER TABLE restaurant_pos.payments ADD COLUMN IF NOT EXISTS split_type VARCHAR(50) DEFAULT 'FULL';",
-
-            // Public schema fallbacks
-            "ALTER TABLE public.restaurants ADD COLUMN IF NOT EXISTS google_review_url VARCHAR(255) DEFAULT 'https://maps.google.com';",
-            "ALTER TABLE public.restaurants ADD COLUMN IF NOT EXISTS wifi_ssid VARCHAR(100) DEFAULT 'Bistro-HighSpeed-Guest';",
-            "ALTER TABLE public.restaurants ADD COLUMN IF NOT EXISTS wifi_password VARCHAR(100) DEFAULT 'Bistro@2026';",
-            "ALTER TABLE public.restaurants ADD COLUMN IF NOT EXISTS wifi_enabled BOOLEAN DEFAULT TRUE;",
-            "ALTER TABLE public.restaurants ADD COLUMN IF NOT EXISTS subscription_tier VARCHAR(50) DEFAULT 'PRO';"
-        };
-
-        foreach (var sql in migrations)
-        {
-            try
-            {
-                await db.Database.ExecuteSqlRawAsync(sql);
-            }
-            catch
-            {
-                // Continue with next statement even if table/schema doesn't exist
-            }
-        }
+        await db.Database.ExecuteSqlRawAsync(@"
+            DO $$
+            BEGIN
+                ALTER TABLE restaurant_pos.tables DROP CONSTRAINT IF EXISTS tables_status_check;
+                ALTER TABLE restaurant_pos.tables ADD CONSTRAINT tables_status_check CHECK (status IN ('AVAILABLE', 'RESERVED', 'OCCUPIED', 'WAITING_FOR_CLEANING', 'CLEANING', 'OUT_OF_SERVICE'));
+            EXCEPTION WHEN OTHERS THEN
+                NULL;
+            END $$;
+        ");
     }
 
     var targetOrderNumbers = new[] { "ORD-0D10DC7FC6", "ORD-66A6B8C8CB" };
@@ -322,7 +252,7 @@ try
 {
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<RestaurantDbContext>();
-    await UserProvisioning.EnsureDefaultDataAsync(db);
+    await UserProvisioning.EnsureDefaultDataAsync(db, allowDevSeedCredentials: app.Environment.IsDevelopment());
     await DiningAreaProvisioning.EnsureDefaultDiningAreasAsync(db);
 }
 catch (Exception exception)

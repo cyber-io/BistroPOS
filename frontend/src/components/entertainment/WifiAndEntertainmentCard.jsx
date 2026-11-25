@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Wifi, Copy, Check, Sparkles, Trophy, RotateCcw, 
-  Gamepad2, X, Timer, HelpCircle, Award, Star
+  Gamepad2, X, Timer, HelpCircle, Award, Star, Dices
 } from 'lucide-react';
 import { api } from '../../services/api';
+import LudoGame from './LudoGame';
 
 const triviaQuestions = [
   {
@@ -64,11 +65,38 @@ function generateShuffledMemoryCards() {
 export default function WifiAndEntertainmentCard({ 
   isOpen = true, 
   onClose, 
-  tableNumber = 'A9', 
+  tableNumber = 'Table 1', 
   lang = 'en' 
 }) {
-  // Tabs: 'WIFI' | 'TRIVIA' | 'MEMORY' | 'LEADERBOARD'
+  // Tabs: 'WIFI' | 'LUDO' | 'MEMORY' | 'TRIVIA' | 'LEADERBOARD'
   const [activeSubTab, setActiveSubTab] = useState('WIFI');
+
+  // Theme state: automatically synchronizes with phone's system preference
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    if (typeof window !== 'undefined' && window.matchMedia) {
+      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    setIsDarkMode(media.matches);
+    const handler = (e) => setIsDarkMode(e.matches);
+    if (media.addEventListener) {
+      media.addEventListener('change', handler);
+    } else if (media.addListener) {
+      media.addListener(handler);
+    }
+    return () => {
+      if (media.removeEventListener) {
+        media.removeEventListener('change', handler);
+      } else if (media.removeListener) {
+        media.removeListener(handler);
+      }
+    };
+  }, []);
 
   // Wi-Fi State
   const [wifiData, setWifiData] = useState({
@@ -92,6 +120,7 @@ export default function WifiAndEntertainmentCard({
   const [memoryMoves, setMemoryMoves] = useState(0);
   const [isMemoryChecking, setIsMemoryChecking] = useState(false);
   const [memoryBonusPoints, setMemoryBonusPoints] = useState(0);
+  const [ludoBonusPoints, setLudoBonusPoints] = useState(0);
 
   // Load Wi-Fi credentials from backend if available
   useEffect(() => {
@@ -188,7 +217,7 @@ export default function WifiAndEntertainmentCard({
 
   const currentQ = triviaQuestions[currentQuestionIndex];
   const matchedPairsCount = Math.floor(matchedCardIds.length / 2);
-  const totalUserPoints = 200 + (triviaScore * 30) + memoryBonusPoints;
+  const totalUserPoints = 200 + (triviaScore * 30) + memoryBonusPoints + ludoBonusPoints;
 
   if (!isOpen) return null;
 
@@ -201,65 +230,95 @@ export default function WifiAndEntertainmentCard({
       }}
     >
       <div 
-        className="bg-[#1c2028] text-white w-full max-w-md rounded-[28px] shadow-2xl border border-white/10 overflow-hidden flex flex-col max-h-[92vh] animate-scaleIn"
+        className={`w-full max-w-md rounded-[28px] shadow-2xl border overflow-hidden flex flex-col max-h-[92vh] animate-scaleIn transition-colors ${
+          isDarkMode 
+            ? 'bg-[#1c2028] text-white border-white/10' 
+            : 'bg-white text-slate-900 border-slate-200'
+        }`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Header matching Screenshot 1 & 2 */}
         <div className="p-4 sm:p-5 flex items-center justify-between pb-3">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-500 flex items-center justify-center shrink-0">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
+              isDarkMode 
+                ? 'bg-amber-500/15 border-amber-500/30 text-amber-500' 
+                : 'bg-amber-50 border-amber-200 text-amber-600'
+            }`}>
               <Gamepad2 size={22} />
             </div>
             <div>
-              <h3 className="font-bold text-white text-base leading-tight">
+              <h3 className={`font-bold text-base leading-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                 {lang === 'hi' ? 'मनोरंजन एवं टेबल लाउंज' : 'Entertainment & Table Lounge'}
               </h3>
-              <p className="text-slate-400 text-xs mt-0.5">
+              <p className={`text-xs mt-0.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                 {lang === 'hi' ? 'खेलें, अन्य टेबलों से मुकाबला करें और जुड़े रहें' : 'Play, compete with other tables & stay connected'}
               </p>
             </div>
           </div>
-          {onClose && (
-            <button
-              type="button"
-              onClick={onClose}
-              className="w-8 h-8 rounded-full text-slate-400 hover:text-white hover:bg-white/10 flex items-center justify-center transition-colors"
-              aria-label="Close"
-            >
-              <X size={18} />
-            </button>
-          )}
+          <div className="flex items-center gap-1">
+            {onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
+                  isDarkMode 
+                    ? 'text-slate-400 hover:text-white hover:bg-white/10' 
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+                }`}
+                aria-label="Close"
+              >
+                <X size={18} />
+              </button>
+            )}
+          </div>
         </div>
 
-        {/* 4 Tabs Row matching Screenshots */}
-        <div className="px-4 sm:px-5 border-b border-white/10 flex items-center gap-5 sm:gap-6 overflow-x-auto no-scrollbar text-xs font-semibold">
+        {/* Tabs Row */}
+        <div 
+          className={`px-4 sm:px-5 border-b flex items-center gap-5 sm:gap-6 overflow-x-auto no-scrollbar text-xs font-semibold ${
+            isDarkMode ? 'border-white/10' : 'border-slate-200'
+          }`}
+          style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+        >
           {/* Tab 1: Restaurant Wi-Fi */}
           <button
             type="button"
             onClick={() => setActiveSubTab('WIFI')}
             className={`pb-2.5 flex items-center gap-1.5 whitespace-nowrap transition-colors relative ${
-              activeSubTab === 'WIFI' ? 'text-white font-bold' : 'text-slate-400 hover:text-slate-200'
+              activeSubTab === 'WIFI' 
+                ? (isDarkMode ? 'text-white font-bold' : 'text-slate-900 font-bold') 
+                : (isDarkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800')
             }`}
           >
             <Wifi size={14} />
             <span>Restaurant Wi-Fi</span>
             {activeSubTab === 'WIFI' && (
-              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-white rounded-full" />
+              <span className={`absolute bottom-0 left-0 right-0 h-0.5 rounded-full ${isDarkMode ? 'bg-white' : 'bg-slate-900'}`} />
             )}
           </button>
 
-          {/* Tab 2: Food Trivia Quiz */}
+          {/* Tab 2: Table Ludo (NEW) */}
           <button
             type="button"
-            onClick={() => setActiveSubTab('TRIVIA')}
+            onClick={() => setActiveSubTab('LUDO')}
             className={`pb-2.5 flex items-center gap-1.5 whitespace-nowrap transition-colors relative ${
-              activeSubTab === 'TRIVIA' ? 'text-white font-bold' : 'text-slate-400 hover:text-slate-200'
+              activeSubTab === 'LUDO' 
+                ? (isDarkMode ? 'text-white font-bold' : 'text-slate-900 font-bold') 
+                : (isDarkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800')
             }`}
           >
-            <Sparkles size={14} />
-            <span>Food Trivia Quiz</span>
-            {activeSubTab === 'TRIVIA' && (
-              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-white rounded-full" />
+            <Dices size={14} className={activeSubTab === 'LUDO' ? (isDarkMode ? 'text-amber-400' : 'text-amber-600') : (isDarkMode ? 'text-slate-400' : 'text-slate-500')} />
+            <span>Table Ludo</span>
+            <span className={`px-1.5 py-0.2 rounded-md text-[9px] font-black uppercase border ${
+              isDarkMode 
+                ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' 
+                : 'bg-amber-100 text-amber-800 border-amber-200'
+            }`}>
+              New
+            </span>
+            {activeSubTab === 'LUDO' && (
+              <span className={`absolute bottom-0 left-0 right-0 h-0.5 rounded-full ${isDarkMode ? 'bg-white' : 'bg-slate-900'}`} />
             )}
           </button>
 
@@ -268,28 +327,49 @@ export default function WifiAndEntertainmentCard({
             type="button"
             onClick={() => setActiveSubTab('MEMORY')}
             className={`pb-2.5 flex items-center gap-1.5 whitespace-nowrap transition-colors relative ${
-              activeSubTab === 'MEMORY' ? 'text-white font-bold' : 'text-slate-400 hover:text-slate-200'
+              activeSubTab === 'MEMORY' 
+                ? (isDarkMode ? 'text-white font-bold' : 'text-slate-900 font-bold') 
+                : (isDarkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800')
             }`}
           >
             <Timer size={14} />
             <span>Culinary Memory</span>
             {activeSubTab === 'MEMORY' && (
-              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-white rounded-full" />
+              <span className={`absolute bottom-0 left-0 right-0 h-0.5 rounded-full ${isDarkMode ? 'bg-white' : 'bg-slate-900'}`} />
             )}
           </button>
 
-          {/* Tab 4: Leaderboard */}
+          {/* Tab 4: Food Trivia Quiz */}
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('TRIVIA')}
+            className={`pb-2.5 flex items-center gap-1.5 whitespace-nowrap transition-colors relative ${
+              activeSubTab === 'TRIVIA' 
+                ? (isDarkMode ? 'text-white font-bold' : 'text-slate-900 font-bold') 
+                : (isDarkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800')
+            }`}
+          >
+            <Sparkles size={14} />
+            <span>Food Trivia</span>
+            {activeSubTab === 'TRIVIA' && (
+              <span className={`absolute bottom-0 left-0 right-0 h-0.5 rounded-full ${isDarkMode ? 'bg-white' : 'bg-slate-900'}`} />
+            )}
+          </button>
+
+          {/* Tab 5: Leaderboard */}
           <button
             type="button"
             onClick={() => setActiveSubTab('LEADERBOARD')}
             className={`pb-2.5 flex items-center gap-1.5 whitespace-nowrap transition-colors relative ${
-              activeSubTab === 'LEADERBOARD' ? 'text-white font-bold' : 'text-slate-400 hover:text-slate-200'
+              activeSubTab === 'LEADERBOARD' 
+                ? (isDarkMode ? 'text-white font-bold' : 'text-slate-900 font-bold') 
+                : (isDarkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800')
             }`}
           >
             <Trophy size={14} />
             <span>Leaderboard</span>
             {activeSubTab === 'LEADERBOARD' && (
-              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-white rounded-full" />
+              <span className={`absolute bottom-0 left-0 right-0 h-0.5 rounded-full ${isDarkMode ? 'bg-white' : 'bg-slate-900'}`} />
             )}
           </button>
         </div>
@@ -300,100 +380,181 @@ export default function WifiAndEntertainmentCard({
           {/* TAB 1: RESTAURANT WI-FI (Screenshot 2) */}
           {activeSubTab === 'WIFI' && (
             <div className="space-y-3 animate-fadeIn">
-              {/* Deep Navy Card */}
-              <div className="bg-gradient-to-br from-[#12192e] via-[#151c33] to-[#0d1222] border border-blue-900/40 rounded-2xl p-4 sm:p-5 shadow-inner">
+              {/* Wi-Fi Card */}
+              <div className={`border rounded-2xl p-4 sm:p-5 shadow-sm transition-colors ${
+                isDarkMode 
+                  ? 'bg-gradient-to-br from-[#12192e] via-[#151c33] to-[#0d1222] border-blue-900/40 text-white shadow-inner' 
+                  : 'bg-gradient-to-br from-blue-50/70 via-white to-slate-50 border-blue-100 text-slate-900'
+              }`}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    <div className="w-11 h-11 rounded-xl bg-[#082622] border border-teal-500/30 text-teal-400 flex items-center justify-center shrink-0">
-                      <Wifi size={22} className="text-[#2dd4bf]" />
+                    <div className={`w-11 h-11 rounded-xl border flex items-center justify-center shrink-0 ${
+                      isDarkMode 
+                        ? 'bg-[#082622] border-teal-500/30 text-teal-400' 
+                        : 'bg-teal-50 border-teal-200 text-teal-600'
+                    }`}>
+                      <Wifi size={22} className={isDarkMode ? 'text-[#2dd4bf]' : 'text-teal-600'} />
                     </div>
                     <div>
-                      <span className="text-[10px] uppercase font-bold tracking-wider text-slate-300 block">
+                      <span className={`text-[10px] uppercase font-bold tracking-wider block ${
+                        isDarkMode ? 'text-slate-300' : 'text-slate-500'
+                      }`}>
                         COMPLIMENTARY DINING WI-FI
                       </span>
-                      <strong className="text-base sm:text-lg font-bold text-white tracking-wide block">
+                      <strong className={`text-base sm:text-lg font-bold tracking-wide block ${
+                        isDarkMode ? 'text-white' : 'text-slate-900'
+                      }`}>
                         {wifiData.ssid}
                       </strong>
                     </div>
                   </div>
-                  <span className="px-2.5 py-1 rounded-full bg-[#0a2e28] border border-teal-500/30 text-[#2dd4bf] text-[11px] font-bold shrink-0">
+                  <span className={`px-2.5 py-1 rounded-full border text-[11px] font-bold shrink-0 ${
+                    isDarkMode 
+                      ? 'bg-[#0a2e28] border-teal-500/30 text-[#2dd4bf]' 
+                      : 'bg-teal-50 border-teal-200 text-teal-700'
+                  }`}>
                     High Speed 5G
                   </span>
                 </div>
 
                 {/* Password Box */}
-                <div className="bg-[#192138] rounded-xl p-3 sm:p-3.5 border border-blue-900/40 flex items-center justify-between mt-4">
+                <div className={`rounded-xl p-3 sm:p-3.5 border flex items-center justify-between mt-4 transition-colors ${
+                  isDarkMode 
+                    ? 'bg-[#192138] border-blue-900/40' 
+                    : 'bg-slate-100/80 border-slate-200'
+                }`}>
                   <div>
-                    <span className="text-[9px] uppercase font-bold text-slate-400 tracking-wider block">PASSWORD</span>
-                    <span className="font-mono text-sm sm:text-base font-bold text-white tracking-wide select-all">
+                    <span className={`text-[9px] uppercase font-bold tracking-wider block ${
+                      isDarkMode ? 'text-slate-400' : 'text-slate-500'
+                    }`}>
+                      PASSWORD
+                    </span>
+                    <span className={`font-mono text-sm sm:text-base font-bold tracking-wide select-all ${
+                      isDarkMode ? 'text-white' : 'text-slate-900'
+                    }`}>
                       {wifiData.password}
                     </span>
                   </div>
                   <button
                     type="button"
                     onClick={handleCopyPassword}
-                    className="px-3.5 py-1.5 rounded-lg bg-[#2b3452] hover:bg-[#364166] text-slate-200 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95 shadow-xs"
+                    className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95 shadow-xs ${
+                      isDarkMode 
+                        ? 'bg-[#2b3452] hover:bg-[#364166] text-slate-200 hover:text-white' 
+                        : 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200'
+                    }`}
                   >
                     {copied ? (
                       <>
-                        <Check size={14} className="text-emerald-400" />
-                        <span className="text-emerald-400">Copied</span>
+                        <Check size={14} className="text-emerald-500" />
+                        <span className="text-emerald-500">Copied</span>
                       </>
                     ) : (
                       <>
-                        <Copy size={14} className="text-slate-300" />
+                        <Copy size={14} className={isDarkMode ? 'text-slate-300' : 'text-slate-600'} />
                         <span>Copy</span>
                       </>
                     )}
                   </button>
                 </div>
 
-                <p className="text-slate-400 text-xs mt-3 leading-relaxed">
+                <p className={`text-xs mt-3 leading-relaxed ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
                   Enjoy seamless browsing, streaming, and ordering while our chefs prepare your delicacies.
                 </p>
               </div>
 
               {/* Bottom Teaser Card */}
-              <div className="bg-[#20242e] border border-white/5 rounded-2xl p-4">
-                <div className="flex items-center gap-2 text-white font-bold text-sm">
-                  <Gamepad2 size={16} className="text-slate-300" />
-                  <span>Play & Compete While You Wait!</span>
+              <div className={`border rounded-2xl p-4 space-y-2.5 transition-colors ${
+                isDarkMode ? 'bg-[#20242e] border-white/5' : 'bg-slate-50 border-slate-200'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <div className={`flex items-center gap-2 font-bold text-sm ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                    <Gamepad2 size={16} className="text-amber-500" />
+                    <span>Play & Compete While You Wait!</span>
+                  </div>
+                  <span className={`text-[10px] uppercase font-black px-2 py-0.5 rounded-full border ${
+                    isDarkMode 
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' 
+                      : 'bg-amber-100 text-amber-800 border-amber-200'
+                  }`}>
+                    🎲 Ludo Live
+                  </span>
                 </div>
-                <p className="text-slate-400 text-xs mt-1.5 leading-relaxed">
-                  Test your foodie knowledge or challenge other tables to top the live restaurant leaderboard! Tap the tabs above to begin.
+                <p className={`text-xs leading-relaxed ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                  Roll the dice in Table Ludo against Chef Bot, test foodie trivia, or challenge other tables on the live restaurant leaderboard!
                 </p>
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setActiveSubTab('LUDO')}
+                    className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:opacity-95 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
+                  >
+                    <Dices size={14} />
+                    <span>Play Table Ludo</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveSubTab('MEMORY')}
+                    className={`px-3 py-1.5 rounded-xl font-semibold text-xs active:scale-95 transition-all ${
+                      isDarkMode 
+                        ? 'bg-[#2b3345] hover:bg-[#343e54] text-slate-200' 
+                        : 'bg-slate-200 hover:bg-slate-300 text-slate-800'
+                    }`}
+                  >
+                    Culinary Memory
+                  </button>
+                </div>
               </div>
             </div>
+          )}
+
+          {/* TAB: TABLE LUDO (User Feature Request) */}
+          {activeSubTab === 'LUDO' && (
+            <LudoGame 
+              tableNumber={tableNumber} 
+              onAddLeaderboardPoints={(pts) => setLudoBonusPoints(p => p + pts)} 
+              isDarkMode={isDarkMode}
+            />
           )}
 
           {/* TAB 2: FOOD TRIVIA QUIZ */}
           {activeSubTab === 'TRIVIA' && (
             <div className="space-y-4 animate-fadeIn">
-              <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <div className={`flex items-center justify-between border-b pb-3 ${isDarkMode ? 'border-white/10' : 'border-slate-200'}`}>
                 <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center">
+                  <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${
+                    isDarkMode ? 'bg-amber-500/20 text-amber-400' : 'bg-amber-100 text-amber-600'
+                  }`}>
                     <Sparkles size={14} />
                   </div>
-                  <span className="text-xs font-bold text-slate-200">
+                  <span className={`text-xs font-bold ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>
                     {lang === 'hi' ? 'पाक-कला ट्रिविया' : 'Culinary Food Trivia'}
                   </span>
                 </div>
-                <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${
+                  isDarkMode 
+                    ? 'bg-purple-500/20 text-purple-300 border-purple-500/30' 
+                    : 'bg-purple-100 text-purple-700 border-purple-200'
+                }`}>
                   {quizFinished ? `Score: ${triviaScore}/${triviaQuestions.length}` : `Q ${currentQuestionIndex + 1} of ${triviaQuestions.length}`}
                 </span>
               </div>
 
               {quizFinished ? (
-                <div className="text-center py-6 space-y-3.5 bg-[#20242e] rounded-2xl p-5 border border-white/5">
-                  <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center">
+                <div className={`text-center py-6 space-y-3.5 rounded-2xl p-5 border ${
+                  isDarkMode ? 'bg-[#20242e] border-white/5' : 'bg-slate-50 border-slate-200'
+                }`}>
+                  <div className={`w-14 h-14 mx-auto rounded-2xl border flex items-center justify-center ${
+                    isDarkMode ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' : 'bg-amber-100 text-amber-600 border-amber-200'
+                  }`}>
                     <Trophy size={28} />
                   </div>
                   <div className="space-y-1">
-                    <h5 className="font-bold text-base text-white">
+                    <h5 className={`font-bold text-base ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                       {triviaScore >= 4 ? '🎉 Culinary Connoisseur!' : triviaScore >= 2 ? '👏 Good Effort, Foodie!' : '🍽️ Keep Exploring Flavors!'}
                     </h5>
-                    <p className="text-xs text-slate-400 max-w-xs mx-auto">
-                      You answered <strong className="text-white">{triviaScore}</strong> out of <strong className="text-white">{triviaQuestions.length}</strong> questions correctly! (+{triviaScore * 30} pts)
+                    <p className={`text-xs max-w-xs mx-auto ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                      You answered <strong className={isDarkMode ? 'text-white' : 'text-slate-900'}>{triviaScore}</strong> out of <strong className={isDarkMode ? 'text-white' : 'text-slate-900'}>{triviaQuestions.length}</strong> questions correctly! (+{triviaScore * 30} pts)
                     </p>
                   </div>
                   <button
@@ -406,20 +567,28 @@ export default function WifiAndEntertainmentCard({
                 </div>
               ) : (
                 <div className="space-y-3.5">
-                  <p className="text-sm font-bold text-white leading-snug">
+                  <p className={`text-sm font-bold leading-snug ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                     {currentQ.question}
                   </p>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     {currentQ.options.map((opt, idx) => {
-                      let btnStyle = 'bg-[#252934] border-slate-700/60 text-slate-200 hover:bg-[#2e3442] hover:border-slate-600';
+                      let btnStyle = isDarkMode 
+                        ? 'bg-[#252934] border-slate-700/60 text-slate-200 hover:bg-[#2e3442] hover:border-slate-600'
+                        : 'bg-slate-50 border-slate-200 text-slate-800 hover:bg-slate-100 hover:border-slate-300';
                       if (isAnswered) {
                         if (idx === currentQ.answer) {
-                          btnStyle = 'bg-emerald-950/70 border-emerald-500 text-emerald-200 font-bold ring-1 ring-emerald-500';
+                          btnStyle = isDarkMode
+                            ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 font-bold ring-1 ring-emerald-500'
+                            : 'bg-emerald-50 border-emerald-500 text-emerald-800 font-bold ring-1 ring-emerald-500';
                         } else if (idx === selectedAnswer) {
-                          btnStyle = 'bg-rose-950/70 border-rose-500 text-rose-200 ring-1 ring-rose-500';
+                          btnStyle = isDarkMode
+                            ? 'bg-rose-500/20 border-rose-500 text-rose-300 ring-1 ring-rose-500'
+                            : 'bg-rose-50 border-rose-500 text-rose-800 ring-1 ring-rose-500';
                         } else {
-                          btnStyle = 'bg-[#252934]/40 border-slate-800 text-slate-500 opacity-50';
+                          btnStyle = isDarkMode 
+                            ? 'bg-[#252934]/40 border-slate-800 text-slate-500 opacity-50'
+                            : 'bg-slate-100 border-slate-200 text-slate-400 opacity-50';
                         }
                       }
                       return (
@@ -431,17 +600,21 @@ export default function WifiAndEntertainmentCard({
                           className={`p-3 rounded-xl border text-left text-xs font-semibold transition-all flex items-center justify-between min-h-[44px] ${btnStyle}`}
                         >
                           <span>{opt}</span>
-                          {isAnswered && idx === currentQ.answer && <Check size={14} className="text-emerald-400 shrink-0 ml-1.5" />}
+                          {isAnswered && idx === currentQ.answer && <Check size={14} className="text-emerald-500 shrink-0 ml-1.5" />}
                         </button>
                       );
                     })}
                   </div>
 
                   {isAnswered && (
-                    <div className="bg-[#1b253b] border border-blue-900/60 p-3.5 rounded-xl text-xs text-blue-200 space-y-2.5 animate-fadeIn">
+                    <div className={`p-3.5 rounded-xl text-xs space-y-2.5 animate-fadeIn border ${
+                      isDarkMode 
+                        ? 'bg-[#1b253b] border-blue-900/60 text-blue-200' 
+                        : 'bg-blue-50 border-blue-200 text-blue-900'
+                    }`}>
                       <div className="flex items-start gap-2">
-                        <HelpCircle size={15} className="text-blue-400 shrink-0 mt-0.5" />
-                        <p className="text-[11px] leading-relaxed text-blue-200 font-medium">
+                        <HelpCircle size={15} className={`shrink-0 mt-0.5 ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`} />
+                        <p className={`text-[11px] leading-relaxed font-medium ${isDarkMode ? 'text-blue-200' : 'text-blue-900'}`}>
                           {currentQ.fact}
                         </p>
                       </div>
@@ -465,7 +638,9 @@ export default function WifiAndEntertainmentCard({
           {activeSubTab === 'MEMORY' && (
             <div className="space-y-3 animate-fadeIn">
               {/* Moves & Matches row matching Screenshot 1 */}
-              <div className="flex items-center justify-between px-1 text-slate-300 text-xs sm:text-sm font-semibold">
+              <div className={`flex items-center justify-between px-1 text-xs sm:text-sm font-semibold ${
+                isDarkMode ? 'text-slate-300' : 'text-slate-700'
+              }`}>
                 <span>Moves: {memoryMoves}</span>
                 <span>Matches: {matchedPairsCount} / 6</span>
               </div>
@@ -480,7 +655,11 @@ export default function WifiAndEntertainmentCard({
                     return (
                       <div
                         key={card.id}
-                        className="bg-emerald-950/60 border-2 border-emerald-500/80 rounded-2xl aspect-square flex flex-col items-center justify-center text-3xl shadow-md transition-all select-none animate-fadeIn"
+                        className={`rounded-2xl aspect-square flex flex-col items-center justify-center text-3xl shadow-md transition-all select-none animate-fadeIn border-2 ${
+                          isDarkMode 
+                            ? 'bg-emerald-950/60 border-emerald-500/80' 
+                            : 'bg-emerald-50 border-emerald-500'
+                        }`}
                       >
                         <span>{card.icon}</span>
                       </div>
@@ -491,20 +670,28 @@ export default function WifiAndEntertainmentCard({
                     return (
                       <div
                         key={card.id}
-                        className="bg-slate-800 border-2 border-amber-400 rounded-2xl aspect-square flex flex-col items-center justify-center text-3xl shadow-lg transition-all select-none"
+                        className={`rounded-2xl aspect-square flex flex-col items-center justify-center text-3xl shadow-lg transition-all select-none border-2 ${
+                          isDarkMode 
+                            ? 'bg-slate-800 border-amber-400' 
+                            : 'bg-white border-amber-500'
+                        }`}
                       >
                         <span>{card.icon}</span>
                       </div>
                     );
                   }
 
-                  // Unflipped Card matching Screenshot 1: Dark gray with bold red '?'
+                  // Unflipped Card matching Screenshot 1: Red '?'
                   return (
                     <button
                       key={card.id}
                       type="button"
                       onClick={() => handleCardClick(card)}
-                      className="bg-[#282c35] hover:bg-[#323742] active:scale-95 border border-slate-700/60 rounded-2xl aspect-square flex items-center justify-center transition-all shadow-sm"
+                      className={`active:scale-95 border rounded-2xl aspect-square flex items-center justify-center transition-all shadow-sm ${
+                        isDarkMode 
+                          ? 'bg-[#282c35] hover:bg-[#323742] border-slate-700/60' 
+                          : 'bg-slate-100 hover:bg-slate-200 border-slate-200'
+                      }`}
                       aria-label="Memory Card"
                     >
                       <span className="text-rose-500 font-extrabold text-2xl sm:text-3xl select-none leading-none">
@@ -517,15 +704,19 @@ export default function WifiAndEntertainmentCard({
 
               {/* Victory state */}
               {matchedPairsCount === 6 && (
-                <div className="bg-[#182a20] border border-emerald-500/50 rounded-2xl p-4 text-center space-y-2 mt-3 animate-fadeIn">
-                  <div className="w-10 h-10 mx-auto rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                <div className={`border rounded-2xl p-4 text-center space-y-2 mt-3 animate-fadeIn ${
+                  isDarkMode 
+                    ? 'bg-[#182a20] border-emerald-500/50' 
+                    : 'bg-emerald-50 border-emerald-300'
+                }`}>
+                  <div className="w-10 h-10 mx-auto rounded-xl bg-emerald-500/20 text-emerald-500 flex items-center justify-center">
                     <Trophy size={20} />
                   </div>
-                  <h5 className="font-bold text-sm text-emerald-200">
+                  <h5 className={`font-bold text-sm ${isDarkMode ? 'text-emerald-200' : 'text-emerald-900'}`}>
                     🎉 Outstanding! All 6 Pairs Matched!
                   </h5>
-                  <p className="text-xs text-slate-300">
-                    Completed in <strong className="text-white">{memoryMoves} moves</strong>! Added <strong className="text-emerald-400">+150 pts</strong> to Table {tableNumber}!
+                  <p className={`text-xs ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                    Completed in <strong className={isDarkMode ? 'text-white' : 'text-slate-900'}>{memoryMoves} moves</strong>! Added <strong className={isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}>+150 pts</strong> to Table {tableNumber}!
                   </p>
                   <button
                     type="button"
@@ -542,17 +733,23 @@ export default function WifiAndEntertainmentCard({
           {/* TAB 4: LEADERBOARD */}
           {activeSubTab === 'LEADERBOARD' && (
             <div className="space-y-3 animate-fadeIn">
-              <div className="bg-[#20242e] border border-white/5 rounded-2xl p-4 space-y-2">
+              <div className={`border rounded-2xl p-4 space-y-2 ${
+                isDarkMode ? 'bg-[#20242e] border-white/5' : 'bg-slate-50 border-slate-200'
+              }`}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Trophy size={16} className="text-amber-400" />
-                    <span className="font-bold text-sm text-white">Live Table Standings</span>
+                    <Trophy size={16} className="text-amber-500" />
+                    <span className={`font-bold text-sm ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Live Table Standings</span>
                   </div>
-                  <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-400 border border-emerald-500/30">
+                  <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full border ${
+                    isDarkMode 
+                      ? 'bg-emerald-950/80 text-emerald-400 border-emerald-500/30' 
+                      : 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                  }`}>
                     ● Live
                   </span>
                 </div>
-                <p className="text-xs text-slate-400">
+                <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
                   Compete with fellow tables while waiting for your order.
                 </p>
               </div>
@@ -560,68 +757,88 @@ export default function WifiAndEntertainmentCard({
               {/* Standings List */}
               <div className="space-y-2 text-xs">
                 {/* 1st */}
-                <div className="bg-[#232834] p-3 rounded-xl border border-amber-500/30 flex items-center justify-between">
+                <div className={`p-3 rounded-xl border flex items-center justify-between ${
+                  isDarkMode 
+                    ? 'bg-[#232834] border-amber-500/30' 
+                    : 'bg-amber-50/50 border-amber-200 shadow-xs'
+                }`}>
                   <div className="flex items-center gap-3">
                     <span className="text-lg">🥇</span>
                     <div>
-                      <span className="font-bold text-white block">Table B2</span>
-                      <span className="text-[10px] text-amber-400 font-semibold">Grand Master</span>
+                      <span className={`font-bold block ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Table B2</span>
+                      <span className={`text-[10px] font-semibold ${isDarkMode ? 'text-amber-400' : 'text-amber-700'}`}>Grand Master</span>
                     </div>
                   </div>
-                  <span className="font-mono font-bold text-amber-300">420 pts</span>
+                  <span className={`font-mono font-bold ${isDarkMode ? 'text-amber-300' : 'text-amber-700'}`}>420 pts</span>
                 </div>
 
                 {/* 2nd - Current User Table */}
-                <div className="bg-[#1e2436] p-3 rounded-xl border-2 border-purple-500/70 shadow-md flex items-center justify-between">
+                <div className={`p-3 rounded-xl border-2 shadow-md flex items-center justify-between ${
+                  isDarkMode 
+                    ? 'bg-[#1e2436] border-purple-500/70' 
+                    : 'bg-purple-50/60 border-purple-400 shadow-xs'
+                }`}>
                   <div className="flex items-center gap-3">
                     <span className="text-lg">🥈</span>
                     <div>
                       <div className="flex items-center gap-1.5">
-                        <span className="font-bold text-white">Table {tableNumber || 'A9'}</span>
+                        <span className={`font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Table {tableNumber || 'A9'}</span>
                         <span className="px-1.5 py-0.2 rounded-md bg-purple-600 text-[9px] font-black uppercase text-white">
                           You
                         </span>
                       </div>
-                      <span className="text-[10px] text-purple-300 font-semibold">Foodie Connoisseur</span>
+                      <span className={`text-[10px] font-semibold ${isDarkMode ? 'text-purple-300' : 'text-purple-700'}`}>Foodie Connoisseur</span>
                     </div>
                   </div>
-                  <span className="font-mono font-bold text-purple-300">{totalUserPoints} pts</span>
+                  <span className={`font-mono font-bold ${isDarkMode ? 'text-purple-300' : 'text-purple-700'}`}>{totalUserPoints} pts</span>
                 </div>
 
                 {/* 3rd */}
-                <div className="bg-[#232834] p-3 rounded-xl border border-slate-700/60 flex items-center justify-between">
+                <div className={`p-3 rounded-xl border flex items-center justify-between ${
+                  isDarkMode 
+                    ? 'bg-[#232834] border-slate-700/60' 
+                    : 'bg-white border-slate-200 shadow-xs'
+                }`}>
                   <div className="flex items-center gap-3">
                     <span className="text-lg">🥉</span>
                     <div>
-                      <span className="font-bold text-slate-200 block">Table C1</span>
-                      <span className="text-[10px] text-slate-400 font-semibold">Trivia Enthusiast</span>
+                      <span className={`font-bold block ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>Table C1</span>
+                      <span className={`text-[10px] font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Trivia Enthusiast</span>
                     </div>
                   </div>
-                  <span className="font-mono font-bold text-slate-300">280 pts</span>
+                  <span className={`font-mono font-bold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>280 pts</span>
                 </div>
 
                 {/* 4th */}
-                <div className="bg-[#232834] p-3 rounded-xl border border-slate-700/40 flex items-center justify-between text-slate-400">
+                <div className={`p-3 rounded-xl border flex items-center justify-between ${
+                  isDarkMode 
+                    ? 'bg-[#232834] border-slate-700/40 text-slate-400' 
+                    : 'bg-white border-slate-200 text-slate-500 shadow-xs'
+                }`}>
                   <div className="flex items-center gap-3">
-                    <span className="font-bold pl-1.5 text-slate-500">4</span>
+                    <span className="font-bold pl-1.5 text-slate-400">4</span>
                     <div>
-                      <span className="font-bold text-slate-300 block">Table A3</span>
-                      <span className="text-[10px] text-slate-500 font-semibold">Appetizer Explorer</span>
+                      <span className={`font-bold block ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>Table 3</span>
+                      <span className="text-[10px] text-slate-400 font-semibold">Appetizer Explorer</span>
                     </div>
                   </div>
-                  <span className="font-mono font-bold text-slate-400">190 pts</span>
+                  <span className="font-mono font-bold">190 pts</span>
                 </div>
 
                 {/* 5th */}
-                <div className="bg-[#232834] p-3 rounded-xl border border-slate-700/40 flex items-center justify-between text-slate-400">
+                <div className={`p-3 rounded-xl border flex items-center justify-between ${
+                  isDarkMode 
+                    ? 'bg-[#232834] border-slate-700/40 text-slate-400' 
+                    : 'bg-white border-slate-200 text-slate-500 shadow-xs'
+                }`}>
                   <div className="flex items-center gap-3">
-                    <span className="font-bold pl-1.5 text-slate-500">5</span>
+                    <span className="font-bold pl-1.5 text-slate-400">5</span>
                     <div>
-                      <span className="font-bold text-slate-300 block">Table D4</span>
-                      <span className="text-[10px] text-slate-500 font-semibold">Snack Tactician</span>
+                      <span className={`font-bold block ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>Table D4</span>
+                      <span className="text-[10px] text-slate-400 font-semibold">Snack Tactician</span>
                     </div>
                   </div>
-                  <span className="font-mono font-bold text-slate-400">140 pts</span>
+                  <span className="font-mono font-bold">140 pts</span>
                 </div>
               </div>
             </div>

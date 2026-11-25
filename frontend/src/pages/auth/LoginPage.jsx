@@ -4,6 +4,8 @@ import { ArrowLeft, ArrowRight, Cloud, Eye, EyeOff, LockKeyhole, ShieldCheck, Ut
 import { useAuth } from '../../context/AuthContext';
 
 const roles = [
+  { role: 'SUPER_ADMIN', name: 'Super Admin', icon: ShieldCheck },
+  { role: 'MANAGER', name: 'Manager', icon: LockKeyhole },
   { role: 'RECEPTIONIST', name: 'Reception', icon: Grid2X2 },
   { role: 'KITCHEN', name: 'Kitchen', icon: ChefHat },
   { role: 'WAITER', name: 'Floor staff', icon: Bell }
@@ -19,10 +21,10 @@ export default function LoginPage() {
   const location = useLocation();
   const redirect = new URLSearchParams(location.search).get('redirect');
   const nextPath = userRole => {
-    const defaultPath = userRole === 'KITCHEN' ? '/kitchen' : userRole === 'WAITER' ? '/waiter' : ['RECEPTIONIST', 'SUPER_ADMIN'].includes(userRole) ? '/pos' : '/menu';
+    const defaultPath = userRole === 'KITCHEN' ? '/kitchen' : userRole === 'WAITER' ? '/waiter' : ['RECEPTIONIST', 'MANAGER', 'SUPER_ADMIN'].includes(userRole) ? '/pos' : '/menu';
     if (!redirect || !redirect.startsWith('/') || redirect.startsWith('//')) return defaultPath;
     const staffPath = redirect.startsWith('/pos') || redirect.startsWith('/receptionist');
-    if (staffPath && !['RECEPTIONIST', 'SUPER_ADMIN'].includes(userRole)) return defaultPath;
+    if (staffPath && !['RECEPTIONIST', 'MANAGER', 'SUPER_ADMIN'].includes(userRole)) return defaultPath;
     if (redirect.startsWith('/kitchen') && !['KITCHEN', 'SUPER_ADMIN'].includes(userRole)) return defaultPath;
     if (redirect.startsWith('/waiter') && !['WAITER', 'SUPER_ADMIN'].includes(userRole)) return defaultPath;
     return redirect;
@@ -70,7 +72,7 @@ export default function LoginPage() {
               <div><div className="flex items-center justify-between mb-2"><label htmlFor="auth-password" className="text-xs font-medium">Password</label></div><div className="relative"><input id="auth-password" name="password" type={showPassword ? 'text' : 'password'} required autoComplete="current-password" value={form.password} onChange={change} className="auth-field pr-11" placeholder="Enter staff password" /><button type="button" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? 'Hide password' : 'Show password'} className="absolute right-3 top-3 text-slate-400">{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></div>
               <button type="submit" disabled={busy} className="btn-3d-blue w-full h-11 rounded-lg text-white text-xs font-semibold flex items-center justify-center gap-2 disabled:opacity-50 mt-6">{busy ? 'Please wait…' : 'Sign in to Staff POS'}{!busy && <ArrowRight size={15} />}</button>
             </form>
-            {import.meta.env.DEV && <div className="mt-9 pt-6 border-t border-[#edf0f6]"><p className="text-[10px] text-slate-400 text-center mb-3">Quick staff demo sign in</p><div className="grid grid-cols-3 gap-2">{roles.map(({ role, name, icon: Icon }) => <button key={role} type="button" disabled={busy} onClick={() => openDemo(role)} className="flex flex-col items-center gap-2 border border-[#e4e9f2] bg-[#fafbfe] rounded-lg py-3 text-[10px] font-medium text-slate-600 hover:border-[#4778f5] hover:text-[#4778f5] disabled:opacity-50"><Icon size={17} />{name}</button>)}</div></div>}
+            {import.meta.env.DEV && <div className="mt-9 pt-6 border-t border-[#edf0f6]"><p className="text-[10px] text-slate-400 text-center mb-3">Quick staff demo sign in</p><div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">{roles.map(({ role, name, icon: Icon }) => <button key={role} type="button" disabled={busy} onClick={() => openDemo(role)} className="flex flex-col items-center gap-2 border border-[#e4e9f2] bg-[#fafbfe] rounded-lg py-3 text-[10px] font-medium text-slate-600 hover:border-[#4778f5] hover:text-[#4778f5] disabled:opacity-50"><Icon size={17} />{name}</button>)}</div></div>}
           </div>
         </div>
         <footer className="px-7 sm:px-12 py-6 flex items-center justify-between text-[10px] text-[#9ca5b5]"><span>Bistro &amp; Bloom Staff Portal</span><span className="flex items-center gap-1.5"><ShieldCheck size={12} /> Secure staff access</span></footer>

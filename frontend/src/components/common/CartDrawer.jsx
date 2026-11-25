@@ -4,7 +4,7 @@ import { useCart } from '../../context/CartContext';
 import { ShoppingBag, Plus, Minus, Trash2, X, ArrowRight, Tag } from 'lucide-react';
 
 export default function CartDrawer({ isOpen, onClose, onCheckout }) {
-  const { items, updateQuantity, removeItem, clearCart, subtotal, tax, deliveryFee, total, orderSource, setOrderSource } = useCart();
+  const { items, updateQuantity, updateItemCourse, removeItem, clearCart, subtotal, tax, deliveryFee, total, orderSource, setOrderSource } = useCart();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -97,6 +97,25 @@ export default function CartDrawer({ isOpen, onClose, onCheckout }) {
                     )}
                   </div>
                 ) : null}
+
+                {/* Course Selection (Serve Together) */}
+                <div className="flex items-center gap-1.5 pt-1 text-[10px]">
+                  <span className="text-slate-400 font-semibold">Course:</span>
+                  {['STARTERS', 'MAIN', 'DESSERTS'].map(c => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => updateItemCourse?.(item.itemKey, c)}
+                      className={`px-2 py-0.5 rounded-md font-bold transition-all ${
+                        (item.course || 'MAIN') === c
+                          ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                          : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                      }`}
+                    >
+                      {c === 'STARTERS' ? 'Starter' : c === 'MAIN' ? 'Main' : 'Dessert'}
+                    </button>
+                  ))}
+                </div>
 
                 {/* Quantity Controls & Line Total */}
                 <div className="flex items-center justify-between pt-1">

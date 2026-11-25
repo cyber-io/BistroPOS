@@ -30,3 +30,25 @@ export function getSmsUrl(reservation, restaurantName = 'Bistro & Bloom') {
   const text = encodeURIComponent(getRescheduleNotificationText(reservation, restaurantName));
   return `sms:${phone}?body=${text}`;
 }
+
+export function getCancellationNotificationText(reservation, reason = '', restaurantName = 'Bistro & Bloom') {
+  if (!reservation) return '';
+  const guest = reservation.customerName || 'Valued Guest';
+  const bookingId = reservation.bookingId || '';
+  const reasonText = reason ? ` due to ${reason}` : ' due to an unforeseen operational inconvenience';
+  
+  return `Dear ${guest}, we regret to inform you that your table reservation (${bookingId}) at ${restaurantName} has been cancelled${reasonText}. We sincerely apologize for any inconvenience caused. Please reply to this message or call our reception if you would like to book an alternate slot. Thank you!`;
+}
+
+export function getCancelWhatsAppUrl(reservation, reason = '', restaurantName = 'Bistro & Bloom') {
+  const phone = cleanPhone(reservation?.customerPhone);
+  const text = encodeURIComponent(getCancellationNotificationText(reservation, reason, restaurantName));
+  if (!phone) return `https://wa.me/?text=${text}`;
+  return `https://wa.me/${phone}?text=${text}`;
+}
+
+export function getCancelSmsUrl(reservation, reason = '', restaurantName = 'Bistro & Bloom') {
+  const phone = cleanPhone(reservation?.customerPhone);
+  const text = encodeURIComponent(getCancellationNotificationText(reservation, reason, restaurantName));
+  return `sms:${phone}?body=${text}`;
+}

@@ -7,25 +7,31 @@ import { soundEffects } from '../../services/soundEffects';
 import { Badge, Empty, Spinner, time } from '../../components/pos/PosUI';
 import { Bell, HelpCircle, CheckCircle2, Clock, UserCheck, RefreshCw, AlertCircle, HandPlatter, Sparkles } from 'lucide-react';
 
-function CleaningCountdown({ acceptedAt, onMarkAvailable, busy }) {
+function CleaningCountdown({ acceptedAt, onMarkAvailable, busy, canAutoComplete = false }) {
   const [secondsLeft, setSecondsLeft] = useState(() => {
     const elapsed = Math.floor((Date.now() - new Date(acceptedAt || Date.now()).getTime()) / 1000);
     return Math.max(0, 120 - elapsed);
   });
   const autoTriggered = useRef(false);
+  const onMarkAvailableRef = useRef(onMarkAvailable);
+  onMarkAvailableRef.current = onMarkAvailable;
+
+  useEffect(() => {
+    autoTriggered.current = false;
+  }, [acceptedAt]);
 
   useEffect(() => {
     const timer = setInterval(() => {
       const elapsed = Math.floor((Date.now() - new Date(acceptedAt || Date.now()).getTime()) / 1000);
       const remaining = Math.max(0, 120 - elapsed);
       setSecondsLeft(remaining);
-      if (remaining === 0 && !autoTriggered.current) {
+      if (remaining === 0 && canAutoComplete && !autoTriggered.current) {
         autoTriggered.current = true;
-        onMarkAvailable?.();
+        onMarkAvailableRef.current?.();
       }
     }, 1000);
     return () => clearInterval(timer);
-  }, [acceptedAt, onMarkAvailable]);
+  }, [acceptedAt, canAutoComplete]);
 
   const mins = Math.floor(secondsLeft / 60);
   const secs = secondsLeft % 60;
@@ -187,7 +193,7 @@ export default function WaiterDashboard() {
       <section className="pos-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 460 }}>
         <header className="pos-panel-header">
           <h2><Bell size={15} />Ready on the pass</h2>
-          <span className="pos-count">{orders.length} dine-in orders</span>
+          {orders.length > 0 && <span className="pos-count">{orders.length} dine-in orders</span>}
         </header>
         <div className="pos-panel-content" style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: orders.length ? 'flex-start' : 'center' }}>
           {!orders.length ? (
@@ -231,7 +237,7 @@ export default function WaiterDashboard() {
       <section className="pos-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 460 }}>
         <header className="pos-panel-header">
           <h2><HelpCircle size={15} />Floor assistance &amp; Cleaning</h2>
-          <span className="pos-count">{pending.length} waiting</span>
+          {pending.length > 0 && <span className="pos-count">{pending.length} waiting</span>}
         </header>
         <div style={{ padding: '12px 12px 0' }}>
           <div className="pos-segment" style={{ display: 'flex', width: '100%' }}>
@@ -346,6 +352,7 @@ export default function WaiterDashboard() {
                       <CleaningCountdown
                         acceptedAt={request.acceptedAt || request.createdAt}
                         busy={busy === request.requestId}
+                        canAutoComplete={isMine(request)}
                         onMarkAvailable={() => act(
                           request.requestId,
                           () => api.resolveHelpRequest(request.requestId),
@@ -373,17 +380,16 @@ export default function WaiterDashboard() {
                         Being attended by {request.assignedWaiterName || 'another staff member'}.
                       </p>
                       <button
-                        className="pos-button full primary"
+                        className="pos-button full"
                         disabled={Boolean(busy)}
                         onClick={() => act(
                           request.requestId,
                           () => api.resolveHelpRequest(request.requestId),
-                          `${tableTitle(request)} sanitized and marked AVAILABLE!`
+                          'Guest assistance request marked resolved.'
                         )}
-                        style={{ background: '#16a34a', borderColor: '#16a34a', color: '#fff', fontWeight: 650 }}
                       >
                         <CheckCircle2 size={14} />
-                        Mark Table Available
+                        {busy === request.requestId ? 'Saving…' : 'Mark resolved'}
                       </button>
                     </div>
                   )}

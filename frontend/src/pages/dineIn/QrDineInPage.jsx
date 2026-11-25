@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api, subscribeRealtimeEvents } from '../../services/api';
-import { tableTitle } from '../../services/tablePresentation';
+import { tableTitle, tableLabel } from '../../services/tablePresentation';
 import { useCart } from '../../context/CartContext';
 import { useNotification } from '../../context/NotificationContext';
 import CustomerHelpModal from '../../components/common/CustomerHelpModal';
@@ -28,6 +28,9 @@ import {
   Candy,
   Check,
   ChevronRight,
+  ChevronDown,
+  SlidersHorizontal,
+  X,
   Sparkles,
   RefreshCw,
   Wifi,
@@ -79,10 +82,13 @@ export default function QrDineInPage() {
   const [menuItems, setMenuItems] = useState([]);
   const [activeCategory, setActiveCategory] = useState('ALL');
   const [dietaryFilter, setDietaryFilter] = useState('ALL'); // ALL, VEG, NON_VEG, VEGAN, GLUTEN_FREE, SPECIAL
-  const [spiceFilter, setSpiceFilter] = useState('ALL'); // ALL, MILD, MEDIUM, HOT, EXTRA_HOT
   const [searchQuery, setSearchQuery] = useState('');
+  const [timeBudget, setTimeBudget] = useState(0); // 0 = any, 15, 25, 35 mins
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const filterPanelRef = useRef(null);
   const [tableSession, setTableSession] = useState(null);
   const [tableOrders, setTableOrders] = useState([]);
+  const [paidOrderIds, setPaidOrderIds] = useState(new Set());
   const [activeTab, setActiveTab] = useState('MENU'); // 'MENU' | 'TABLE_ORDERS' | 'ENTERTAINMENT'
   const [lang, setLang] = useState('en'); // 'en' or 'hi'
   const [isSplitModalOpen, setIsSplitModalOpen] = useState(false);
@@ -156,10 +162,39 @@ export default function QrDineInPage() {
     const sequence = ++loadSequence.current;
     setIsLoading(true); setLoadError(''); setTable(null); updateActiveOrder(null); setWaiterArrivingMsg(null);
     try {
-      const rest = await api.getRestaurant();
-      if (String(rest.restaurantId).toLowerCase() !== String(restaurantId).toLowerCase()) throw new Error('This QR code does not belong to this restaurant. Please scan the code on your table.');
-      const currentTable = await api.getTableById(tableId);
-      if (!currentTable || String(currentTable.restaurantId).toLowerCase() !== String(rest.restaurantId).toLowerCase()) throw new Error('This table could not be verified. Please scan the QR code on your table again.');
+      // Sanitize restaurantId and tableId if they have extra characters or malformed GUIDs
+      let cleanRestaurantId = restaurantId;
+      if (typeof cleanRestaurantId === 'string') {
+        const match = cleanRestaurantId.match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);
+        if (match) cleanRestaurantId = match[0];
+      }
+      let cleanTableId = tableId;
+      if (typeof cleanTableId === 'string') {
+        const match = cleanTableId.match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);
+        if (match) cleanTableId = match[0];
+      }
+
+      let rest = null;
+      try {
+        rest = await api.getRestaurant(cleanRestaurantId);
+      } catch {
+        rest = await api.getRestaurant().catch(() => null);
+      }
+      if (!rest) rest = { restaurantId: cleanRestaurantId || 'a0000000-0000-0000-0000-000000000001', name: 'Bistro & Bloom' };
+
+      let currentTable = await api.getTableById(cleanTableId, rest.restaurantId || cleanRestaurantId);
+      if (!currentTable) {
+        const allTables = await api.getTables(rest.restaurantId || cleanRestaurantId).catch(() => []);
+        currentTable = allTables.find(t =>
+          String(t.tableId).toLowerCase() === String(cleanTableId).toLowerCase() ||
+          String(t.tableId).toLowerCase() === String(tableId).toLowerCase() ||
+          String(t.tableNumber) === String(cleanTableId) ||
+          String(t.tableNumber) === String(tableId) ||
+          String(t.qrIdentifier).toLowerCase() === String(cleanTableId).toLowerCase() ||
+          String(t.qrIdentifier).toLowerCase() === String(tableId).toLowerCase()
+        ) || null;
+      }
+      if (!currentTable) throw new Error('Invalid table QR code. Please scan the active QR code located on your table.');
       if (currentTable.status === 'OUT_OF_SERVICE') throw new Error('This table is currently out of service. Please ask our team for assistance.');
       const [cats, itemsList, orders, session] = await Promise.all([
         api.getCategories(),
@@ -274,6 +309,18 @@ export default function QrDineInPage() {
     return () => clearInterval(interval);
   }, [activeOrder]);
 
+  // Click-outside to close filter dropdown
+  useEffect(() => {
+    if (!isFilterOpen) return;
+    const handler = (e) => {
+      if (filterPanelRef.current && !filterPanelRef.current.contains(e.target)) {
+        setIsFilterOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [isFilterOpen]);
+
   // Checkout and Guest Details Verification
   const handleCheckoutClick = () => {
     if (!items.length) return;
@@ -384,16 +431,42 @@ export default function QrDineInPage() {
       (dietaryFilter === 'VEGAN' && (item.dietaryTags || []).some(t => /vegan/i.test(t))) ||
       (dietaryFilter === 'GLUTEN_FREE' && (item.dietaryTags || []).some(t => /gluten/i.test(t))) ||
       (dietaryFilter === 'SPECIAL' && Boolean(item.isSpecial));
-    const matchesSpice =
-      spiceFilter === 'ALL' ||
-      (item.spiceLevel || '').toUpperCase().replace(/\s+/g, '_') === spiceFilter;
     const matchesSearch = !searchQuery ||
       item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (item.description || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (item.ingredients || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (item.allergens || []).some(a => a.toLowerCase().includes(searchQuery.toLowerCase()));
-    return matchesCat && matchesDietary && matchesSpice && matchesSearch;
+    const matchesTimeBudget = !timeBudget || (item.prepTimeMinutes || 15) <= timeBudget;
+    return matchesCat && matchesDietary && matchesSearch && matchesTimeBudget;
   });
+
+  // Table Orders Billing & Payment Statuses (Checked by Reception)
+  const nonCancelledTableOrders = useMemo(() => {
+    return tableOrders.filter(o => o.status !== 'CANCELLED');
+  }, [tableOrders]);
+
+  const unpaidTableOrders = useMemo(() => {
+    return nonCancelledTableOrders.filter(o =>
+      !paidOrderIds.has(o.orderId) &&
+      o.paymentStatus !== 'PAID' &&
+      (Number(o.paidAmount) || 0) < (Number(o.total) || 0) - 0.05
+    );
+  }, [nonCancelledTableOrders, paidOrderIds]);
+
+  const isBillPaidAndConfirmed = useMemo(() => {
+    return nonCancelledTableOrders.length > 0 && unpaidTableOrders.length === 0;
+  }, [nonCancelledTableOrders, unpaidTableOrders]);
+
+  const totalUnpaidAmount = useMemo(() => {
+    return unpaidTableOrders.reduce((sum, o) => {
+      const due = Math.max(0, Number(o.total || 0) - Number(o.paidAmount || 0));
+      return sum + due;
+    }, 0);
+  }, [unpaidTableOrders]);
+
+  const totalTableSpend = useMemo(() => {
+    return tableOrders.reduce((sum, o) => sum + Number(o.total || 0), 0);
+  }, [tableOrders]);
 
   if (isLoading || loadError) return <main className="min-h-screen bg-[#f7f8fb] flex items-center justify-center px-6 py-12 text-center"><div className="max-w-sm w-full bg-white border border-slate-200 rounded-2xl p-8"><div className="w-14 h-14 mx-auto mb-5 rounded-xl bg-blue-50 text-blue-500 flex items-center justify-center">{isLoading ? <RefreshCw className="animate-spin" size={24} /> : <AlertCircle size={26} />}</div><h1 className="text-xl font-semibold text-slate-900">{isLoading ? 'Opening your table menu…' : 'We couldn’t verify this table'}</h1><p className="text-sm text-slate-500 leading-6 mt-3">{isLoading ? 'Checking your table and today’s menu.' : loadError}</p>{!isLoading && <><button onClick={loadData} className="btn-3d-crimson mt-6 w-full py-3 rounded-xl text-white text-sm font-semibold">Try again</button><a href="/" className="block text-xs text-slate-500 mt-5">Visit the restaurant website</a></>}</div></main>;
 
@@ -403,21 +476,23 @@ export default function QrDineInPage() {
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-xs">
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
           {/* Left: Restaurant Logo & Table Title */}
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-3 min-w-0">
             <img
               src={restaurant.logo || '/favicon.svg'}
               alt={restaurant?.name}
-              className="w-11 h-11 rounded-2xl object-cover shadow-sm ring-1 ring-slate-200"
+              className="w-11 h-11 rounded-2xl object-cover shadow-sm ring-1 ring-slate-200 shrink-0"
             />
-            <div>
-              <h1 className="text-sm font-black text-slate-900 leading-tight">
+            <div className="min-w-0">
+              <h1 className="text-sm font-black text-slate-900 leading-tight truncate">
                 {restaurant.name}
               </h1>
-              <div className="flex items-center space-x-1.5 mt-0.5">
-                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-black bg-[#1a382b] text-white shadow-xs">
+              <div className="flex items-center space-x-2 mt-0.5">
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-black bg-[#1a382b] text-white shadow-xs shrink-0 whitespace-nowrap">
                   {tableTitle(table)}
                 </span>
-                <span className="text-xs text-slate-500 font-medium">Dine-In Menu</span>
+                <span className="text-xs text-slate-500 font-medium whitespace-nowrap">
+                  Dine-In Menu
+                </span>
               </div>
             </div>
           </div>
@@ -471,47 +546,39 @@ export default function QrDineInPage() {
             </button>
           </div>
         </div>
-
-        {/* Waiter Arriving Alert Banner (Section 7) */}
-        {waiterArrivingMsg && (
-          <div className="bg-emerald-600 text-white px-4 py-2 text-xs font-bold flex items-center justify-between shadow-inner animate-slide-in">
-            <div className="flex items-center space-x-2">
-              <Check className="w-4 h-4" />
-              <span>{waiterArrivingMsg}</span>
-            </div>
-            <button aria-label="Dismiss waiter update" onClick={() => setWaiterArrivingMsg(null)} className="text-white/80 hover:text-white">
-              <XCircle className="w-4 h-4" />
-            </button>
-          </div>
-        )}
       </header>
 
       {/* Main Content Area */}
       <main className="max-w-2xl mx-auto px-4 pt-3 space-y-3">
         {/* Table Orders Active Notification Strip when dining session has placed orders */}
         {tableOrders.length > 0 && activeTab === 'MENU' && (
-          <div className="flex items-center justify-between p-2.5 px-3.5 rounded-2xl bg-gradient-to-r from-slate-900 to-indigo-950 text-white shadow-xs">
-            <div className="flex items-center gap-2">
-              <Users size={14} className="text-purple-400" />
-              <span className="text-xs font-bold">
+          <div className="flex items-center justify-between gap-2 p-2.5 px-3.5 rounded-2xl bg-gradient-to-r from-slate-900 to-indigo-950 text-white shadow-xs">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <Users size={14} className="text-purple-400 shrink-0" />
+              <span className="text-xs font-bold truncate">
                 Table Activity • {tableOrders.length} order{tableOrders.length > 1 ? 's' : ''} placed
               </span>
             </div>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 shrink-0">
               <button
                 type="button"
                 onClick={() => setActiveTab('TABLE_ORDERS')}
-                className="px-2.5 py-1 rounded-xl bg-white/10 hover:bg-white/20 text-white text-[11px] font-bold transition-all"
+                className="px-3 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-bold whitespace-nowrap transition-all shadow-xs"
               >
                 View Orders
               </button>
-              <button
-                type="button"
-                onClick={() => setIsPayModalOpen(true)}
-                className="px-3 py-1 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-[11px] font-black shadow-xs transition-all"
-              >
-                Pay Bill
-              </button>
+              {isBillPaidAndConfirmed && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedOrderForFeedback(tableOrders[0]);
+                    setIsFeedbackReceiptOpen(true);
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black whitespace-nowrap shadow-xs transition-all flex items-center gap-1"
+                >
+                  <CheckCircle2 size={12} /> Receipt
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -685,35 +752,30 @@ export default function QrDineInPage() {
                 <span>➕ Add More Dishes to Table</span>
               </button>
 
-              {tableOrders.length > 0 && (
+              {tableOrders.length > 0 && isBillPaidAndConfirmed && (
                 <div className="space-y-2 pt-2 border-t border-slate-100">
+                  <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between text-xs text-emerald-800">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+                      <div>
+                        <strong className="block font-bold">Bill Paid & Confirmed</strong>
+                        <span className="text-[11px] text-emerald-600">Payment confirmed by reception</span>
+                      </div>
+                    </div>
+                    <span className="font-mono font-bold text-emerald-700">
+                      ₹{totalTableSpend.toFixed(2)}
+                    </span>
+                  </div>
                   <button
                     type="button"
-                    onClick={() => setIsPayModalOpen(true)}
-                    className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-slate-900 hover:opacity-95 text-white font-black text-xs flex items-center justify-center gap-2 shadow-md shadow-purple-500/25 transition-all active:scale-98"
+                    onClick={() => {
+                      setSelectedOrderForFeedback(tableOrders[0]);
+                      setIsFeedbackReceiptOpen(true);
+                    }}
+                    className="w-full py-2.5 px-4 rounded-xl bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-700 font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all active:scale-95"
                   >
-                    <CreditCard size={15} />
-                    <span>Pay Table Bill (₹{tableOrders.reduce((sum, o) => sum + Number(o.total || 0), 0).toFixed(2)}) • Split & Gateways</span>
+                    <Receipt size={14} /> Receipt & Review
                   </button>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setIsPayModalOpen(true)}
-                      className="py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-black text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all active:scale-95"
-                    >
-                      <Calculator size={14} /> Split Bill
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedOrderForFeedback(tableOrders[0]);
-                        setIsFeedbackReceiptOpen(true);
-                      }}
-                      className="py-2.5 px-3 rounded-xl bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-700 font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all active:scale-95"
-                    >
-                      <Receipt size={14} /> Receipt & Review
-                    </button>
-                  </div>
                 </div>
               )}
             </div>
@@ -811,146 +873,203 @@ export default function QrDineInPage() {
                 />
               </div>
 
-              {/* Veg / Non-Veg Bar */}
-              <div className="bg-[#f1f3f9] p-1 rounded-2xl flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setDietaryFilter('ALL')}
-                  className={`px-4 py-1.5 rounded-xl font-bold text-xs transition-all ${
-                    dietaryFilter === 'ALL'
-                      ? 'bg-white text-slate-900 shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  All
-                </button>
+              {/* ── Compact Filter Row: dropdown trigger + category tabs ── */}
+              {(() => {
+                // Count active filters for badge
+                const activeFilterCount = [
+                  dietaryFilter !== 'ALL',
+                  timeBudget !== 0,
+                ].filter(Boolean).length;
 
-                <button
-                  type="button"
-                  onClick={() => setDietaryFilter(dietaryFilter === 'VEG' ? 'ALL' : 'VEG')}
-                  className={`px-3.5 py-1.5 rounded-xl font-bold text-xs transition-all flex items-center gap-1.5 ${
-                    dietaryFilter === 'VEG'
-                      ? 'bg-white text-[#047857] shadow-xs ring-1 ring-emerald-300'
-                      : 'text-[#047857] hover:text-emerald-950'
-                  }`}
-                >
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#10b981] inline-block shrink-0 shadow-2xs" />
-                  <span>Pure Veg</span>
-                </button>
+                const timeBudgetOptions = [
+                  { label: 'Any time', mins: 0 },
+                  { label: '⚡ 15m', mins: 15 },
+                  { label: '⏱️ 25m', mins: 25 },
+                  { label: '🍲 35m', mins: 35 },
+                ];
 
-                <button
-                  type="button"
-                  onClick={() => setDietaryFilter(dietaryFilter === 'NON_VEG' ? 'ALL' : 'NON_VEG')}
-                  className={`px-3.5 py-1.5 rounded-xl font-bold text-xs transition-all flex items-center gap-1.5 ${
-                    dietaryFilter === 'NON_VEG'
-                      ? 'bg-white text-[#9f1239] shadow-xs ring-1 ring-rose-300'
-                      : 'text-[#9f1239] hover:text-rose-950'
-                  }`}
-                >
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#f43f5e] inline-block shrink-0 shadow-2xs" />
-                  <span>Non-Veg</span>
-                </button>
-              </div>
+                const dietaryLabel = {
+                  ALL: 'All',
+                  VEG: '🟢 Pure Veg',
+                  NON_VEG: '🔴 Non-Veg',
+                  VEGAN: '🌱 Vegan',
+                  GLUTEN_FREE: '🌾 Gluten-Free',
+                  SPECIAL: '⭐ Specials',
+                }[dietaryFilter] || 'All';
 
-              {/* Dietary & Spice Pills Row (Horizontal Scroll) */}
-              <div className="flex items-center space-x-2 overflow-x-auto no-scrollbar py-0.5">
-                {/* Daily Specials Pill */}
-                <button
-                  type="button"
-                  onClick={() => setDietaryFilter(dietaryFilter === 'SPECIAL' ? 'ALL' : 'SPECIAL')}
-                  className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all border flex items-center gap-1.5 shadow-2xs shrink-0 ${
-                    dietaryFilter === 'SPECIAL'
-                      ? 'bg-amber-100 border-amber-400 text-amber-900 ring-1 ring-amber-400'
-                      : 'bg-[#fffbeb] border-amber-200/80 text-[#92400e] hover:bg-amber-100/70'
-                  }`}
-                >
-                  <span className="text-amber-600 font-black text-[11px]">%</span>
-                  <span>⭐ Daily Specials</span>
-                </button>
+                const timeBudgetLabel = timeBudget === 0
+                  ? 'Any time'
+                  : timeBudgetOptions.find(b => b.mins === timeBudget)?.label;
 
-                {/* Vegan Pill */}
-                <button
-                  type="button"
-                  onClick={() => setDietaryFilter(dietaryFilter === 'VEGAN' ? 'ALL' : 'VEGAN')}
-                  className={`px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all border flex items-center gap-1.5 shadow-2xs shrink-0 ${
-                    dietaryFilter === 'VEGAN'
-                      ? 'bg-emerald-50 border-emerald-400 text-emerald-800 ring-1 ring-emerald-300 font-bold'
-                      : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  <span>🌱</span>
-                  <span>Vegan</span>
-                </button>
+                return (
+                  <div className="flex items-center gap-2">
 
-                {/* Gluten-Free Pill */}
-                <button
-                  type="button"
-                  onClick={() => setDietaryFilter(dietaryFilter === 'GLUTEN_FREE' ? 'ALL' : 'GLUTEN_FREE')}
-                  className={`px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all border flex items-center gap-1.5 shadow-2xs shrink-0 ${
-                    dietaryFilter === 'GLUTEN_FREE'
-                      ? 'bg-amber-50 border-amber-400 text-amber-800 ring-1 ring-amber-300 font-bold'
-                      : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  <span>🌾</span>
-                  <span>Gluten-Free</span>
-                </button>
+                    {/* ── Filter Dropdown Trigger ── */}
+                    <div className="relative shrink-0" ref={filterPanelRef}>
+                      <button
+                        type="button"
+                        onClick={() => setIsFilterOpen(o => !o)}
+                        className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-all shadow-xs ${
+                          activeFilterCount > 0
+                            ? 'bg-slate-900 text-white border-slate-900'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        <SlidersHorizontal className="w-3.5 h-3.5" />
+                        <span>Filters</span>
+                        {activeFilterCount > 0 && (
+                          <span className="bg-orange-400 text-white text-[9px] font-black rounded-full w-4 h-4 flex items-center justify-center leading-none">
+                            {activeFilterCount}
+                          </span>
+                        )}
+                        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isFilterOpen ? 'rotate-180' : ''}`} />
+                      </button>
 
-                {/* Any Spice Level Dropdown Pill */}
-                <div className="relative shrink-0">
-                  <select
-                    value={spiceFilter}
-                    onChange={(e) => setSpiceFilter(e.target.value)}
-                    className="px-3.5 py-1.5 rounded-full text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 shadow-2xs cursor-pointer focus:outline-none appearance-none pr-6 font-sans"
-                    style={{
-                      backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
-                      backgroundRepeat: 'no-repeat',
-                      backgroundPosition: 'right 8px center'
-                    }}
-                    aria-label="Spice level filter"
-                  >
-                    <option value="ALL">🌶️ Any Spice Level</option>
-                    <option value="MILD">🌶️ Mild</option>
-                    <option value="MEDIUM">🌶️🌶️ Medium</option>
-                    <option value="HOT">🌶️🌶️🌶️ Hot</option>
-                    <option value="EXTRA_HOT">🔥 Extra Hot</option>
-                  </select>
-                </div>
-              </div>
+                      {/* ── Dropdown Panel ── */}
+                      {isFilterOpen && (
+                        <div className="absolute top-full left-0 mt-1.5 z-50 bg-white rounded-2xl border border-slate-200 shadow-xl p-4 w-72">
 
-              {/* Horizontal Category Pill Scroll */}
-              <div className="flex items-center space-x-2 overflow-x-auto no-scrollbar py-0.5">
-                <button
-                  type="button"
-                  onClick={() => setActiveCategory('ALL')}
-                  className={`px-4 py-2 rounded-2xl text-xs font-bold whitespace-nowrap transition-all shrink-0 ${
-                    activeCategory === 'ALL'
-                      ? 'bg-[#0f172a] text-white shadow-xs'
-                      : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  All Items
-                </button>
-                {categories.map((cat) => {
-                  const icon = cat.icon || getCategoryIcon(cat.name);
-                  const isActive = activeCategory === cat.categoryId;
-                  return (
-                    <button
-                      key={cat.categoryId}
-                      type="button"
-                      onClick={() => setActiveCategory(cat.categoryId)}
-                      className={`px-3.5 py-2 rounded-2xl text-xs font-bold whitespace-nowrap transition-all flex items-center space-x-1.5 shrink-0 shadow-2xs ${
-                        isActive
-                          ? 'bg-[#0f172a] text-white shadow-xs'
-                          : 'bg-white border border-slate-200 text-slate-800 hover:bg-slate-50'
-                      }`}
+                          {/* Header */}
+                          <div className="flex items-center justify-between mb-3">
+                            <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                              <SlidersHorizontal className="w-3.5 h-3.5" /> Filters
+                            </span>
+                            {activeFilterCount > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => { setDietaryFilter('ALL'); setTimeBudget(0); }}
+                                className="text-[10px] text-orange-500 font-bold hover:text-orange-700 flex items-center gap-0.5"
+                              >
+                                <X className="w-3 h-3" /> Clear all
+                              </button>
+                            )}
+                          </div>
+
+                          {/* ── Type: Veg / Non-Veg ── */}
+                          <div className="mb-3">
+                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Type</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {[
+                                { val: 'ALL', label: 'All' },
+                                { val: 'VEG', label: '🟢 Pure Veg' },
+                                { val: 'NON_VEG', label: '🔴 Non-Veg' },
+                              ].map(opt => (
+                                <button
+                                  key={opt.val}
+                                  type="button"
+                                  onClick={() => setDietaryFilter(opt.val)}
+                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all ${
+                                    dietaryFilter === opt.val
+                                      ? 'bg-slate-900 text-white border-slate-900'
+                                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                                  }`}
+                                >
+                                  {opt.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* ── Prep Time ── */}
+                          <div className="mb-3">
+                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Prep Time</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {timeBudgetOptions.map(b => (
+                                <button
+                                  key={b.mins}
+                                  type="button"
+                                  onClick={() => setTimeBudget(b.mins)}
+                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all ${
+                                    timeBudget === b.mins
+                                      ? 'bg-amber-500 text-white border-amber-500'
+                                      : 'bg-amber-50 text-amber-900 border-amber-200 hover:bg-amber-100'
+                                  }`}
+                                >
+                                  {b.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* ── Dietary Tags ── */}
+                          <div>
+                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Dietary</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {[
+                                { val: 'SPECIAL', label: '⭐ Daily Specials' },
+                                { val: 'VEGAN',   label: '🌱 Vegan' },
+                                { val: 'GLUTEN_FREE', label: '🌾 Gluten-Free' },
+                              ].map(opt => (
+                                <button
+                                  key={opt.val}
+                                  type="button"
+                                  onClick={() => setDietaryFilter(dietaryFilter === opt.val ? 'ALL' : opt.val)}
+                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all ${
+                                    dietaryFilter === opt.val
+                                      ? 'bg-emerald-600 text-white border-emerald-600'
+                                      : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+                                  }`}
+                                >
+                                  {opt.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Active filter summary */}
+                          {activeFilterCount > 0 && (
+                            <div className="mt-3 pt-3 border-t border-slate-100 text-[10px] text-slate-500 font-medium flex flex-wrap gap-1">
+                              {dietaryFilter !== 'ALL' && (
+                                <span className="bg-slate-100 px-2 py-0.5 rounded-full">{dietaryLabel}</span>
+                              )}
+                              {timeBudget !== 0 && (
+                                <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">{timeBudgetLabel}</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ── Category Tabs (horizontal scroll) ── */}
+                    <div
+                      className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 flex-1"
+                      style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
                     >
-                      <span>{icon}</span>
-                      <span>{cat.name}</span>
-                    </button>
-                  );
-                })}
-              </div>
+                      <button
+                        type="button"
+                        onClick={() => setActiveCategory('ALL')}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all shrink-0 ${
+                          activeCategory === 'ALL'
+                            ? 'bg-[#0f172a] text-white shadow-xs'
+                            : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        All Items
+                      </button>
+                      {categories.map((cat) => {
+                        const icon = cat.icon || getCategoryIcon(cat.name);
+                        const isActive = activeCategory === cat.categoryId;
+                        return (
+                          <button
+                            key={cat.categoryId}
+                            type="button"
+                            onClick={() => setActiveCategory(cat.categoryId)}
+                            className={`px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1 shrink-0 ${
+                              isActive
+                                ? 'bg-[#0f172a] text-white shadow-xs'
+                                : 'bg-white border border-slate-200 text-slate-800 hover:bg-slate-50'
+                            }`}
+                          >
+                            <span>{icon}</span>
+                            <span>{cat.name}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Food Item Grid (Section 4) */}
@@ -1009,43 +1128,18 @@ export default function QrDineInPage() {
                           {item.description}
                         </p>
 
-                        <div className="flex flex-wrap items-center gap-1 mt-1">
-                          {item.isSweet && (
+                        {item.isSweet && (
+                          <div className="flex flex-wrap items-center gap-1 mt-1">
                             <span className="text-[9px] text-pink-600 bg-pink-50 px-1 py-0.5 rounded font-bold">Sweet</span>
-                          )}
-                          {item.spiceLevel && item.spiceLevel !== 'NONE' && (
-                            <span className="text-[9px] text-red-600 bg-red-50 px-1 py-0.5 rounded font-bold">
-                              {item.spiceLevel === 'MILD' && '🌶️ Mild'}
-                              {item.spiceLevel === 'MEDIUM' && '🌶️🌶️ Med'}
-                              {item.spiceLevel === 'HOT' && '🌶️🌶️🌶️ Hot'}
-                              {(item.spiceLevel === 'EXTRA_HOT' || item.spiceLevel === 'EXTRA HOT') && '🔥 Extra Hot'}
-                              {!['MILD', 'MEDIUM', 'HOT', 'EXTRA_HOT', 'EXTRA HOT'].includes(item.spiceLevel) && item.spiceLevel}
-                            </span>
-                          )}
-                          {(item.dietaryTags || []).map((t, idx) => (
-                            <span key={idx} className="text-[9px] text-emerald-700 bg-emerald-50 px-1 py-0.5 rounded font-bold">
-                              {t}
-                            </span>
-                          ))}
-                        </div>
-
-                        {item.allergens && item.allergens.length > 0 && (
-                          <p className="text-[9px] text-amber-800 bg-amber-50/70 border border-amber-200/50 px-1.5 py-0.5 rounded mt-1 font-medium">
-                            ⚠️ Contains: {item.allergens.join(', ')}
-                          </p>
+                          </div>
                         )}
                       </div>
 
                       {/* Price & Add Button */}
                       <div className="flex items-center justify-between pt-2">
-                        {item.portions && item.portions.length > 0 ? (
-                          <div>
-                            <span className="text-xs font-black text-slate-900">from ₹{item.portions[0].price}</span>
-                            <span className="text-[9px] text-slate-400 block">{item.portions.map(p => `${p.name} ₹${p.price}`).join(' • ')}</span>
-                          </div>
-                        ) : (
-                          <span className="text-xs font-black text-slate-900">₹{item.price}</span>
-                        )}
+                        <span className="text-xs font-black text-slate-900">
+                          ₹{item.portions && item.portions.length > 0 ? item.portions[0].price : item.price}
+                        </span>
 
                         {item.availability ? (
                           <button
@@ -1096,8 +1190,8 @@ export default function QrDineInPage() {
         </div>
       )}
 
-      {/* Floating Bottom Bar: Table Pay Bar when cart is empty & orders exist */}
-      {itemCount === 0 && tableOrders.length > 0 && (
+      {/* Floating Bottom Bar: Table Pay Bar when cart is empty & unpaid orders exist */}
+      {itemCount === 0 && unpaidTableOrders.length > 0 && (
         <div className="fixed bottom-3 left-4 right-4 max-w-md mx-auto z-40 animate-slide-up">
           <button
             onClick={() => setIsPayModalOpen(true)}
@@ -1109,15 +1203,45 @@ export default function QrDineInPage() {
               </span>
               <div>
                 <p className="text-xs font-bold leading-tight">{tableTitle(table)} Bill</p>
-                <p className="text-[11px] text-purple-200">Tap to pay • Split bill & UPI / Cards / Cash</p>
+                <p className="text-[11px] text-purple-200">Tap to pay with UPI, Cards or Cash</p>
               </div>
             </div>
 
             <div className="flex items-center space-x-2">
               <span className="text-sm font-black text-amber-300">
-                ₹{tableOrders.reduce((sum, o) => sum + Number(o.total || 0), 0).toFixed(2)}
+                ₹{totalUnpaidAmount.toFixed(2)}
               </span>
               <ChevronRight className="w-4 h-4 text-purple-200" />
+            </div>
+          </button>
+        </div>
+      )}
+
+      {/* Floating Bottom Bar: Receipt when bill is paid & confirmed */}
+      {itemCount === 0 && isBillPaidAndConfirmed && (
+        <div className="fixed bottom-3 left-4 right-4 max-w-md mx-auto z-40 animate-slide-up">
+          <button
+            onClick={() => {
+              setSelectedOrderForFeedback(tableOrders[0] || activeOrder);
+              setIsFeedbackReceiptOpen(true);
+            }}
+            className="w-full bg-gradient-to-r from-emerald-600 to-teal-700 hover:opacity-95 text-white p-3.5 rounded-2xl shadow-xl flex items-center justify-between transition-all"
+          >
+            <div className="flex items-center space-x-3 text-left">
+              <span className="w-8 h-8 rounded-xl bg-white/20 text-white font-black text-sm flex items-center justify-center shadow-inner">
+                <CheckCircle2 size={17} />
+              </span>
+              <div>
+                <p className="text-xs font-bold leading-tight">Bill Paid & Confirmed</p>
+                <p className="text-[11px] text-emerald-100">Tap to view Receipt & Review</p>
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <span className="text-sm font-black text-white">
+                ₹{totalTableSpend.toFixed(2)}
+              </span>
+              <Receipt size={16} className="text-emerald-100" />
             </div>
           </button>
         </div>
@@ -1126,7 +1250,7 @@ export default function QrDineInPage() {
       {/* Guest Identification Modal (Name & Phone required before placing) */}
       {isGuestModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-          <div role="dialog" aria-modal="true" className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
+          <div role="dialog" aria-modal="true" className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl space-y-4">
             <div className="flex items-start justify-between">
               <div>
                 <h3 className="text-sm font-black text-slate-900 leading-tight">
@@ -1244,11 +1368,29 @@ export default function QrDineInPage() {
         tableOrders={tableOrders}
         tableSession={tableSession}
         restaurant={restaurant}
-        onPaymentSuccess={(payResult) => {
-          setTableOrders(prev => prev.map(o => ({ ...o, paymentStatus: 'PAID' })));
-          if (activeOrder) setActiveOrder(prev => prev ? ({ ...prev, paymentStatus: 'PAID' }) : null);
-          setSelectedOrderForFeedback(tableOrders[0] || activeOrder);
-          setIsFeedbackReceiptOpen(true);
+        onPaymentSuccess={async (payResult) => {
+          try {
+            const sess = table?.tableId ? await api.getTableSession(table.tableId) : null;
+            if (sess && Array.isArray(sess.orders)) {
+              setTableSession(sess);
+              const freshOrders = sess.orders.filter(o => o && o.orderId && o.status !== 'CANCELLED');
+              setTableOrders(freshOrders);
+              setPaidOrderIds(new Set(freshOrders.filter(o => o.paymentStatus === 'PAID').map(o => o.orderId)));
+              const latestActive = activeOrder ? freshOrders.find(o => o.orderId === activeOrder.orderId) : freshOrders[0];
+              if (latestActive) setActiveOrder(latestActive);
+              if (payResult?.paymentCompleted && !payResult?.payShareOnly) {
+                setSelectedOrderForFeedback(latestActive || freshOrders[0] || activeOrder);
+                setIsFeedbackReceiptOpen(true);
+              }
+              return;
+            }
+          } catch (syncErr) {
+            console.warn('Unable to refresh table orders after payment:', syncErr);
+          }
+          if (payResult?.paymentCompleted && !payResult?.payShareOnly) {
+            setSelectedOrderForFeedback(tableOrders[0] || activeOrder);
+            setIsFeedbackReceiptOpen(true);
+          }
         }}
       />
 
@@ -1265,11 +1407,13 @@ export default function QrDineInPage() {
         isOpen={isSplitModalOpen}
         onClose={() => setIsSplitModalOpen(false)}
         items={tableOrders.flatMap(o => o.items || [])}
-        subtotal={tableOrders.reduce((acc, o) => acc + (Number(o.total || 0) - Number(o.tax || 0)), 0)}
+        subtotal={tableOrders.reduce((acc, o) => acc + Number(o.subtotal ?? (Number(o.total || 0) - Number(o.tax || 0))), 0)}
         tax={tableOrders.reduce((acc, o) => acc + Number(o.tax || 0), 0)}
         tableNumber={tableTitle(table)}
-        onPaymentSuccess={(data) => {
-          addToast(`Split calculation saved for ${data.splitCount} diners.`, 'success');
+        orderNumber={tableOrders[0]?.orderNumber || activeOrder?.orderNumber}
+        onPaymentSuccess={() => {
+          setIsSplitModalOpen(false);
+          setIsPayModalOpen(true);
         }}
       />
 

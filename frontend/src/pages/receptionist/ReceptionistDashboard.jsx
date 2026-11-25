@@ -1,6 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
+import QRCode from 'qrcode';
 import { api, subscribeRealtimeEvents } from '../../services/api';
 import { tableTitle, getTableQrUrl } from '../../services/tablePresentation';
+import { useAuth } from '../../context/AuthContext';
 import { useNotification } from '../../context/NotificationContext';
 import {
   LayoutDashboard,
@@ -32,7 +34,24 @@ import {
   Check
 } from 'lucide-react';
 
+function LocalTableQrImage({ url, title }) {
+  const [imgSrc, setImgSrc] = useState('');
+  useEffect(() => {
+    if (url) {
+      QRCode.toDataURL(url, { width: 300, margin: 2, errorCorrectionLevel: 'M' })
+        .then(setImgSrc)
+        .catch(() => setImgSrc(''));
+    }
+  }, [url]);
+
+  if (!imgSrc) {
+    return <div className="w-full h-full flex items-center justify-center text-slate-400 text-xs">Generating...</div>;
+  }
+  return <img src={imgSrc} alt={`QR Code for ${title}`} className="w-full h-full object-contain" />;
+}
+
 export default function ReceptionistDashboard() {
+  const { currentUser } = useAuth();
   const { addToast } = useNotification();
   const [activeModule, setActiveModuleState] = useState(() => {
     try {
@@ -126,6 +145,22 @@ export default function ReceptionistDashboard() {
     specialRequest: ''
   });
 
+  const [waitlist, setWaitlist] = useState([]);
+  const [waitEstimate, setWaitEstimate] = useState(null);
+  const [isAddWalkInOpen, setIsAddWalkInOpen] = useState(false);
+  const [walkInForm, setWalkInForm] = useState({ customerName: '', customerPhone: '', partySize: 2, notes: '' });
+  const [partyHallModal, setPartyHallModal] = useState(null);
+  const [prepSheetModal, setPrepSheetModal] = useState(null);
+  const [eventPlanForm, setEventPlanForm] = useState({
+    confirmedHeadcount: 20,
+    mealChoices: 'Paneer Tikka, Dal Makhani, Butter Naan, Gulab Jamun',
+    dietaryRequests: '',
+    depositAmount: 5000,
+    depositPaid: 5000,
+    estimatedTotalCost: 15000,
+    prepSheetNotes: ''
+  });
+
   const loadData = async (silent = false) => {
     if (!silent) setIsLoading(true);
     try {
@@ -138,9 +173,17 @@ export default function ReceptionistDashboard() {
       const help = await api.getHelpRequests();
       setHelpRequests(help);
       try {
+        const wl = await api.getWaitlist();
+        if (Array.isArray(wl)) setWaitlist(wl);
+      } catch (wlErr) {
+        console.warn('Waitlist load error:', wlErr);
+      }
+      try {
         const waiterList = await api.getUsers('WAITER');
         if (Array.isArray(waiterList)) setWaiters(waiterList);
-      } catch {}
+      } catch (staffErr) {
+        console.warn('Waiter list load error:', staffErr);
+      }
     } catch (e) {
       console.warn('Receptionist load error:', e);
     } finally {
@@ -333,13 +376,28 @@ export default function ReceptionistDashboard() {
   // Checkout Flow (Section 28): Bill Generated -> Payment Received -> Checkout -> Table Cleaning -> Table Available
   const handleProcessCheckout = async (table) => {
     try {
+      const unpaidOrders = orders.filter(o =>
+        (o.tableId === table.tableId || o.tableNumber === table.tableNumber) &&
+        o.status !== 'CANCELLED' &&
+        o.paymentStatus !== 'PAID'
+      );
+      for (const ord of unpaidOrders) {
+        const due = Math.max(0, Number(ord.total || 0) - Number(ord.paidAmount || 0));
+        await api.recordPayment({
+          restaurantId: ord.restaurantId,
+          orderId: ord.orderId,
+          amount: due > 0 ? due : Number(ord.total || 0),
+          method: 'CASH'
+        });
+      }
+      await api.closeTableSession(table.tableId).catch((closeErr) => console.warn('Close session notice:', closeErr));
       // Move table to cleaning
       await api.updateTableStatus(table.tableId, 'WAITING_FOR_CLEANING', null);
       addToast(`Payment received for ${tableTitle(table)}. Table marked WAITING_FOR_CLEANING.`, 'success');
       loadData();
       setSelectedTable(null);
-    } catch {
-      addToast('Failed to checkout table.', 'error');
+    } catch (err) {
+      addToast(err?.message || 'Failed to checkout table.', 'error');
     }
   };
 
@@ -353,6 +411,120 @@ export default function ReceptionistDashboard() {
       loadData();
     } catch (err) {
       addToast(err.message, 'error');
+    }
+  };
+
+  const fetchWaitEstimate = async (size = 2) => {
+    try {
+      const est = await api.getWaitEstimate(null, size);
+      setWaitEstimate(est);
+    } catch {}
+  };
+
+  const handleAddWalkIn = async (e) => {
+    e.preventDefault();
+    if (!walkInForm.customerName || !walkInForm.customerPhone) {
+      addToast('Please enter customer name and phone.', 'warning');
+      return;
+    }
+    try {
+      await api.addWalkIn(walkInForm);
+      addToast(`Added ${walkInForm.customerName} to waitlist!`, 'success');
+      setIsAddWalkInOpen(false);
+      setWalkInForm({ customerName: '', customerPhone: '', partySize: 2, notes: '' });
+      loadData(true);
+    } catch (err) {
+      addToast(err.message || 'Failed to add walk-in guest', 'error');
+    }
+  };
+
+  const handleNotifyWaitlist = async (id) => {
+    try {
+      await api.notifyWaitlistGuest(id);
+      addToast('Guest notified via SMS/App ready alert!', 'success');
+      loadData(true);
+    } catch (err) {
+      addToast(err.message || 'Failed to notify guest', 'error');
+    }
+  };
+
+  const handleSeatWaitlist = async (id, tableId) => {
+    try {
+      await api.seatWaitlistGuest(id, tableId);
+      addToast('Guest seated successfully! Table marked occupied.', 'success');
+      loadData(true);
+    } catch (err) {
+      addToast(err.message || 'Failed to seat guest', 'error');
+    }
+  };
+
+  const handleCancelWaitlist = async (id) => {
+    try {
+      await api.cancelWaitlistGuest(id);
+      addToast('Waitlist entry cancelled.', 'info');
+      loadData(true);
+    } catch (err) {
+      addToast(err.message || 'Failed to cancel', 'error');
+    }
+  };
+
+  const openPartyHallModal = (res) => {
+    setPartyHallModal(res);
+    setEventPlanForm({
+      confirmedHeadcount: res.confirmedHeadcount || res.guestCount || 20,
+      mealChoices: 'Paneer Tikka, Dal Makhani, Butter Naan, Gulab Jamun',
+      dietaryRequests: res.dietaryRequests || '',
+      depositAmount: res.depositAmount || 5000,
+      depositPaid: res.depositPaid || 5000,
+      estimatedTotalCost: res.estimatedTotalCost || 15000,
+      prepSheetNotes: res.prepSheetNotes || ''
+    });
+  };
+
+  const handleSaveEventPlan = async (e) => {
+    e.preventDefault();
+    if (!partyHallModal) return;
+    try {
+      const choices = eventPlanForm.mealChoices.split(',').map(s => s.trim()).filter(Boolean);
+      await api.planEvent(partyHallModal.reservationId, {
+        confirmedHeadcount: Number(eventPlanForm.confirmedHeadcount),
+        mealChoices: choices,
+        dietaryRequests: eventPlanForm.dietaryRequests,
+        depositAmount: Number(eventPlanForm.depositAmount),
+        depositPaid: Number(eventPlanForm.depositPaid),
+        estimatedTotalCost: Number(eventPlanForm.estimatedTotalCost),
+        prepSheetNotes: eventPlanForm.prepSheetNotes
+      });
+      addToast('Party hall event plan saved successfully!', 'success');
+      setPartyHallModal(null);
+      loadData(true);
+    } catch (err) {
+      addToast(err.message || 'Failed to save event plan', 'error');
+    }
+  };
+
+  const handleViewPrepSheet = async (resId) => {
+    try {
+      const sheet = await api.getKitchenPrepSheet(resId);
+      setPrepSheetModal(sheet);
+    } catch (err) {
+      addToast(err.message || 'Failed to load prep sheet', 'error');
+    }
+  };
+
+  const handleConfirmCashPayment = async (helpReq) => {
+    try {
+      const match = helpReq.message?.match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);
+      const paymentId = match ? match[0] : null;
+      if (paymentId) {
+        await api.confirmCashPayment(paymentId);
+      } else {
+        await api.resolveHelpRequest(helpReq.requestId);
+      }
+      addToast('Cash payment confirmed and recorded!', 'success');
+      loadData(true);
+    } catch (err) {
+      addToast(err.message || 'Could not confirm cash payment', 'error');
     }
   };
 
@@ -393,6 +565,7 @@ export default function ReceptionistDashboard() {
             {[
               { id: 'DASHBOARD', label: 'Dashboard', icon: LayoutDashboard },
               { id: 'TABLES', label: 'Table Management', icon: Grid, count: occupiedTables },
+              { id: 'WAITLIST', label: 'Walk-in Waitlist', icon: Users, count: waitlist.filter(w => w.status === 'WAITING').length },
               { id: 'RESERVATIONS', label: 'Reservations', icon: Calendar, count: todayReservations },
               { id: 'ORDERS', label: 'Orders Hub', icon: ShoppingBag, count: activeOrders },
               { id: 'BILLING', label: 'Billing & Checkout', icon: CreditCard },
@@ -1138,6 +1311,145 @@ export default function ReceptionistDashboard() {
             </div>
           )}
 
+          {/* MODULE: WALK-IN WAITLIST (Phase 2) */}
+          {activeModule === 'WAITLIST' && (
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider">
+                    Walk-in Waitlist & Table Queue ({waitlist.filter(w => w.status === 'WAITING').length} waiting)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Smart wait estimator based on party size, cleaning turnover, and live floor occupancy.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      fetchWaitEstimate(2);
+                      setIsAddWalkInOpen(true);
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-md shadow-purple-600/20 flex items-center gap-1.5"
+                  >
+                    <Plus size={14} /> Add Walk-In Guest
+                  </button>
+                </div>
+              </div>
+
+              {/* Dynamic Wait Estimate Panel */}
+              <div className="p-4 rounded-xl bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-purple-600 text-white flex items-center justify-center font-bold">
+                    <Clock size={20} />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-slate-900 uppercase">Live Wait Estimation</h4>
+                    <p className="text-[11px] text-slate-600">
+                      {waitEstimate ? waitEstimate.message : 'Select a party size to see estimated wait range'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-1">
+                    {[2, 4, 6, 8].map(sz => (
+                      <button
+                        key={sz}
+                        type="button"
+                        onClick={() => fetchWaitEstimate(sz)}
+                        className="px-2.5 py-1 rounded-lg text-xs font-bold border border-purple-200 bg-white hover:bg-purple-100 text-purple-900"
+                      >
+                        {sz} Guests
+                      </button>
+                    ))}
+                  </div>
+                  {waitEstimate && (
+                    <div className="px-3 py-1.5 rounded-xl bg-purple-600 text-white font-black text-sm">
+                      ~{waitEstimate.estimatedWaitMinutesMin} - {waitEstimate.estimatedWaitMinutesMax} mins
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Waitlist Table */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-slate-50 text-slate-500 uppercase border-y border-slate-200">
+                    <tr>
+                      <th className="p-3">Customer</th>
+                      <th className="p-3">Party Size</th>
+                      <th className="p-3">Est. Wait</th>
+                      <th className="p-3">Joined Queue</th>
+                      <th className="p-3">Status</th>
+                      <th className="p-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {waitlist.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="p-6 text-center text-slate-400">
+                          No guests currently waiting on the walk-in waitlist.
+                        </td>
+                      </tr>
+                    ) : (
+                      waitlist.map(w => (
+                        <tr key={w.waitlistId} className="hover:bg-slate-50">
+                          <td className="p-3">
+                            <p className="font-bold text-slate-900">{w.customerName}</p>
+                            <p className="text-[11px] text-slate-500">{w.customerPhone}</p>
+                            {w.notes && <p className="text-[10px] text-amber-700 italic">"{w.notes}"</p>}
+                          </td>
+                          <td className="p-3 font-bold">{w.partySize} guests</td>
+                          <td className="p-3 font-semibold text-purple-700">~{w.estimatedWaitMinutes} mins</td>
+                          <td className="p-3 text-slate-500">{new Date(w.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
+                          <td className="p-3">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                              w.status === 'NOTIFIED' ? 'bg-amber-100 text-amber-800 animate-pulse' :
+                              w.status === 'WAITING' ? 'bg-blue-100 text-blue-800' :
+                              'bg-slate-100 text-slate-600'
+                            }`}>
+                              {w.status}
+                            </span>
+                          </td>
+                          <td className="p-3 text-right space-x-1.5">
+                            {w.status === 'WAITING' && (
+                              <button
+                                onClick={() => handleNotifyWaitlist(w.waitlistId)}
+                                className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold"
+                              >
+                                Notify Guest 🔔
+                              </button>
+                            )}
+                            {w.status !== 'SEATED' && (
+                              <select
+                                onChange={(e) => {
+                                  if (e.target.value) handleSeatWaitlist(w.waitlistId, e.target.value);
+                                }}
+                                defaultValue=""
+                                className="px-2 py-1 rounded-lg border border-slate-200 bg-emerald-50 text-emerald-800 font-bold"
+                              >
+                                <option value="" disabled>Seat Table...</option>
+                                {tables.filter(t => t.status === 'AVAILABLE' && t.capacity >= w.partySize).map(t => (
+                                  <option key={t.tableId} value={t.tableId}>{tableTitle(t)} (Cap {t.capacity})</option>
+                                ))}
+                              </select>
+                            )}
+                            <button
+                              onClick={() => handleCancelWaitlist(w.waitlistId)}
+                              className="px-2 py-1 rounded-lg text-slate-400 hover:text-rose-600"
+                            >
+                              ✕
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {/* MODULE 3: RESERVATIONS (Section 23 & 24) */}
           {activeModule === 'RESERVATIONS' && (
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
@@ -1186,6 +1498,13 @@ export default function ReceptionistDashboard() {
                           </span>
                         </td>
                         <td className="p-3 text-right space-x-1.5">
+                          <button
+                            onClick={() => openPartyHallModal(r)}
+                            className="px-2 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold border border-indigo-200"
+                            title="Party Hall / Event Plan & Timed Kitchen Prep Sheet"
+                          >
+                            🎉 Event Plan
+                          </button>
                           {r.status === 'CONFIRMED' && (
                             <button
                               onClick={() => handleReservationArrived(r)}
@@ -1295,6 +1614,31 @@ export default function ReceptionistDashboard() {
                 Checkout Flow: Bill Generated → Payment Received → Customer Checkout → Table Cleaning → Table Available
               </p>
 
+              {/* Cash Collection Section (Phase 1 Requirement 2) */}
+              {helpRequests.filter(h => h.status !== 'RESOLVED' && (h.message?.includes('Cash payment') || h.message?.includes('CASH'))).length > 0 && (
+                <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 space-y-2">
+                  <h4 className="text-xs font-black text-amber-900 uppercase tracking-wider flex items-center gap-1.5">
+                    💵 Pending Cash Collections ({helpRequests.filter(h => h.status !== 'RESOLVED' && (h.message?.includes('Cash payment') || h.message?.includes('CASH'))).length})
+                  </h4>
+                  <div className="space-y-2">
+                    {helpRequests.filter(h => h.status !== 'RESOLVED' && (h.message?.includes('Cash payment') || h.message?.includes('CASH'))).map(hr => (
+                      <div key={hr.requestId} className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-amber-200 text-xs">
+                        <div>
+                          <p className="font-bold text-slate-900">{hr.message}</p>
+                          <p className="text-[10px] text-slate-500">Requested {new Date(hr.createdAt).toLocaleTimeString()}</p>
+                        </div>
+                        <button
+                          onClick={() => handleConfirmCashPayment(hr)}
+                          className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs"
+                        >
+                          Confirm Cash Received ✓
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 {tables.filter(t => t.status === 'OCCUPIED').map(tbl => (
                   <div key={tbl.tableId} className="p-4 rounded-2xl border-2 border-amber-200 bg-amber-50/40 space-y-3">
@@ -1357,15 +1701,6 @@ export default function ReceptionistDashboard() {
                           <PhoneCall className="w-3.5 h-3.5 inline mr-1" />
                           Alert Waiter Kunal
                         </button>
-                        <button
-                          onClick={() => {
-                            setIssues(prev => prev.filter(i => i.id !== iss.id));
-                            addToast('Issue resolved and marked completed.', 'success');
-                          }}
-                          className="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700"
-                        >
-                          Resolve Issue
-                        </button>
                       </div>
                     </div>
                   ))}
@@ -1394,12 +1729,7 @@ export default function ReceptionistDashboard() {
                   return (
                     <div key={tbl.tableId} className="p-4 rounded-2xl border border-slate-200 bg-slate-50 text-center space-y-3">
                       <div className="w-32 h-32 bg-white p-2 rounded-xl border border-slate-200 mx-auto flex items-center justify-center shadow-sm overflow-hidden">
-                        <img
-                          src={qrImgSrc}
-                          alt={`QR Code for ${tableTitle(tbl)}`}
-                          className="w-full h-full object-contain"
-                          loading="lazy"
-                        />
+                        <LocalTableQrImage url={qrUrl} title={tableTitle(tbl)} />
                       </div>
 
                       <div>
@@ -1518,6 +1848,296 @@ export default function ReceptionistDashboard() {
                 Confirm & Auto-Assign Table
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Walk-In Guest Modal (Phase 2) */}
+      {isAddWalkInOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl relative border border-slate-100 space-y-4">
+            <button
+              onClick={() => setIsAddWalkInOpen(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center font-bold">
+                <Users size={18} />
+              </div>
+              <h3 className="text-base font-bold text-slate-900">Add Walk-in Party</h3>
+            </div>
+
+            <form onSubmit={handleAddWalkIn} className="space-y-3 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Customer Name *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Ramesh Gupta"
+                  value={walkInForm.customerName}
+                  onChange={e => setWalkInForm({ ...walkInForm, customerName: e.target.value })}
+                  className="w-full p-2.5 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Mobile Phone *</label>
+                  <input
+                    type="tel"
+                    required
+                    placeholder="9876543210"
+                    value={walkInForm.customerPhone}
+                    onChange={e => setWalkInForm({ ...walkInForm, customerPhone: e.target.value })}
+                    className="w-full p-2.5 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Party Size</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={30}
+                    value={walkInForm.partySize}
+                    onChange={e => {
+                      const sz = Number(e.target.value);
+                      setWalkInForm({ ...walkInForm, partySize: sz });
+                      fetchWaitEstimate(sz);
+                    }}
+                    className="w-full p-2.5 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+              </div>
+
+              {waitEstimate && (
+                <div className="p-2.5 rounded-xl bg-purple-50 border border-purple-200 text-purple-900 flex items-center justify-between">
+                  <span className="font-medium">Estimated Wait:</span>
+                  <span className="font-black text-sm">~{waitEstimate.estimatedWaitMinutesMin} - {waitEstimate.estimatedWaitMinutesMax} mins</span>
+                </div>
+              )}
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Special Notes / Seating Preference</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Near window, high chair needed"
+                  value={walkInForm.notes}
+                  onChange={e => setWalkInForm({ ...walkInForm, notes: e.target.value })}
+                  className="w-full p-2.5 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="w-full mt-3 py-3 px-4 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-sm shadow-md shadow-purple-600/20"
+              >
+                Join Waitlist & Send Notification
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Party Hall Event Planning Modal (Phase 2) */}
+      {partyHallModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl relative border border-slate-100 space-y-4 max-h-[90vh] overflow-y-auto">
+            <button
+              onClick={() => setPartyHallModal(null)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold">
+                <Sparkles size={20} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Party Hall Event Planner</h3>
+                <p className="text-xs text-slate-500">Booking {partyHallModal.bookingId} · {partyHallModal.customerName}</p>
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveEventPlan} className="space-y-3.5 text-xs">
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Confirmed Headcount (up to 70)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={70}
+                    required
+                    value={eventPlanForm.confirmedHeadcount}
+                    onChange={e => setEventPlanForm({ ...eventPlanForm, confirmedHeadcount: e.target.value })}
+                    className="w-full p-2.5 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Estimated Total Cost (₹)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={eventPlanForm.estimatedTotalCost}
+                    onChange={e => setEventPlanForm({ ...eventPlanForm, estimatedTotalCost: e.target.value })}
+                    className="w-full p-2.5 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Deposit Amount (₹)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={eventPlanForm.depositAmount}
+                    onChange={e => setEventPlanForm({ ...eventPlanForm, depositAmount: e.target.value })}
+                    className="w-full p-2.5 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Deposit Paid (₹)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={eventPlanForm.depositPaid}
+                    onChange={e => setEventPlanForm({ ...eventPlanForm, depositPaid: e.target.value })}
+                    className="w-full p-2.5 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              {/* Financial Balance Summary */}
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex justify-between items-center text-xs">
+                <span className="text-slate-600">Outstanding Balance to Collect:</span>
+                <span className="font-black text-indigo-700 text-sm">
+                  ₹{Math.max(0, Number(eventPlanForm.estimatedTotalCost || 0) - Number(eventPlanForm.depositPaid || 0)).toFixed(2)}
+                </span>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Event Meal Choices (comma-separated dishes)</label>
+                <textarea
+                  rows={2}
+                  value={eventPlanForm.mealChoices}
+                  onChange={e => setEventPlanForm({ ...eventPlanForm, mealChoices: e.target.value })}
+                  placeholder="e.g. Paneer Tikka, Dal Makhani, Butter Naan, Gulab Jamun"
+                  className="w-full p-2.5 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500 font-sans"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Dietary Requests / Allergies</label>
+                <input
+                  type="text"
+                  placeholder="e.g. 5 Jain meals, 2 Nut-free, 1 Gluten-free"
+                  value={eventPlanForm.dietaryRequests}
+                  onChange={e => setEventPlanForm({ ...eventPlanForm, dietaryRequests: e.target.value })}
+                  className="w-full p-2.5 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => handleViewPrepSheet(partyHallModal.reservationId)}
+                  className="flex-1 py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold flex items-center justify-center gap-1.5"
+                >
+                  <ChefHat size={15} /> Kitchen Prep Sheet
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-md shadow-indigo-600/20"
+                >
+                  Save Event Plan
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Timed Kitchen Prep Sheet Modal (Phase 2) */}
+      {prepSheetModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl relative border border-slate-100 space-y-4 max-h-[90vh] overflow-y-auto">
+            <button
+              onClick={() => setPrepSheetModal(null)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
+                <ChefHat size={20} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Timed Kitchen Prep Sheet</h3>
+                <p className="text-xs text-slate-500">Booking {prepSheetModal.bookingId} · {prepSheetModal.customerName} ({prepSheetModal.headcount} Guests)</p>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs space-y-1">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Event Date & Time:</span>
+                <span className="font-bold">{prepSheetModal.reservationDate} at {prepSheetModal.reservationTime}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Deposit Paid:</span>
+                <span className="font-bold text-emerald-600">₹{prepSheetModal.depositPaid.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Outstanding Balance:</span>
+                <span className="font-bold text-indigo-700">₹{prepSheetModal.outstandingBalance.toFixed(2)}</span>
+              </div>
+              {prepSheetModal.dietaryRequests && (
+                <div className="flex justify-between pt-1 border-t border-slate-200">
+                  <span className="text-slate-500">Dietary Notes:</span>
+                  <span className="font-semibold text-amber-800">{prepSheetModal.dietaryRequests}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Timed Staggered Prep Timeline */}
+            <div className="space-y-2.5 text-xs">
+              <h4 className="font-black text-slate-800 uppercase tracking-wider text-[11px]">
+                Staggered Preparation Timeline
+              </h4>
+              <div className="space-y-2">
+                {prepSheetModal.timeline.map((task, idx) => (
+                  <div key={idx} className="p-3 rounded-xl border border-slate-200 bg-white flex items-start justify-between gap-3 shadow-2xs">
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md text-[10px]">
+                          {task.timeOffset}
+                        </span>
+                        <span className="font-bold text-slate-800 uppercase text-[11px]">{task.course}</span>
+                        <span className="text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{task.station}</span>
+                      </div>
+                      <p className="text-slate-600 text-[11px] pt-0.5">{task.description}</p>
+                    </div>
+                    <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                      {task.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <button
+              onClick={() => window.print()}
+              className="w-full py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-black text-white font-bold text-xs flex items-center justify-center gap-1.5"
+            >
+              <Printer size={14} /> Print Kitchen Prep Sheet
+            </button>
           </div>
         </div>
       )}

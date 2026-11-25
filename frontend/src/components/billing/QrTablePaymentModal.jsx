@@ -81,10 +81,28 @@ export default function QrTablePaymentModal({
     ? (Number(customTip) || 0)
     : Math.round((subtotal * tipPercent) / 100);
 
+  const [serverSplit, setServerSplit] = useState(null);
+
   const fullBillTotal = Math.max(0, subtotal + gstTax + computedTip - loyaltyDiscount);
   const perPersonShare = Number((fullBillTotal / (splitCount || 1)).toFixed(2));
-  const amountToPay = (isSplitEnabled && payShareOnly) ? perPersonShare : fullBillTotal;
+  const amountToPay = (isSplitEnabled && payShareOnly) ? (serverSplit?.shares?.[0]?.amount ?? perPersonShare) : fullBillTotal;
   const formattedAmount = Number(amountToPay || 0).toFixed(2);
+
+  useEffect(() => {
+    if (!isOpen || !tableOrders.length) return;
+    const primary = tableOrders[0];
+    api.calculateSplit({
+      restaurantId: primary.restaurantId,
+      orderId: primary.orderId,
+      tableId: table?.tableId,
+      splitCount: isSplitEnabled ? splitCount : 1,
+      splitType: isSplitEnabled ? splitMode : 'FULL',
+      tipAmount: computedTip,
+      loyaltyDiscount
+    }).then(res => {
+      if (res?.shares) setServerSplit(res);
+    }).catch(() => {});
+  }, [isOpen, isSplitEnabled, splitCount, splitMode, computedTip, loyaltyDiscount, tableOrders, table]);
 
   // Generate dynamic UPI QR Code on amount or gateway change
   useEffect(() => {
@@ -132,18 +150,24 @@ export default function QrTablePaymentModal({
       } else {
         addToast('No loyalty points found. You will earn reward points on this bill!', 'info');
       }
-    } catch {
-      addToast('Could not fetch loyalty account. You can still proceed with payment.', 'info');
+    } catch (err) {
+      addToast(err?.message || 'Could not fetch loyalty account. You can still proceed with payment.', 'warning');
     } finally {
       setIsCheckingLoyalty(false);
     }
   };
 
   const handleRedeemPoints = (points) => {
+    if (redeemedPoints === points) {
+      setRedeemedPoints(0);
+      setLoyaltyDiscount(0);
+      addToast('Loyalty discount removed.', 'info');
+      return;
+    }
     const disc = points * 0.5;
     setRedeemedPoints(points);
     setLoyaltyDiscount(disc);
-    addToast(`Redeemed ${points} points for ₹${disc} discount!`, 'success');
+    addToast(`Selected ${points} points (-₹${disc}) to apply on payment.`, 'info');
   };
 
   // Card formatting helpers
@@ -185,50 +209,94 @@ export default function QrTablePaymentModal({
     const primaryOrder = tableOrders[0];
 
     try {
-      if (gateway === 'CASH') {
-        // Request Waiter for Cash settlement
-        await api.requestHelp({
-          restaurantId: primaryOrder?.restaurantId,
-          tableId: table?.tableId,
-          requestType: 'BILL',
-          message: `Cash payment requested for ${tableTitle(table)}. Bill Amount: ₹${formattedAmount}.`
+      let appliedServerDiscount = 0;
+      if (redeemedPoints > 0 && customerPhone.trim() && primaryOrder?.orderId) {
+        const redeemRes = await api.redeemLoyaltyPoints({
+          restaurantId: primaryOrder.restaurantId,
+          customerPhone: customerPhone.trim(),
+          pointsToRedeem: redeemedPoints,
+          orderId: primaryOrder.orderId
         });
+        appliedServerDiscount = Number(redeemRes?.discountAmount ?? loyaltyDiscount ?? 0);
+        if (redeemRes?.loyalty) setLoyaltyAccount(redeemRes.loyalty);
+      }
+
+      const effectiveTip = Math.max(0, Number(computedTip) || 0);
+
+      if (gateway === 'CASH') {
+        const targetOrd = tableOrders.find(o => o.status !== 'CANCELLED' && o.paymentStatus !== 'PAID') || primaryOrder;
+        if (targetOrd) {
+          const isPrimary = targetOrd.orderId === primaryOrder?.orderId;
+          const ordDue = Math.max(0, Number(targetOrd.total || 0) - Number(targetOrd.paidAmount || 0) - (isPrimary ? appliedServerDiscount : 0));
+          const payAmt = (isSplitEnabled && payShareOnly)
+            ? Number(amountToPay)
+            : Math.max(1, ordDue + (isPrimary ? effectiveTip : 0));
+          await api.initiatePayment({
+            orderId: targetOrd.orderId,
+            restaurantId: targetOrd.restaurantId,
+            amount: payAmt,
+            tipAmount: isPrimary ? effectiveTip : 0,
+            splitCount: isSplitEnabled ? splitCount : 1,
+            splitType: isSplitEnabled ? (payShareOnly ? 'EQUAL_SHARE' : 'EQUAL_FULL') : 'FULL',
+            method: 'CASH'
+          });
+        }
         addToast(`Cash payment requested. A waiter has been alerted to collect ₹${formattedAmount} at your table.`, 'success');
       } else {
-        // Record electronic payment
-        if (primaryOrder?.orderId) {
-          try {
-            await api.initiatePayment({
-              orderId: primaryOrder.orderId,
-              restaurantId: primaryOrder.restaurantId,
-              amount: Number(amountToPay),
-              tipAmount: computedTip,
-              splitCount: isSplitEnabled ? splitCount : 1,
-              splitType: isSplitEnabled ? (payShareOnly ? 'EQUAL_SHARE' : 'EQUAL_FULL') : 'FULL',
-              method: gateway
-            });
-          } catch (initErr) {
-            console.warn('Initiate payment fallback:', initErr);
-            // Fallback to record payment if already verified or local mock
-            await api.recordPayment({
-              orderId: primaryOrder.orderId,
-              restaurantId: primaryOrder.restaurantId,
-              amount: Number(amountToPay),
-              tipAmount: computedTip,
-              splitCount: isSplitEnabled ? splitCount : 1,
-              splitType: isSplitEnabled ? 'EQUAL' : 'FULL',
-              method: gateway
-            }).catch(() => {});
+        const unpaidList = (tableOrders || []).filter(o =>
+          o.status !== 'CANCELLED' &&
+          o.paymentStatus !== 'PAID' &&
+          (Number(o.paidAmount) || 0) < (Number(o.total) || 0) - 0.05
+        );
+        const targetOrders = unpaidList.length > 0 ? unpaidList : (primaryOrder ? [primaryOrder] : []);
+        if (!targetOrders.length) throw new Error('No unpaid orders found to process payment.');
+
+        for (let idx = 0; idx < targetOrders.length; idx++) {
+          const ord = targetOrders[idx];
+          const ordDiscount = idx === 0 ? appliedServerDiscount : 0;
+          const ordTip = idx === 0 ? effectiveTip : 0;
+          const ordDue = Math.max(0, Number(ord.total || 0) - Number(ord.paidAmount || 0) - ordDiscount);
+          const payAmt = (isSplitEnabled && payShareOnly && Number(amountToPay) > 0)
+            ? Number(amountToPay)
+            : Math.max(1, ordDue + ordTip);
+
+          const initRes = await api.initiatePayment({
+            orderId: ord.orderId,
+            restaurantId: ord.restaurantId,
+            amount: payAmt,
+            tipAmount: ordTip,
+            splitCount: isSplitEnabled ? splitCount : 1,
+            splitType: isSplitEnabled ? (payShareOnly ? 'EQUAL_SHARE' : 'EQUAL_FULL') : 'FULL',
+            method: gateway
+          });
+
+          if (!initRes?.paymentId) {
+            throw new Error('Payment initiation failed. Please try again.');
+          }
+          if (!initRes.mockSignature) {
+            throw new Error('Online gateway confirmation is pending verification. Please ask staff to confirm or choose Cash.');
+          }
+
+          const verifyRes = await api.verifyPayment({
+            orderId: ord.orderId,
+            paymentId: initRes.paymentId,
+            transactionId: initRes.transactionId,
+            signature: initRes.mockSignature,
+            status: 'PAID'
+          });
+          if (verifyRes?.success === false) {
+            throw new Error(verifyRes?.message || 'Payment verification failed.');
           }
         }
-        addToast(`Payment of ₹${formattedAmount} successful via ${gateway}!`, 'success');
+        addToast(`Payment of ₹${formattedAmount} verified and completed via ${gateway}!`, 'success');
       }
 
       onPaymentSuccess?.({
         gateway,
+        paymentCompleted: gateway !== 'CASH',
         paidAmount: Number(amountToPay),
-        tipAmount: computedTip,
-        loyaltyDiscount,
+        tipAmount: effectiveTip,
+        loyaltyDiscount: appliedServerDiscount,
         splitCount: isSplitEnabled ? splitCount : 1,
         isSplit: isSplitEnabled,
         payShareOnly

@@ -13,7 +13,8 @@ export default function DigitalReceiptAndFeedbackModal({
   const { addToast } = useNotification();
   const [activeTab, setActiveTab] = useState('RECEIPT'); // 'RECEIPT' or 'FEEDBACK'
   const [email, setEmail] = useState('');
-  const [emailSent, setEmailSent] = useState(false);
+  const [emailStatus, setEmailStatus] = useState('IDLE'); // 'IDLE', 'SENDING', 'SENT', 'FAILED'
+  const [emailError, setEmailError] = useState('');
 
   // 5-Star Feedback State (Feature 8)
   const [rating, setRating] = useState(5);
@@ -67,14 +68,29 @@ Thank you for dining with us!
     addToast('Receipt downloaded successfully.', 'success');
   };
 
-  const handleSendEmail = (e) => {
-    e.preventDefault();
+  const handleSendEmail = async (e) => {
+    if (e) e.preventDefault();
     if (!email || !email.includes('@')) {
       addToast('Please enter a valid email address.', 'warning');
       return;
     }
-    setEmailSent(true);
-    addToast(`Digital receipt sent to ${email}.`, 'success');
+    setEmailStatus('SENDING');
+    setEmailError('');
+    try {
+      const res = await api.emailReceipt(order.orderId, email);
+      if (res?.success) {
+        setEmailStatus('SENT');
+        addToast(`Digital receipt successfully delivered to ${email}.`, 'success');
+      } else {
+        setEmailStatus('FAILED');
+        setEmailError(res?.message || 'Delivery failed.');
+        addToast(res?.message || 'Email delivery failed. Please check address and retry.', 'error');
+      }
+    } catch (err) {
+      setEmailStatus('FAILED');
+      setEmailError(err.message || 'Network error sending receipt.');
+      addToast(err.message || 'Could not deliver email receipt. Tap Retry.', 'error');
+    }
   };
 
   const handleSubmitFeedback = async (e) => {
@@ -95,9 +111,8 @@ Thank you for dining with us!
       });
       setFeedbackSubmitted(true);
       addToast('Thank you! Your feedback has been received.', 'success');
-    } catch {
-      setFeedbackSubmitted(true);
-      addToast('Feedback saved. Thank you!', 'success');
+    } catch (err) {
+      addToast(err?.message || 'Unable to submit feedback right now. Please try again.', 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -238,22 +253,48 @@ Thank you for dining with us!
               </div>
 
               {/* Email Delivery */}
-              <form onSubmit={handleSendEmail} className="flex items-center gap-2 bg-slate-50 p-2 rounded-2xl border border-slate-200">
-                <Mail size={15} className="text-slate-400 ml-2 shrink-0" />
-                <input
-                  type="email"
-                  placeholder="Enter email to receive copy..."
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="flex-1 bg-transparent border-none text-xs focus:outline-none text-slate-800 placeholder-slate-400 min-w-0"
-                />
-                <button
-                  type="submit"
-                  className="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 active:scale-95 text-white font-bold text-xs transition-colors shrink-0 shadow-xs"
-                >
-                  {emailSent ? 'Sent ✓' : 'Send'}
-                </button>
-              </form>
+              <div className="space-y-1.5">
+                <form onSubmit={handleSendEmail} className="flex items-center gap-2 bg-slate-50 p-2 rounded-2xl border border-slate-200">
+                  <Mail size={15} className="text-slate-400 ml-2 shrink-0" />
+                  <input
+                    type="email"
+                    placeholder="Enter email to receive copy..."
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    disabled={emailStatus === 'SENDING'}
+                    className="flex-1 bg-transparent border-none text-xs focus:outline-none text-slate-800 placeholder-slate-400 min-w-0"
+                  />
+                  {emailStatus === 'FAILED' ? (
+                    <button
+                      type="button"
+                      onClick={() => handleSendEmail()}
+                      className="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 active:scale-95 text-white font-bold text-xs transition-colors shrink-0 shadow-xs"
+                    >
+                      Retry ↻
+                    </button>
+                  ) : (
+                    <button
+                      type="submit"
+                      disabled={emailStatus === 'SENDING' || emailStatus === 'SENT'}
+                      className={`px-3.5 py-1.5 rounded-xl font-bold text-xs transition-colors shrink-0 shadow-xs ${
+                        emailStatus === 'SENT'
+                          ? 'bg-emerald-600 text-white cursor-default'
+                          : emailStatus === 'SENDING'
+                          ? 'bg-purple-400 text-white cursor-wait'
+                          : 'bg-purple-600 hover:bg-purple-700 active:scale-95 text-white'
+                      }`}
+                    >
+                      {emailStatus === 'SENT' ? 'Delivered ✓' : emailStatus === 'SENDING' ? 'Sending...' : 'Send'}
+                    </button>
+                  )}
+                </form>
+                {emailStatus === 'FAILED' && (
+                  <p className="text-[10px] text-rose-600 font-medium px-2">Delivery failed: {emailError}</p>
+                )}
+                {emailStatus === 'SENT' && (
+                  <p className="text-[10px] text-emerald-600 font-medium px-2">Digital receipt delivered to your inbox.</p>
+                )}
+              </div>
             </div>
           ) : (
             /* FEEDBACK TAB */

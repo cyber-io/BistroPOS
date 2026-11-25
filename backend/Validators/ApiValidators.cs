@@ -9,7 +9,11 @@ public class RegisterRequestValidator : AbstractValidator<RegisterRequest>
     {
         RuleFor(x => x.Name).NotEmpty().MaximumLength(100);
         RuleFor(x => x.Email).NotEmpty().EmailAddress().MaximumLength(150);
-        RuleFor(x => x.Password).NotEmpty().MinimumLength(6);
+        RuleFor(x => x.Password)
+            .NotEmpty()
+            .MinimumLength(8).WithMessage("Password must be at least 8 characters long.")
+            .Matches("[A-Za-z]").WithMessage("Password must contain at least one letter.")
+            .Matches("[0-9]").WithMessage("Password must contain at least one number.");
     }
 }
 
@@ -51,5 +55,23 @@ public class InitiatePaymentRequestValidator : AbstractValidator<InitiatePayment
         RuleFor(x => x.RestaurantId).NotEmpty();
         RuleFor(x => x.Amount).GreaterThan(0);
         RuleFor(x => x.Method).NotEmpty().Must(m => m is "CASH" or "UPI" or "CARD" or "ONLINE" or "NET_BANKING" or "WALLET");
+    }
+}
+
+public class CalculateSplitRequestValidator : AbstractValidator<CalculateSplitRequest>
+{
+    public CalculateSplitRequestValidator()
+    {
+        RuleFor(x => x.RestaurantId).NotEmpty();
+        RuleFor(x => x.SplitCount).InclusiveBetween(1, 50).WithMessage("Split count must be between 1 and 50.");
+        RuleFor(x => x.TipAmount).GreaterThanOrEqualTo(0).WithMessage("Tip amount cannot be negative.");
+        RuleFor(x => x.TipPercent).InclusiveBetween(0, 100).WithMessage("Tip percentage must be between 0 and 100.");
+        RuleFor(x => x.LoyaltyDiscount).GreaterThanOrEqualTo(0).WithMessage("Loyalty discount cannot be negative.");
+        RuleForEach(x => x.ItemShares).ChildRules(share =>
+        {
+            share.RuleFor(s => s.OrderItemId).NotEmpty();
+            share.RuleFor(s => s.DinerIndex).GreaterThanOrEqualTo(0);
+            share.RuleFor(s => s.Quantity).InclusiveBetween(1, 100);
+        });
     }
 }

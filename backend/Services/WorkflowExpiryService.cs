@@ -27,6 +27,13 @@ public sealed class WorkflowExpiryService(IServiceScopeFactory scopes, ILogger<W
             {
                 using var scope = scopes.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<RestaurantDbContext>();
+                if (db.Database.IsRelational() && !await db.Database.CanConnectAsync(stoppingToken))
+                    continue;
+                if (!UserProvisioning.IsInitialized)
+                {
+                    await UserProvisioning.EnsureDefaultDataAsync(db);
+                    await DiningAreaProvisioning.EnsureDefaultDiningAreasAsync(db);
+                }
                 var rules = scope.ServiceProvider.GetRequiredService<IOptions<BusinessRulesOptions>>().Value;
                 var cutoff = DateTime.UtcNow.AddMinutes(-rules.OrderConfirmationTimeoutMinutes);
                 await db.Orders.Where(o => o.Status == OrderStatuses.PendingConfirmation && o.ConfirmationRequestedAt < cutoff)

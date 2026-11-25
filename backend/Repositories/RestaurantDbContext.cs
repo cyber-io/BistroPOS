@@ -12,6 +12,8 @@ public class RestaurantDbContext : DbContext
     public DbSet<Restaurant> Restaurants => Set<Restaurant>();
     public DbSet<User> Users => Set<User>();
     public DbSet<TableEntity> Tables => Set<TableEntity>();
+    public DbSet<TableSession> TableSessions => Set<TableSession>();
+    public DbSet<TableAssignment> TableAssignments => Set<TableAssignment>();
     public DbSet<MenuCategory> MenuCategories => Set<MenuCategory>();
     public DbSet<MenuItem> MenuItems => Set<MenuItem>();
     public DbSet<DiningSession> DiningSessions => Set<DiningSession>();
@@ -23,10 +25,14 @@ public class RestaurantDbContext : DbContext
     public DbSet<CustomerIssue> CustomerIssues => Set<CustomerIssue>();
     public DbSet<NotificationEntity> Notifications => Set<NotificationEntity>();
     public DbSet<DeliveryAddressEntity> DeliveryAddresses => Set<DeliveryAddressEntity>();
+    public DbSet<RestaurantSettingsEntity> RestaurantSettings => Set<RestaurantSettingsEntity>();
+    public DbSet<StaffProfile> StaffProfiles => Set<StaffProfile>();
     public DbSet<InventoryItem> InventoryItems => Set<InventoryItem>();
     public DbSet<CustomerLoyalty> CustomerLoyalties => Set<CustomerLoyalty>();
     public DbSet<CustomerFeedback> CustomerFeedbacks => Set<CustomerFeedback>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<WalkInWaitlist> WalkInWaitlists => Set<WalkInWaitlist>();
+    public DbSet<ReceiptDelivery> ReceiptDeliveries => Set<ReceiptDelivery>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -53,6 +59,10 @@ public class RestaurantDbContext : DbContext
         modelBuilder.Entity<MenuItem>().Property(m => m.Allergens).HasColumnType("jsonb");
         modelBuilder.Entity<MenuItem>().Property(m => m.Portions).HasColumnType("jsonb");
         modelBuilder.Entity<MenuItem>().Property(m => m.DietaryTags).HasColumnType("jsonb");
+        modelBuilder.Entity<MenuItem>().Property(m => m.Recipe).HasColumnType("jsonb");
+        modelBuilder.Entity<Reservation>().Property(r => r.EventMealChoices).HasColumnType("jsonb");
+        modelBuilder.Entity<DiningSession>().Ignore(s => s.SessionCode);
+        modelBuilder.Entity<DiningSession>().Ignore(s => s.ExpiresAt);
         modelBuilder.Entity<DiningSession>().HasIndex(s => new { s.TableId, s.Status });
         modelBuilder.Entity<OrderItem>().Property(i => i.Customization).HasColumnType("jsonb");
         modelBuilder.Entity<Order>().Property(o => o.DeliveryAddress).HasColumnType("jsonb");

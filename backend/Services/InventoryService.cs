@@ -124,7 +124,8 @@ public class InventoryService : IInventoryService
     {
         if (request.ItemType == "DISH" && request.MenuItemId.HasValue && request.MarkDishSoldOut)
         {
-            var menuItem = await _db.MenuItems.FindAsync(request.MenuItemId.Value);
+            var menuItem = await _db.MenuItems
+                .FirstOrDefaultAsync(m => m.MenuItemId == request.MenuItemId.Value && m.RestaurantId == request.RestaurantId);
             if (menuItem != null)
             {
                 menuItem.Availability = false;
