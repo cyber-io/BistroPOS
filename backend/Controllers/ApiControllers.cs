@@ -299,6 +299,37 @@ public class RestaurantsController : ControllerBase
         await _db.SaveChangesAsync();
         return CreatedAtAction(nameof(GetRestaurantById), new { id = restaurant.RestaurantId }, restaurant);
     }
+
+    [HttpGet("{id:guid}/wifi")]
+    public async Task<IActionResult> GetWifi(Guid id)
+    {
+        var restaurant = await _db.Restaurants.FindAsync(id);
+        if (restaurant == null) return NotFound();
+        return Ok(new
+        {
+            restaurantId = restaurant.RestaurantId,
+            wifiSsid = restaurant.WifiSsid ?? "Bistro-HighSpeed-Guest",
+            wifiPassword = restaurant.WifiEnabled ? (restaurant.WifiPassword ?? "Bistro@2026") : null,
+            wifiEnabled = restaurant.WifiEnabled,
+            googleReviewUrl = restaurant.GoogleReviewUrl ?? "https://maps.google.com",
+            subscriptionTier = restaurant.SubscriptionTier ?? "PRO"
+        });
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager},{UserRoles.Receptionist}")]
+    [HttpPatch("{id:guid}/wifi")]
+    public async Task<IActionResult> UpdateWifi(Guid id, [FromBody] UpdateRestaurantWifiDto dto)
+    {
+        var restaurant = await _db.Restaurants.FindAsync(id);
+        if (restaurant == null) return NotFound();
+        if (dto.WifiSsid != null) restaurant.WifiSsid = dto.WifiSsid;
+        if (dto.WifiPassword != null) restaurant.WifiPassword = dto.WifiPassword;
+        if (dto.WifiEnabled.HasValue) restaurant.WifiEnabled = dto.WifiEnabled.Value;
+        if (dto.GoogleReviewUrl != null) restaurant.GoogleReviewUrl = dto.GoogleReviewUrl;
+        restaurant.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+        return Ok(restaurant);
+    }
 }
 
 [ApiController]
