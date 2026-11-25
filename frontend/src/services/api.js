@@ -349,11 +349,9 @@ export const api = {
       return null;
     }
   },
-<<<<<<< HEAD
   createTable: data => request(`/tables${query({ restaurantId: data?.restaurantId || restaurantId })}`, { method: 'POST', body: data }),
   updateTable: (id, data) => request(`/tables/${id}`, { method: 'PUT', body: data }),
   deleteTable: id => request(`/tables/${id}`, { method: 'DELETE' }),
-=======
   getTableSession: async tableId => {
     try {
       const data = await request(`/tables/${encodeURIComponent(tableId)}/session`);
@@ -378,7 +376,6 @@ export const api = {
     broadcastEvent('TABLE_POSITION_UPDATED', { tableId, positionX, positionY, shape, diningArea });
     return result;
   }),
->>>>>>> eca0a65db7ac53e4dae0846f322f30f18263f332
   updateTableStatus: (tableId, status, customerName = null, assignedWaiterId = null) => request(`/tables/${tableId}/status`, { method: 'PUT', body: { status, customerName, assignedWaiterId } }).then(result => {
     broadcastEvent('TABLE_STATUS_UPDATED', { tableId, status, customerName });
     return result;

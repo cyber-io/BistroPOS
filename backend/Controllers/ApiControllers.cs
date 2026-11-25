@@ -229,7 +229,6 @@ public class RestaurantsController : ControllerBase
         return Ok(restaurant);
     }
 
-<<<<<<< HEAD
     [Authorize(Roles = UserRoles.SuperAdmin)]
     [HttpPost]
     public async Task<IActionResult> CreateRestaurant([FromBody] CreateRestaurantDto dto)
@@ -299,7 +298,8 @@ public class RestaurantsController : ControllerBase
 
         await _db.SaveChangesAsync();
         return CreatedAtAction(nameof(GetRestaurantById), new { id = restaurant.RestaurantId }, restaurant);
-=======
+    }
+
     [HttpGet("{id:guid}/wifi")]
     public async Task<IActionResult> GetWifi(Guid id)
     {
@@ -329,7 +329,6 @@ public class RestaurantsController : ControllerBase
         restaurant.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
         return Ok(restaurant);
->>>>>>> eca0a65db7ac53e4dae0846f322f30f18263f332
     }
 }
 
@@ -373,7 +372,6 @@ public class TablesController : ControllerBase
         return Ok(new { success = true, message = "Table status updated successfully." });
     }
 
-<<<<<<< HEAD
     [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
     [HttpPost]
     public async Task<IActionResult> CreateTable([FromBody] CreateTableRequest request, [FromQuery] Guid? restaurantId)
@@ -419,7 +417,8 @@ public class TablesController : ControllerBase
         {
             return BadRequest(new { message = ex.Message });
         }
-=======
+    }
+
     [HttpGet("{id:guid}/session")]
     public async Task<IActionResult> GetTableSession(Guid id)
     {
@@ -495,7 +494,6 @@ public class InventoryController : ControllerBase
         _tenant.EnforceTenantAccess(request.RestaurantId);
         var success = await _inventory.ReportShortageAsync(request);
         return Ok(new { success = true, message = "Shortage alert processed." });
->>>>>>> eca0a65db7ac53e4dae0846f322f30f18263f332
     }
 }
 
@@ -515,10 +513,14 @@ public class MenuController : ControllerBase
     }
 
     [HttpGet("categories")]
-    public async Task<IActionResult> GetCategories([FromQuery] Guid restaurantId)
+    public async Task<IActionResult> GetCategories([FromQuery] Guid? restaurantId)
     {
+        var targetId = (restaurantId.HasValue && restaurantId.Value != Guid.Empty)
+            ? restaurantId.Value
+            : UserProvisioning.DefaultRestaurantId;
+
         var categories = await _db.MenuCategories
-            .Where(c => c.RestaurantId == restaurantId && c.Status == "ACTIVE")
+            .Where(c => c.RestaurantId == targetId && c.Status == "ACTIVE")
             .OrderBy(c => c.SortOrder)
             .ToListAsync();
         return Ok(categories);
@@ -616,9 +618,13 @@ public class MenuController : ControllerBase
     }
 
     [HttpGet("items")]
-    public async Task<IActionResult> GetMenuItems([FromQuery] Guid restaurantId, [FromQuery] Guid? categoryId, [FromQuery] string? vegFilter)
+    public async Task<IActionResult> GetMenuItems([FromQuery] Guid? restaurantId, [FromQuery] Guid? categoryId, [FromQuery] string? vegFilter)
     {
-        var query = _db.MenuItems.Include(m => m.Category).Where(m => m.RestaurantId == restaurantId);
+        var targetId = (restaurantId.HasValue && restaurantId.Value != Guid.Empty)
+            ? restaurantId.Value
+            : UserProvisioning.DefaultRestaurantId;
+
+        var query = _db.MenuItems.Include(m => m.Category).Where(m => m.RestaurantId == targetId);
 
         if (categoryId.HasValue)
         {

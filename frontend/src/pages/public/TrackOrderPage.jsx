@@ -44,29 +44,6 @@ export default function TrackOrderPage() {
     {!activeQuery && <div className="rounded-2xl border border-[#E8D1CE] bg-white p-12 text-center"><Clock size={35} className="mx-auto mb-4 text-[#A61920]" /><h2 className="font-serif text-2xl">Let’s find your order.</h2><p className="mt-2 text-sm text-[#75666B]">Use the order number from your confirmation. Sign in to track orders placed with your account.</p></div>}
     {order && <section className="space-y-7 rounded-2xl border border-[#E8D1CE] bg-white p-5 sm:p-8" aria-live="polite">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#E8D1CE] pb-5"><div><p className="text-[10px] font-semibold uppercase tracking-wider text-[#A61920]">{order.source.replaceAll('_',' ')}</p><h2 className="mt-1 font-serif text-2xl">{order.orderNumber}</h2><p className="mt-1 text-xs text-[#75666B]">Placed {new Date(order.createdAt).toLocaleString('en-IN', { dateStyle:'medium', timeStyle:'short' })}</p></div><button onClick={() => fetchOrder(activeQuery)} className="flex items-center gap-1.5 rounded-lg border border-[#E8D1CE] px-3 py-2 text-xs"><RefreshCw size={13} />Refresh</button></div>
-      {/* Dynamic Preparation Time & Delay Warning (Feature 14) */}
-      {!cancelled && ['NEW','ACCEPTED','PREPARING'].includes(order.status) && (
-        <div className="p-4 rounded-xl bg-amber-50/70 border border-amber-200/80 space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
-              <Clock size={15} className="text-amber-600 animate-spin" />
-              Kitchen Preparation Estimate
-            </span>
-            <span className="text-xs font-semibold text-amber-800">
-              ~{order.estimatedPrepTimeMinutes || 20} mins total
-            </span>
-          </div>
-          {order.estimatedReadyAt && new Date() > new Date(order.estimatedReadyAt) ? (
-            <p className="text-xs text-amber-800 font-medium">
-              ⚠️ Our chefs are putting final touches on your order. Taking slightly longer due to high kitchen volume — thank you for your patience!
-            </p>
-          ) : (
-            <p className="text-xs text-slate-600">
-              Estimated ready by: <strong>{order.estimatedReadyAt ? new Date(order.estimatedReadyAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : 'Soon'}</strong>
-            </p>
-          )}
-        </div>
-      )}
       {cancelled ? <div className="rounded-xl bg-red-50 p-4 text-sm text-red-800"><strong>Order cancelled</strong><p className="mt-1 text-xs">{order.rejectionReason || order.cancellationReason || 'Please contact the restaurant for help.'}</p></div> : <ol className={`grid gap-2 sm:grid-cols-${steps.length === 5 ? '5' : '6'}`} style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(90px, 1fr))' }}>{steps.map(([key,label],i)=><li key={key} className={`rounded-xl border px-2 py-4 text-center ${i === currentStep ? 'border-[#a61920] bg-[#a61920] text-white' : i < currentStep ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-[#E8D1CE] bg-[#FAF1F0] text-[#75666B]'}`}><span className="mx-auto mb-2 flex h-6 w-6 items-center justify-center text-xs">{i < currentStep ? <CheckCircle2 size={19} /> : i+1}</span><p className="text-[11px] font-medium">{label}</p></li>)}</ol>}
       <div className="space-y-3">{(order.items || []).map((item,i)=><div key={item.orderItemId || i} className="flex justify-between gap-4 text-sm"><span><strong className="mr-2 text-[#75666B]">{item.quantity}×</strong>{item.name || item.itemName}</span><span>₹{Number(item.lineTotal ?? item.price * item.quantity).toFixed(2)}</span></div>)}</div>
       <div className="flex items-end justify-between border-t border-[#E8D1CE] pt-4"><div className="flex items-center gap-1.5 text-xs text-[#75666B]"><Banknote size={15} />{cancelled ? 'Contact the restaurant for payment queries' : order.paymentStatus === 'PAID' ? 'Payment received' : order.paymentStatus === 'PARTIAL' ? `Part paid · ₹${Math.max(0, Number(order.total) - Number(order.paidAmount || 0)).toFixed(2)} due` : order.source === 'DINE_IN_QR' ? 'Payment due at the restaurant' : order.source === 'DELIVERY' ? 'Payment due on delivery' : 'Payment due at collection'}</div><strong className="text-xl">₹{Number(order.total).toFixed(2)}</strong></div>
