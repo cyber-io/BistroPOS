@@ -309,6 +309,7 @@ export const api = {
   register: ({ name, email, phone, password }) => request('/auth/register', { method: 'POST', body: { name, email, phone, password, restaurantId, role: 'CUSTOMER' } }),
 
   getRestaurants: () => request('/restaurants'),
+  createRestaurant: details => request('/restaurants', { method: 'POST', body: details }),
   getRestaurant: async () => {
     const data = await request(`/restaurants/${restaurantId}`);
     restaurantId = data.restaurantId;
@@ -348,6 +349,11 @@ export const api = {
       return null;
     }
   },
+<<<<<<< HEAD
+  createTable: data => request(`/tables${query({ restaurantId: data?.restaurantId || restaurantId })}`, { method: 'POST', body: data }),
+  updateTable: (id, data) => request(`/tables/${id}`, { method: 'PUT', body: data }),
+  deleteTable: id => request(`/tables/${id}`, { method: 'DELETE' }),
+=======
   getTableSession: async tableId => {
     try {
       const data = await request(`/tables/${encodeURIComponent(tableId)}/session`);
@@ -372,6 +378,7 @@ export const api = {
     broadcastEvent('TABLE_POSITION_UPDATED', { tableId, positionX, positionY, shape, diningArea });
     return result;
   }),
+>>>>>>> eca0a65db7ac53e4dae0846f322f30f18263f332
   updateTableStatus: (tableId, status, customerName = null, assignedWaiterId = null) => request(`/tables/${tableId}/status`, { method: 'PUT', body: { status, customerName, assignedWaiterId } }).then(result => {
     broadcastEvent('TABLE_STATUS_UPDATED', { tableId, status, customerName });
     return result;
@@ -589,6 +596,9 @@ export const api = {
   getIssues: () => request(`/issues${query({ restaurantId })}`).catch(() => []),
   resolveIssue: (issueId, resolution, escalate = false) => request(`/issues/${issueId}/resolve`, { method: 'PATCH', body: typeof resolution === 'object' ? resolution : { resolution, escalate } }),
   getUsers: (role) => request(`/users${query({ restaurantId, role })}`),
+  getAllManagers: () => request('/users/managers'),
+  getPlatformSummary: () => request('/restaurants/summary'),
+  updateRestaurantStatus: (id, status) => request(`/restaurants/${id}/status`, { method: 'PUT', body: { status } }),
   createStaffUser: details => request(`/users${query({ restaurantId })}`, { method: 'POST', body: details }),
   deleteStaffUser: userId => request(`/users/${userId}`, { method: 'DELETE' }),
   updateRestaurantSettings: (restaurantIdToUpdate, payload) => request(`/restaurants/${restaurantIdToUpdate || restaurantId}/settings`, { method: 'PATCH', body: payload }),

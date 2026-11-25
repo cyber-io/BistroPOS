@@ -49,6 +49,11 @@ public interface ITableService
     Task<TableDto?> GetTableByIdAsync(Guid tableId);
     Task<QrValidationResponse> ValidateQrAsync(string qrIdentifier);
     Task<bool> UpdateTableStatusAsync(Guid tableId, UpdateTableStatusRequest request);
+<<<<<<< HEAD
+    Task<TableDto> CreateTableAsync(CreateTableRequest request, Guid targetRestaurantId);
+    Task<bool> DeleteTableAsync(Guid tableId);
+    Task<TableDto?> UpdateTableAsync(Guid tableId, UpdateTableRequest request);
+=======
     Task<bool> UpdateTablePositionAsync(Guid tableId, UpdateTablePositionDto request);
     Task<DiningSessionDto?> GetOrCreateActiveSessionAsync(Guid tableId);
     Task<bool> CloseSessionAsync(Guid tableId);
@@ -60,6 +65,7 @@ public interface IInventoryService
     Task<InventoryItemDto> CreateItemAsync(CreateInventoryItemDto request);
     Task<bool> UpdateStockAsync(Guid itemId, decimal quantityChange, string? reason);
     Task<bool> ReportShortageAsync(ReportShortageDto request);
+>>>>>>> eca0a65db7ac53e4dae0846f322f30f18263f332
 }
 
 public interface IHelpRequestService
