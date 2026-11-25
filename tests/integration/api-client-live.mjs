@@ -2,8 +2,14 @@ import fs from 'node:fs';
 import assert from 'node:assert/strict';
 const memoryStorage=()=>{const data=new Map();return{getItem:key=>data.get(key)||null,setItem:(key,value)=>data.set(key,String(value)),removeItem:key=>data.delete(key)}};
 globalThis.localStorage=memoryStorage();globalThis.sessionStorage=memoryStorage();globalThis.window={dispatchEvent(){}};
-const base='http://127.0.0.1:5050/api';
-const source=fs.readFileSync('frontend/src/services/api.js','utf8').replaceAll('import.meta.env',`({VITE_API_URL:'${base}'})`);
+const base = (process.env.API_BASE_URL || 'http://127.0.0.1:5050/api').replace(/\/$/, '');
+const tablePresentationSource = fs.readFileSync('frontend/src/services/tablePresentation.js', 'utf8')
+  .replaceAll('import.meta.env', `({VITE_API_URL:'${base}'})`)
+  .replace(/export\s+/g, '');
+const apiSource = fs.readFileSync('frontend/src/services/api.js', 'utf8')
+  .replaceAll('import.meta.env', `({VITE_API_URL:'${base}'})`)
+  .replace(/import\s*\{[^}]*\}\s*from\s*['"]\.\/tablePresentation\.js['"];?/, '');
+const source = `${tablePresentationSource}\n${apiSource}`;
 const {api,setAuthToken}=await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
 const pass=message=>console.log('PASS',message);
 const demo=async role=>{const auth=await api.demoLogin(role);assert.equal(auth.success,true);setAuthToken(auth.token);assert.equal((await api.me()).role,role)};

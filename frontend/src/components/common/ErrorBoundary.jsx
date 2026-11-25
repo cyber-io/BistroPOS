@@ -18,7 +18,11 @@ export default class ErrorBoundary extends React.Component {
   resetError = () => {
     this.setState({ hasError: false, error: null });
     if (this.props.onReset) {
-      this.props.onReset();
+      try { this.props.onReset(); } catch {}
+    }
+    // Hard refresh resets any stale React fiber state / HMR hook mismatch
+    if (typeof window !== 'undefined') {
+      window.location.reload();
     }
   };
 

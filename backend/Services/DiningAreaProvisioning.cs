@@ -8,49 +8,93 @@ public static class DiningAreaProvisioning
 {
     public static async Task<int> EnsureDefaultDiningAreasAsync(RestaurantDbContext db)
     {
-        var restaurantId = DiningLayoutCatalog.DefaultRestaurantId;
-        if (!await db.Restaurants.AnyAsync(restaurant => restaurant.RestaurantId == restaurantId)) return 0;
+        var restaurants = await db.Restaurants.ToListAsync();
+        if (restaurants.Count == 0) return 0;
 
-        // Concurrent app instances must not both try to provision the same real table identities.
-        await using var transaction = db.Database.IsRelational() ? await db.Database.BeginTransactionAsync() : null;
-        if (db.Database.IsNpgsql())
-            await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtext({"dining-layout:" + restaurantId}))");
+        var totalAdded = 0;
 
-        var ids = DiningLayoutCatalog.Definitions.Select(definition => definition.TableId).ToArray();
-        var numbers = DiningLayoutCatalog.Definitions.Select(definition => definition.TableNumber).ToArray();
-        var qrIdentifiers = DiningLayoutCatalog.Definitions.Select(DiningLayoutCatalog.QrIdentifier).ToArray();
-        var existing = await db.Tables.Where(table => ids.Contains(table.TableId)
-            || (table.RestaurantId == restaurantId && numbers.Contains(table.TableNumber))
-            || qrIdentifiers.Contains(table.QrIdentifier)).ToListAsync();
-
-        var added = 0;
-        foreach (var definition in DiningLayoutCatalog.Definitions)
+        foreach (var restaurant in restaurants)
         {
-            var qrIdentifier = DiningLayoutCatalog.QrIdentifier(definition);
-            var matching = existing.FirstOrDefault(table => table.TableId == definition.TableId);
-            if (matching != null)
-            {
-                if (matching.RestaurantId != restaurantId || matching.TableNumber != definition.TableNumber || matching.QrIdentifier != qrIdentifier)
-                    throw new InvalidOperationException($"Dining layout identity {definition.DisplayName} is already used by another table.");
-                // Never reset an existing table's status, capacity, customer or waiter during startup.
-                continue;
-            }
-            if (existing.Any(table => table.QrIdentifier == qrIdentifier || (table.RestaurantId == restaurantId && table.TableNumber == definition.TableNumber)))
-                throw new InvalidOperationException($"Dining layout table number {definition.TableNumber} or QR identity is already in use.");
+            var restaurantId = restaurant.RestaurantId;
 
-            db.Tables.Add(new TableEntity
+            var existingTables = await db.Tables
+                .Where(t => t.RestaurantId == restaurantId)
+                .ToListAsync();
+
+            // 1. Ensure existing standard tables have correct group/everyday dining area
+            foreach (var t in existingTables)
             {
-                TableId = definition.TableId,
-                RestaurantId = restaurantId,
-                TableNumber = definition.TableNumber,
-                Capacity = definition.Capacity,
-                Status = TableStatuses.Available,
-                QrIdentifier = qrIdentifier,
-            });
-            added++;
+                var correctArea = DiningLayoutCatalog.Area(t.Capacity, t.QrIdentifier, t.TableNumber);
+                if (string.IsNullOrEmpty(t.DiningArea) || t.DiningArea == "everyday")
+                {
+                    if (correctArea != "everyday")
+                    {
+                        t.DiningArea = correctArea;
+                    }
+                }
+            }
+
+            // 2. Ensure Family (101-104) and Party Hall (201) are provisioned
+            foreach (var definition in DiningLayoutCatalog.Definitions)
+            {
+                var existing = existingTables.FirstOrDefault(t => t.TableNumber == definition.TableNumber);
+                if (existing != null)
+                {
+                    var expectedArea = definition.SeatingStyle == "hall" ? "party" : "family";
+                    if (existing.DiningArea != expectedArea)
+                    {
+                        existing.DiningArea = expectedArea;
+                    }
+                    continue;
+                }
+
+                var qrIdentifier = DiningLayoutCatalog.QrIdentifier(restaurantId, definition);
+                Guid newTableId;
+                if (restaurantId == DiningLayoutCatalog.DefaultRestaurantId)
+                {
+                    newTableId = definition.TableId;
+                }
+                else
+                {
+                    var idSeed = $"{restaurantId:N}"[..24] + $"{definition.TableNumber:D8}";
+                    newTableId = Guid.TryParse(idSeed, out var parsed) ? parsed : Guid.NewGuid();
+                }
+
+                // If newTableId is already taken by another restaurant, generate a new Guid
+                if (await db.Tables.AnyAsync(t => t.TableId == newTableId))
+                {
+                    newTableId = Guid.NewGuid();
+                }
+
+                db.Tables.Add(new TableEntity
+                {
+                    TableId = newTableId,
+                    RestaurantId = restaurantId,
+                    TableNumber = definition.TableNumber,
+                    Capacity = definition.Capacity,
+                    Status = TableStatuses.Available,
+                    QrIdentifier = qrIdentifier,
+                    DiningArea = definition.SeatingStyle == "hall" ? "party" : "family",
+                    Shape = definition.SeatingStyle == "hall" ? "HALL" : "RECTANGLE",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
+                totalAdded++;
+            }
         }
-        if (added > 0) await db.SaveChangesAsync();
-        if (transaction != null) await transaction.CommitAsync();
-        return added;
+
+        try
+        {
+            if (totalAdded > 0 || db.ChangeTracker.HasChanges())
+            {
+                await db.SaveChangesAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[DiningAreaProvisioning] Warning: {ex.Message}");
+        }
+
+        return totalAdded;
     }
 }

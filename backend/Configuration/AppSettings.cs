@@ -14,7 +14,21 @@ public class JwtOptions
     public string SecretKey { get; set; } = string.Empty;
     public string Issuer { get; set; } = string.Empty;
     public string Audience { get; set; } = string.Empty;
-    public int ExpiryMinutes { get; set; } = 1440;
+    public int ExpiryMinutes { get; set; } = 240;
+}
+
+public class SecurityOptions
+{
+    public const string SectionName = "Security";
+    public string ResourceTokenKey { get; set; } = string.Empty;
+    public int ResourceTokenHours { get; set; } = 24;
+    public string[] CorsAllowedOrigins { get; set; } = [];
+}
+
+public class FeaturesOptions
+{
+    public const string SectionName = "Features";
+    public bool EnableDemoLogin { get; set; } = false;
 }
 
 public class BusinessRulesOptions

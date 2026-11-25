@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using System.Text.Json;
 
 namespace RestaurantSystem.Api.Models;
 
@@ -90,6 +91,112 @@ public class Restaurant
 
     public ICollection<TableEntity> Tables { get; set; } = new List<TableEntity>();
     public ICollection<MenuCategory> Categories { get; set; } = new List<MenuCategory>();
+
+    [NotMapped]
+    public string? WifiSsid
+    {
+        get => GetSettingString("wifi_ssid", "Bistro-HighSpeed-Guest");
+        set => SetSetting("wifi_ssid", value);
+    }
+
+    [NotMapped]
+    public string? WifiPassword
+    {
+        get => GetSettingString("wifi_password", "Bistro@2026");
+        set => SetSetting("wifi_password", value);
+    }
+
+    [NotMapped]
+    public bool WifiEnabled
+    {
+        get => GetSettingBool("wifi_enabled", true);
+        set => SetSetting("wifi_enabled", value);
+    }
+
+    [NotMapped]
+    public string? GoogleReviewUrl
+    {
+        get => GetSettingString("google_review_url", "https://maps.google.com");
+        set => SetSetting("google_review_url", value);
+    }
+
+    [NotMapped]
+    public string? SubscriptionTier
+    {
+        get => GetSettingString("subscription_tier", "PRO");
+        set => SetSetting("subscription_tier", value);
+    }
+
+    private string? GetSettingString(string key, string? defaultValue)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(Settings) || Settings == "{}") return defaultValue;
+            using var doc = JsonDocument.Parse(Settings);
+            if (doc.RootElement.TryGetProperty(key, out var el))
+            {
+                if (el.ValueKind == JsonValueKind.String)
+                    return el.GetString() ?? defaultValue;
+                return el.ToString();
+            }
+            return defaultValue;
+        }
+        catch
+        {
+            return defaultValue;
+        }
+    }
+
+    private bool GetSettingBool(string key, bool defaultValue)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(Settings) || Settings == "{}") return defaultValue;
+            using var doc = JsonDocument.Parse(Settings);
+            if (doc.RootElement.TryGetProperty(key, out var el))
+            {
+                if (el.ValueKind == JsonValueKind.True) return true;
+                if (el.ValueKind == JsonValueKind.False) return false;
+            }
+            return defaultValue;
+        }
+        catch
+        {
+            return defaultValue;
+        }
+    }
+
+    private void SetSetting(string key, object? value)
+    {
+        try
+        {
+            var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(Settings) && Settings.Trim().StartsWith("{"))
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(Settings);
+                    foreach (var prop in doc.RootElement.EnumerateObject())
+                    {
+                        if (prop.Value.ValueKind == JsonValueKind.String)
+                            dict[prop.Name] = prop.Value.GetString();
+                        else if (prop.Value.ValueKind == JsonValueKind.True)
+                            dict[prop.Name] = true;
+                        else if (prop.Value.ValueKind == JsonValueKind.False)
+                            dict[prop.Name] = false;
+                        else if (prop.Value.ValueKind == JsonValueKind.Number && prop.Value.TryGetDecimal(out var d))
+                            dict[prop.Name] = d;
+                        else
+                            dict[prop.Name] = prop.Value.GetRawText();
+                    }
+                }
+                catch { }
+            }
+            dict[key] = value;
+            Settings = JsonSerializer.Serialize(dict);
+        }
+        catch { }
+    }
 }
 
 [Table("users")]
@@ -136,6 +243,12 @@ public class TableEntity
     public Guid? AssignedWaiterId { get; set; }
     [ForeignKey(nameof(AssignedWaiterId))]
     public User? AssignedWaiter { get; set; }
+    public int PositionX { get; set; } = 0;
+    public int PositionY { get; set; } = 0;
+    [MaxLength(50)]
+    public string Shape { get; set; } = "SQUARE";
+    [MaxLength(50)]
+    public string DiningArea { get; set; } = "everyday";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
@@ -183,8 +296,38 @@ public class MenuItem
     public bool IsSweet { get; set; } = false;
     public string AddOns { get; set; } = "[]";
     public string CustomizationOptions { get; set; } = "[]";
+    public string Allergens { get; set; } = "[]";
+    public string? Ingredients { get; set; }
+    public string Portions { get; set; } = "[]"; // e.g. [{"name":"Half","price":140},{"name":"Full","price":240}]
+    public string DietaryTags { get; set; } = "[]"; // e.g. ["Vegan","Gluten-Free"]
+    public bool IsSpecial { get; set; } = false;
+    public int PrepTimeMinutes { get; set; } = 15;
+    [MaxLength(50)]
+    public string KitchenStation { get; set; } = "MAIN"; // MAIN, GRILL, BEVERAGES, DESSERTS
+    public string Recipe { get; set; } = "[]"; // e.g. [{"itemId":"...","name":"Paneer","quantity":0.15,"unit":"kg"}]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+[Table("dining_sessions")]
+public class DiningSession
+{
+    [Key]
+    public Guid SessionId { get; set; } = Guid.NewGuid();
+    [Required]
+    public Guid RestaurantId { get; set; }
+    [Required]
+    public Guid TableId { get; set; }
+    [ForeignKey(nameof(TableId))]
+    public TableEntity? Table { get; set; }
+    [NotMapped]
+    public string SessionCode { get; set; } = string.Empty;
+    [Required, MaxLength(50)]
+    public string Status { get; set; } = "ACTIVE"; // ACTIVE, CLOSED
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? ClosedAt { get; set; }
+    [NotMapped]
+    public DateTime? ExpiresAt { get; set; }
 }
 
 [Table("orders")]
@@ -202,6 +345,9 @@ public class Order
     public Guid? TableId { get; set; }
     [ForeignKey(nameof(TableId))]
     public TableEntity? Table { get; set; }
+    public Guid? SessionId { get; set; }
+    [ForeignKey(nameof(SessionId))]
+    public DiningSession? Session { get; set; }
     [Required, MaxLength(50)]
     public string Source { get; set; } = OrderSources.DineInQr;
     [Required, MaxLength(50)]
@@ -216,6 +362,8 @@ public class Order
     public decimal DeliveryFee { get; set; }
     [Column(TypeName = "numeric(10,2)")]
     public decimal Total { get; set; }
+    public int EstimatedPrepTimeMinutes { get; set; } = 15;
+    public DateTime? EstimatedReadyAt { get; set; }
     public string? DeliveryAddress { get; set; }
     public string? CustomerName { get; set; }
     public string? CustomerPhone { get; set; }
@@ -256,6 +404,13 @@ public class OrderItem
     public string? SpecialInstruction { get; set; }
     [Column(TypeName = "numeric(10,2)")]
     public decimal LineTotal { get; set; }
+    [MaxLength(50)]
+    public string Course { get; set; } = "MAIN"; // STARTER, MAIN, DESSERT, BEVERAGE
+    [MaxLength(50)]
+    public string Station { get; set; } = "MAIN"; // MAIN, GRILL, BEVERAGES, DESSERTS
+    [MaxLength(50)]
+    public string PreparationStatus { get; set; } = "PENDING"; // PENDING, PREPARING, READY
+    public DateTime? PreparedAt { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
@@ -285,6 +440,16 @@ public class Reservation
     public string Status { get; set; } = ReservationStatuses.Pending;
     public int GracePeriodMinutes { get; set; } = 10;
     public string? SpecialRequest { get; set; }
+    public int? ConfirmedHeadcount { get; set; }
+    public string EventMealChoices { get; set; } = "{}";
+    public string? DietaryRequests { get; set; }
+    [Column(TypeName = "numeric(10,2)")]
+    public decimal DepositAmount { get; set; } = 0;
+    [Column(TypeName = "numeric(10,2)")]
+    public decimal DepositPaid { get; set; } = 0;
+    [Column(TypeName = "numeric(10,2)")]
+    public decimal EstimatedTotalCost { get; set; } = 0;
+    public string? PrepSheetNotes { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
@@ -304,6 +469,11 @@ public class Payment
     public Reservation? Reservation { get; set; }
     [Column(TypeName = "numeric(10,2)")]
     public decimal Amount { get; set; }
+    [Column(TypeName = "numeric(10,2)")]
+    public decimal TipAmount { get; set; } = 0;
+    public int SplitCount { get; set; } = 1;
+    [MaxLength(50)]
+    public string SplitType { get; set; } = "FULL";
     [MaxLength(10)]
     public string Currency { get; set; } = "INR";
     [Required, MaxLength(50)]
@@ -337,6 +507,8 @@ public class HelpRequest
     public string? AssignedWaiterName { get; set; }
     [Required]
     public string Message { get; set; } = string.Empty;
+    [MaxLength(50)]
+    public string RequestType { get; set; } = "CUSTOM";
     [Required, MaxLength(50)]
     public string Status { get; set; } = "PENDING"; // PENDING, ASSIGNED, RESOLVED
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -417,6 +589,123 @@ public class AuditLog
     public string? Metadata { get; set; }
     public string? IpAddress { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+[Table("inventory_items")]
+public class InventoryItem
+{
+    [Key]
+    public Guid ItemId { get; set; } = Guid.NewGuid();
+    [Required]
+    public Guid RestaurantId { get; set; }
+    [ForeignKey(nameof(RestaurantId))]
+    public Restaurant? Restaurant { get; set; }
+    [Required, MaxLength(150)]
+    public string Name { get; set; } = string.Empty;
+    [MaxLength(100)]
+    public string Category { get; set; } = "GENERAL";
+    [Required, MaxLength(50)]
+    public string Unit { get; set; } = "kg";
+    public decimal CurrentStock { get; set; } = 0;
+    public decimal MinThreshold { get; set; } = 5;
+    public decimal CostPerUnit { get; set; } = 0;
+    [MaxLength(50)]
+    public string Status { get; set; } = "IN_STOCK"; // IN_STOCK, LOW_STOCK, OUT_OF_STOCK
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+[Table("customer_loyalty")]
+public class CustomerLoyalty
+{
+    [Key]
+    public Guid LoyaltyId { get; set; } = Guid.NewGuid();
+    [Required]
+    public Guid RestaurantId { get; set; }
+    [ForeignKey(nameof(RestaurantId))]
+    public Restaurant? Restaurant { get; set; }
+    [Required, MaxLength(20)]
+    public string CustomerPhone { get; set; } = string.Empty;
+    [MaxLength(100)]
+    public string? CustomerName { get; set; }
+    [MaxLength(100)]
+    public string? CustomerEmail { get; set; }
+    public int PointsBalance { get; set; } = 0;
+    public int LifetimePoints { get; set; } = 0;
+    [MaxLength(20)]
+    public string Tier { get; set; } = "BRONZE"; // BRONZE, SILVER, GOLD, PLATINUM
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+[Table("customer_feedbacks")]
+public class CustomerFeedback
+{
+    [Key]
+    public Guid FeedbackId { get; set; } = Guid.NewGuid();
+    [Required]
+    public Guid RestaurantId { get; set; }
+    [ForeignKey(nameof(RestaurantId))]
+    public Restaurant? Restaurant { get; set; }
+    public Guid? OrderId { get; set; }
+    [ForeignKey(nameof(OrderId))]
+    public Order? Order { get; set; }
+    [MaxLength(100)]
+    public string? CustomerName { get; set; }
+    [MaxLength(20)]
+    public string? CustomerPhone { get; set; }
+    public int Rating { get; set; } = 5;
+    public int FoodRating { get; set; } = 5;
+    public int ServiceRating { get; set; } = 5;
+    public int AmbianceRating { get; set; } = 5;
+    public string? Comment { get; set; }
+    public bool GoogleReviewClicked { get; set; } = false;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+[Table("walk_in_waitlist")]
+public class WalkInWaitlist
+{
+    [Key]
+    public Guid WaitlistId { get; set; } = Guid.NewGuid();
+    [Required]
+    public Guid RestaurantId { get; set; }
+    [ForeignKey(nameof(RestaurantId))]
+    public Restaurant? Restaurant { get; set; }
+    [Required, MaxLength(150)]
+    public string CustomerName { get; set; } = string.Empty;
+    [Required, MaxLength(30)]
+    public string CustomerPhone { get; set; } = string.Empty;
+    public int PartySize { get; set; } = 2;
+    [Required, MaxLength(50)]
+    public string Status { get; set; } = "WAITING"; // WAITING, NOTIFIED, SEATED, CANCELLED
+    public int EstimatedWaitMinutes { get; set; } = 15;
+    public DateTime? EstimatedReadyAt { get; set; }
+    public DateTime? NotifiedAt { get; set; }
+    public Guid? SeatedTableId { get; set; }
+    [ForeignKey(nameof(SeatedTableId))]
+    public TableEntity? SeatedTable { get; set; }
+    public string? Notes { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+[Table("receipt_deliveries")]
+public class ReceiptDelivery
+{
+    [Key]
+    public Guid DeliveryId { get; set; } = Guid.NewGuid();
+    [Required]
+    public Guid OrderId { get; set; }
+    [ForeignKey(nameof(OrderId))]
+    public Order? Order { get; set; }
+    [Required, MaxLength(255)]
+    public string Email { get; set; } = string.Empty;
+    [Required, MaxLength(50)]
+    public string Status { get; set; } = "DELIVERED"; // PENDING, DELIVERED, FAILED
+    public string? ErrorMessage { get; set; }
+    public int Attempts { get; set; } = 1;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? DeliveredAt { get; set; }
 }
 
 [Table("staff_profiles")]

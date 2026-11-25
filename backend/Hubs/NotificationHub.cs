@@ -50,7 +50,7 @@ public class NotificationHub(RestaurantDbContext db) : Hub<INotificationClient>
         Guid.TryParse(Context.User?.FindFirstValue(ClaimTypes.NameIdentifier), out var user);
         var role = Context.User?.FindFirstValue(ClaimTypes.Role);
         var tenant = Context.User?.FindFirstValue("restaurant_id");
-        var staff = role is UserRoles.SuperAdmin || (role is UserRoles.Receptionist or UserRoles.Kitchen or UserRoles.Waiter && tenant == restaurantId);
+        var staff = role is UserRoles.SuperAdmin || (role is UserRoles.Manager or UserRoles.Receptionist or UserRoles.Kitchen or UserRoles.Waiter && tenant == restaurantId);
         var customer = await db.Orders.AnyAsync(o => o.RestaurantId == restaurant && o.TableId == table && o.CustomerId == user && o.Status != OrderStatuses.Cancelled);
         if (!staff && !customer) throw new HubException("This table is outside your session.");
         await Groups.AddToGroupAsync(Context.ConnectionId, $"table_{restaurantId}_{tableId}");

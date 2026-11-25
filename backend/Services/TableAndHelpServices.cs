@@ -27,33 +27,73 @@ public class TableService : ITableService
             .OrderBy(t => t.TableNumber)
             .ToListAsync();
 
-        if (tables.Count == 0 && await _db.Restaurants.AnyAsync(r => r.RestaurantId == restaurantId))
+        var needsSave = false;
+        var missingStandardTables = tables.Count == 0;
+        var missingLayoutDefs = DiningLayoutCatalog.Definitions.Where(def => !tables.Any(t => t.TableNumber == def.TableNumber)).ToList();
+
+        if ((missingStandardTables || missingLayoutDefs.Count > 0) && await _db.Restaurants.AnyAsync(r => r.RestaurantId == restaurantId))
         {
-            var defaultCapacities = new[] { 2, 2, 4, 4, 4, 6, 6, 8, 2, 4, 4, 8 };
-            for (int i = 1; i <= 12; i++)
+            if (missingStandardTables)
             {
-                _db.Tables.Add(new TableEntity
+                var defaultCapacities = new[] { 2, 2, 4, 4, 4, 6, 6, 8, 2, 4, 4, 8 };
+                for (int i = 1; i <= 12; i++)
                 {
-                    TableId = Guid.NewGuid(),
+                    var newTbl = new TableEntity
+                    {
+                        TableId = Guid.NewGuid(),
+                        RestaurantId = restaurantId,
+                        TableNumber = i,
+                        Capacity = defaultCapacities[i - 1],
+                        Status = TableStatuses.Available,
+                        QrIdentifier = $"QR_{restaurantId:N}_TBL{i:D02}",
+                        DiningArea = (i == 6 || i == 7 || i == 8 || i == 12) ? "group" : "everyday",
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow
+                    };
+                    _db.Tables.Add(newTbl);
+                }
+                needsSave = true;
+            }
+
+            // Ensure Family dining tables (101-104) and Party Hall (201) are provisioned for this restaurant
+            foreach (var def in missingLayoutDefs)
+            {
+                var qrId = DiningLayoutCatalog.QrIdentifier(restaurantId, def);
+                var newId = restaurantId == DiningLayoutCatalog.DefaultRestaurantId
+                    ? def.TableId
+                    : Guid.NewGuid();
+
+                var newTbl = new TableEntity
+                {
+                    TableId = newId,
                     RestaurantId = restaurantId,
-                    TableNumber = i,
-                    Capacity = defaultCapacities[i - 1],
+                    TableNumber = def.TableNumber,
+                    Capacity = def.Capacity,
                     Status = TableStatuses.Available,
-                    QrIdentifier = $"QR_{restaurantId:N}_TBL{i:D02}",
+                    QrIdentifier = qrId,
+                    DiningArea = def.SeatingStyle == "hall" ? "party" : "family",
+                    Shape = def.SeatingStyle == "hall" ? "HALL" : "RECTANGLE",
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
-                });
+                };
+                _db.Tables.Add(newTbl);
+                needsSave = true;
             }
+        }
+
+        if (needsSave)
+        {
             try
             {
                 await _db.SaveChangesAsync();
-                tables = await _db.Tables
-                    .Include(t => t.AssignedWaiter)
-                    .Where(t => t.RestaurantId == restaurantId)
-                    .OrderBy(t => t.TableNumber)
-                    .ToListAsync();
             }
             catch { }
+
+            tables = await _db.Tables
+                .Include(t => t.AssignedWaiter)
+                .Where(t => t.RestaurantId == restaurantId)
+                .OrderBy(t => t.TableNumber)
+                .ToListAsync();
         }
 
         return tables.Select(t => new TableDto(
@@ -65,7 +105,11 @@ public class TableService : ITableService
             t.QrIdentifier,
             t.CurrentCustomerName,
             t.AssignedWaiterId,
-            t.AssignedWaiter?.Name
+            t.AssignedWaiter?.Name,
+            t.PositionX,
+            t.PositionY,
+            t.Shape ?? (t.TableNumber == 201 ? "HALL" : t.TableNumber >= 101 ? "RECTANGLE" : "SQUARE"),
+            !string.IsNullOrEmpty(t.DiningArea) && t.DiningArea != "everyday" ? t.DiningArea : DiningLayoutCatalog.Area(t.Capacity, t.QrIdentifier, t.TableNumber)
         )).ToList();
     }
 
@@ -86,7 +130,11 @@ public class TableService : ITableService
             t.QrIdentifier,
             t.CurrentCustomerName,
             t.AssignedWaiterId,
-            t.AssignedWaiter?.Name
+            t.AssignedWaiter?.Name,
+            t.PositionX,
+            t.PositionY,
+            t.Shape ?? (t.TableNumber == 201 ? "HALL" : t.TableNumber >= 101 ? "RECTANGLE" : "SQUARE"),
+            !string.IsNullOrEmpty(t.DiningArea) && t.DiningArea != "everyday" ? t.DiningArea : DiningLayoutCatalog.Area(t.Capacity, t.QrIdentifier, t.TableNumber)
         );
     }
 
@@ -181,6 +229,7 @@ public class TableService : ITableService
         return true;
     }
 
+<<<<<<< HEAD
     public async Task<TableDto> CreateTableAsync(CreateTableRequest request, Guid targetRestaurantId)
     {
         int tableNumber = request.TableNumber ?? 0;
@@ -225,10 +274,14 @@ public class TableService : ITableService
     }
 
     public async Task<bool> DeleteTableAsync(Guid tableId)
+=======
+    public async Task<bool> UpdateTablePositionAsync(Guid tableId, UpdateTablePositionDto request)
+>>>>>>> eca0a65db7ac53e4dae0846f322f30f18263f332
     {
         var table = await _db.Tables.FindAsync(tableId);
         if (table == null) return false;
 
+<<<<<<< HEAD
         var hasActiveOrders = await _db.Orders.AnyAsync(o => o.TableId == tableId && o.Status != "COMPLETED" && o.Status != "CANCELLED");
         if (hasActiveOrders)
         {
@@ -276,6 +329,189 @@ public class TableService : ITableService
             table.AssignedWaiter?.Name
         );
     }
+=======
+        table.PositionX = request.PositionX;
+        table.PositionY = request.PositionY;
+        if (!string.IsNullOrWhiteSpace(request.Shape)) table.Shape = request.Shape.Trim().ToUpperInvariant();
+        if (!string.IsNullOrWhiteSpace(request.DiningArea)) table.DiningArea = request.DiningArea.Trim().ToLowerInvariant();
+        table.UpdatedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync();
+
+        await _notifications.NotifyRoleAsync(
+            table.RestaurantId,
+            UserRoles.Receptionist,
+            "TABLE_POSITION_UPDATED",
+            "Table layout updated",
+            $"Table {table.TableNumber} position updated on floor map.",
+            new { TableId = table.TableId, TableNumber = table.TableNumber, PositionX = table.PositionX, PositionY = table.PositionY }
+        );
+
+        return true;
+    }
+
+    public async Task<DiningSessionDto?> GetOrCreateActiveSessionAsync(Guid tableId)
+    {
+        var table = await _db.Tables.FindAsync(tableId);
+        if (table == null) return null;
+
+        DiningSession? session = null;
+        try
+        {
+            session = await _db.DiningSessions
+                .Where(s => s.TableId == tableId && s.Status == "ACTIVE")
+                .OrderByDescending(s => s.CreatedAt)
+                .FirstOrDefaultAsync();
+
+            if (session == null)
+            {
+                var earliestActiveOrder = await _db.Orders
+                    .Where(o => o.TableId == tableId && o.Status != OrderStatuses.Cancelled && o.CreatedAt >= DateTime.UtcNow.AddHours(-6))
+                    .OrderBy(o => o.CreatedAt)
+                    .FirstOrDefaultAsync();
+
+                session = new DiningSession
+                {
+                    RestaurantId = table.RestaurantId,
+                    TableId = tableId,
+                    SessionCode = $"SES-{table.TableNumber}-{DateTime.UtcNow:MMddHHmm}",
+                    Status = "ACTIVE",
+                    CreatedAt = earliestActiveOrder != null ? earliestActiveOrder.CreatedAt.AddSeconds(-1) : DateTime.UtcNow
+                };
+                _db.DiningSessions.Add(session);
+                await _db.SaveChangesAsync();
+            }
+        }
+        catch
+        {
+            _db.ChangeTracker.Clear();
+            session = new DiningSession
+            {
+                SessionId = Guid.NewGuid(),
+                RestaurantId = table.RestaurantId,
+                TableId = tableId,
+                SessionCode = $"SES-{table.TableNumber}-{DateTime.UtcNow:MMddHHmm}",
+                Status = "ACTIVE",
+                CreatedAt = DateTime.UtcNow
+            };
+        }
+
+        var orders = await _db.Orders
+            .Include(o => o.Items)
+            .Where(o => o.TableId == tableId && 
+                       (o.SessionId == session.SessionId || 
+                        o.CreatedAt >= session.CreatedAt ||
+                        (o.Status != OrderStatuses.Cancelled && o.CreatedAt >= DateTime.UtcNow.AddHours(-6))))
+            .OrderByDescending(o => o.CreatedAt)
+            .ToListAsync();
+
+        try
+        {
+            var isPersisted = await _db.DiningSessions.AnyAsync(s => s.SessionId == session.SessionId);
+            if (isPersisted)
+            {
+                var anySessionMissing = false;
+                foreach (var ord in orders)
+                {
+                    if (!ord.SessionId.HasValue)
+                    {
+                        ord.SessionId = session.SessionId;
+                        anySessionMissing = true;
+                    }
+                }
+                if (anySessionMissing)
+                {
+                    await _db.SaveChangesAsync();
+                }
+            }
+        }
+        catch
+        {
+            _db.ChangeTracker.Clear();
+        }
+
+        var orderIds = orders.Select(o => o.OrderId).ToList();
+        var payments = await _db.Payments
+            .Where(p => p.OrderId.HasValue && orderIds.Contains(p.OrderId.Value) && p.Status == PaymentStatuses.Paid)
+            .ToListAsync();
+
+        var paymentsByOrder = payments
+            .GroupBy(p => p.OrderId!.Value)
+            .ToDictionary(g => g.Key, g => g.Sum(p => p.Amount));
+
+        var orderDtos = orders.Select(o => {
+            var paid = paymentsByOrder.TryGetValue(o.OrderId, out var pAmt) ? pAmt : 0m;
+            var paymentStatus = paid >= (o.Total - 0.05m) ? "PAID" : paid > 0 ? "PARTIAL" : "UNPAID";
+            return new OrderDto(
+                o.OrderId,
+                o.OrderNumber,
+                o.RestaurantId,
+                o.CustomerId,
+                o.TableId,
+                table.TableNumber,
+                o.Source,
+                o.Status,
+                o.Subtotal,
+                o.Tax,
+                o.Discount,
+                o.DeliveryFee,
+                o.Total,
+                o.SpecialInstructions,
+                o.RejectionReason,
+                o.CancellationReason,
+                o.CancelledBy,
+                o.CreatedAt,
+                o.Items.Select(i => new OrderItemDto(
+                    i.OrderItemId,
+                    i.MenuItemId,
+                    i.ItemNameSnapshot,
+                    i.PriceSnapshot,
+                    i.Quantity,
+                    i.LineTotal,
+                    i.Customization,
+                    i.SpecialInstruction
+                )).ToList(),
+                PaymentStatus: paymentStatus,
+                PaidAmount: paid,
+                EstimatedPrepTimeMinutes: o.EstimatedPrepTimeMinutes,
+                EstimatedReadyAt: o.EstimatedReadyAt,
+                SessionId: session.SessionId
+            );
+        }).ToList();
+
+        return new DiningSessionDto(
+            session.SessionId,
+            session.RestaurantId,
+            session.TableId,
+            table.TableNumber,
+            string.IsNullOrWhiteSpace(session.SessionCode) ? $"SES-{table.TableNumber}-{session.CreatedAt:MMddHHmm}" : session.SessionCode,
+            session.Status,
+            session.CreatedAt,
+            orderDtos
+        );
+    }
+
+    public async Task<bool> CloseSessionAsync(Guid tableId)
+    {
+        try
+        {
+            var session = await _db.DiningSessions
+                .Where(s => s.TableId == tableId && s.Status == "ACTIVE")
+                .FirstOrDefaultAsync();
+
+            if (session == null) return false;
+
+            session.Status = "CLOSED";
+            session.ClosedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync();
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+>>>>>>> eca0a65db7ac53e4dae0846f322f30f18263f332
 }
 
 public class HelpRequestService : IHelpRequestService
@@ -306,6 +542,7 @@ public class HelpRequestService : IHelpRequestService
             TableId = request.TableId,
             CustomerId = request.CustomerId,
             Message = request.Message,
+            RequestType = string.IsNullOrWhiteSpace(request.RequestType) ? "CUSTOM" : request.RequestType,
             Status = "PENDING",
             CreatedAt = DateTime.UtcNow
         };
@@ -319,8 +556,8 @@ public class HelpRequestService : IHelpRequestService
             UserRoles.Waiter,
             "CUSTOMER_HELP_REQUEST",
             $"Table {tableNum} needs assistance",
-            $"TABLE {tableNum} IS CALLING FOR HELP: \"{request.Message}\"",
-            new { helpReq.RequestId, TableNumber = tableNum, request.Message }
+            $"TABLE {tableNum} IS CALLING FOR HELP ({helpReq.RequestType}): \"{request.Message}\"",
+            new { helpReq.RequestId, TableNumber = tableNum, request.Message, helpReq.RequestType }
         );
 
         await _audit.LogAsync(
@@ -329,7 +566,7 @@ public class HelpRequestService : IHelpRequestService
             "CUSTOMER",
             "HELP_REQUEST_CREATED",
             "help_requests",
-            new { helpReq.RequestId, TableNumber = tableNum, request.Message }
+            new { helpReq.RequestId, TableNumber = tableNum, request.Message, helpReq.RequestType }
         );
 
         return new HelpRequestDto(
@@ -343,7 +580,8 @@ public class HelpRequestService : IHelpRequestService
             null,
             helpReq.CreatedAt,
             null,
-            _tokens.Create("help", helpReq.RequestId)
+            _tokens.Create("help", helpReq.RequestId),
+            helpReq.RequestType
         );
     }
 
@@ -365,7 +603,9 @@ public class HelpRequestService : IHelpRequestService
             h.AssignedWaiterId,
             h.AssignedWaiterName,
             h.CreatedAt,
-            h.AcceptedAt
+            h.AcceptedAt,
+            null,
+            h.RequestType
         )).ToList();
     }
 

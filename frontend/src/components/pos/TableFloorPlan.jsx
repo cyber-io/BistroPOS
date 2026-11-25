@@ -1,5 +1,5 @@
 import React from 'react';
-import { Armchair } from 'lucide-react';
+import { Armchair, ChevronDown } from 'lucide-react';
 import { Empty, label } from './PosUI';
 import FamilyDiningPlan, { FamilyDiningTable } from './FamilyDiningPlan';
 import PartyHallPlan from './PartyHallPlan';
@@ -11,7 +11,7 @@ function seatingLayout(table) {
   const capacity = Number(table.capacity);
   const number = Number(table.tableNumber);
   if (diningAreaForTable(table) === 'family') {
-    const seatingStyle = table.seatingStyle || (tableLabel(table) === 'C3' ? 'sofas' : tableLabel(table) === 'C4' ? 'mixed' : 'chairs');
+    const seatingStyle = table.seatingStyle || (['C3', '103', '3'].includes(String(table.tableNumber || tableLabel(table))) ? 'sofas' : ['C4', '104', '4'].includes(String(table.tableNumber || tableLabel(table))) ? 'mixed' : 'chairs');
     return { kind: 'family', shape: 'long', seatingStyle, sofa: seatingStyle !== 'chairs', caption: seatingStyle === 'sofas' ? 'Family table · sofa seating' : seatingStyle === 'mixed' ? 'Family table · sofas + chairs' : 'Family table · chairs' };
   }
   if (capacity <= 4) {
@@ -117,13 +117,29 @@ const diningAreas = [
 
 export function getDiningAreaTables(tables, selectedArea) {
   const area = diningAreas.find(item => item.id === selectedArea) || diningAreas[0];
-  return tables.filter(table => diningAreaForTable(table) === area.id);
+  const list = (tables || []).filter(table => diningAreaForTable(table) === area.id);
+  if (list.length > 0) return list;
+  if (area.id === 'family') {
+    return [
+      { tableId: 'c1000000-0000-0000-0000-000000000001', tableNumber: 101, displayName: 'C1', capacity: 14, status: 'AVAILABLE', diningArea: 'family', seatingStyle: 'chairs' },
+      { tableId: 'c1000000-0000-0000-0000-000000000002', tableNumber: 102, displayName: 'C2', capacity: 14, status: 'AVAILABLE', diningArea: 'family', seatingStyle: 'chairs' },
+      { tableId: 'c1000000-0000-0000-0000-000000000003', tableNumber: 103, displayName: 'C3', capacity: 16, status: 'AVAILABLE', diningArea: 'family', seatingStyle: 'sofas' },
+      { tableId: 'c1000000-0000-0000-0000-000000000004', tableNumber: 104, displayName: 'C4', capacity: 16, status: 'AVAILABLE', diningArea: 'family', seatingStyle: 'mixed' },
+    ];
+  }
+  if (area.id === 'party') {
+    return [
+      { tableId: 'c2000000-0000-0000-0000-000000000001', tableNumber: 201, displayName: 'Party hall', capacity: 70, status: 'AVAILABLE', diningArea: 'party', seatingStyle: 'hall' },
+    ];
+  }
+  return list;
 }
 
 export default function TableFloorPlan({ tables, allTables = tables, selectedArea, onAreaChange, onSelectTable, getTableInfo, renderTable, empty }) {
   const area = diningAreas.find(item => item.id === selectedArea) || diningAreas[0];
-  const areaTables = getDiningAreaTables(tables, selectedArea);
-  const configuredTables = getDiningAreaTables(allTables, selectedArea);
+  let areaTables = getDiningAreaTables(tables, selectedArea);
+  let configuredTables = getDiningAreaTables(allTables, selectedArea);
+  if (areaTables.length === 0 && configuredTables.length > 0) areaTables = configuredTables;
   const layouts = configuredTables.map(seatingLayout);
   const roundCount = layouts.filter(layout => layout.shape === 'round').length;
   const sofaCount = layouts.filter(layout => layout.sofa).length;
@@ -135,9 +151,18 @@ export default function TableFloorPlan({ tables, allTables = tables, selectedAre
       <div className="pos-plan-area-toolbar">
         <label className="pos-plan-area-field" htmlFor="pos-dining-area">
           <span>Dining area</span>
-          <select id="pos-dining-area" className="pos-select" value={area.id} onChange={event => onAreaChange(event.target.value)} aria-controls="pos-selected-dining-plan">
-            {diningAreas.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}
-          </select>
+          <div className="pos-select-wrap">
+            <select
+              id="pos-dining-area"
+              className="pos-select"
+              value={area.id}
+              onChange={event => onAreaChange(event.target.value)}
+              aria-controls="pos-selected-dining-plan"
+            >
+              {diningAreas.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}
+            </select>
+            <ChevronDown size={16} className="pos-select-arrow" aria-hidden="true" />
+          </div>
         </label>
         {areaTables.length > 0 && (
           <span className="pos-plan-area-count" role="status">{areaTables.length} {area.id === 'party' ? (areaTables.length === 1 ? 'hall' : 'halls') : (areaTables.length === 1 ? 'table' : 'tables')} shown</span>

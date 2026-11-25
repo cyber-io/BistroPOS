@@ -48,19 +48,26 @@ export function CartProvider({ children }) {
       localStorage.setItem('rs_cart_context', JSON.stringify({ source: orderSource, tableInfo }));
     } catch { /* Browsing remains available when local storage is disabled. */ }
   }, [items, orderSource, tableInfo]);
-  const addItem = useCallback((menuItem, quantity = 1, customization = {}, addOns = [], specialInstruction = '') => {
+  const addItem = useCallback((menuItem, quantity = 1, customization = {}, addOns = [], specialInstruction = '', portion = null) => {
     if (menuItem.availability === false) return;
     const count = Math.min(99, Math.max(1, Number(quantity) || 1));
     const extras = (addOns || []).reduce((sum, addon) => sum + Number(addon.price || 0), 0);
-    const price = Number(menuItem.price) + extras + customizationCharge(customization);
-    const itemKey = `${menuItem.menuItemId}-${JSON.stringify(customization)}-${(addOns || []).map(a=>a.name).sort().join(',')}-${specialInstruction.trim()}`;
+    const effectiveBasePrice = portion?.price !== undefined ? Number(portion.price) : Number(menuItem.price);
+    const price = effectiveBasePrice + extras + customizationCharge(customization);
+    const portionKey = portion ? `-${portion.name || portion.label}` : '';
+    const itemKey = `${menuItem.menuItemId}${portionKey}-${JSON.stringify(customization)}-${(addOns || []).map(a=>a.name).sort().join(',')}-${specialInstruction.trim()}`;
     setItems(previous => {
       const existing = previous.find(item=>item.itemKey === itemKey);
       if (existing) return previous.map(item=>item.itemKey === itemKey ? { ...item, quantity:Math.min(99,item.quantity + count), lineTotal:Math.min(99,item.quantity + count)*price } : item);
-      return [...previous, { itemKey, menuItemId:menuItem.menuItemId, name:menuItem.name, image:menuItem.image, vegNonveg:menuItem.vegNonveg, basePrice:Number(menuItem.price), price, quantity:count, customization, addOns, specialInstruction, lineTotal:count*price }];
+      const cat = (menuItem.categoryName || '').toLowerCase();
+      let defaultCourse = 'MAIN';
+      if (/starter|appetizer|soup|salad|chaat/i.test(cat) || /tikka|kebab|fries|nachos/i.test(menuItem.name)) defaultCourse = 'STARTERS';
+      else if (/dessert|ice cream|sweet/i.test(cat) || /brownie|jamun|halwa|kulfi/i.test(menuItem.name)) defaultCourse = 'DESSERTS';
+      return [...previous, { itemKey, menuItemId:menuItem.menuItemId, name:menuItem.name + (portion ? ` (${portion.name || portion.label})` : ''), image:menuItem.image, vegNonveg:menuItem.vegNonveg, basePrice:effectiveBasePrice, price, quantity:count, customization, portion, addOns, specialInstruction, course: defaultCourse, lineTotal:count*price }];
     });
   }, []);
   const updateQuantity = useCallback((itemKey, delta) => setItems(previous=>previous.map(item=>item.itemKey === itemKey ? { ...item, quantity:Math.min(99,item.quantity+delta), lineTotal:Math.min(99,item.quantity+delta)*item.price } : item).filter(item=>item.quantity>0)), []);
+  const updateItemCourse = useCallback((itemKey, course) => setItems(previous => previous.map(item => item.itemKey === itemKey ? { ...item, course } : item)), []);
   const removeItem = useCallback(itemKey => setItems(previous=>previous.filter(item=>item.itemKey!==itemKey)), []);
   const clearCart = useCallback(() => setItems([]), []);
   const subtotal = items.reduce((sum,item)=>sum+item.lineTotal,0);
@@ -68,7 +75,7 @@ export function CartProvider({ children }) {
   const deliveryFee = orderSource==='DELIVERY' && items.length ? 40 : 0;
   const total = subtotal + tax + deliveryFee;
   const itemCount = items.reduce((sum,item)=>sum+item.quantity,0);
-  return <CartContext.Provider value={{ items, itemCount, subtotal, tax, deliveryFee, total, tableInfo, setTableInfo, orderSource, setOrderSource, switchOrderContext, addItem, updateQuantity, removeItem, clearCart }}>{children}</CartContext.Provider>;
+  return <CartContext.Provider value={{ items, itemCount, subtotal, tax, deliveryFee, total, tableInfo, setTableInfo, orderSource, setOrderSource, switchOrderContext, addItem, updateQuantity, updateItemCourse, removeItem, clearCart }}>{children}</CartContext.Provider>;
 }
 export function useCart() {
   const context = useContext(CartContext);

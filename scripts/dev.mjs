@@ -7,5 +7,5 @@ const launch=(cmd,args,cwd,extra={})=>{const child=spawn(cmd,args,{cwd,stdio:'in
 const stop=()=>{for(const child of processes)child.kill('SIGTERM');};
 process.on('SIGINT',()=>{stop();process.exit(0);});process.on('SIGTERM',()=>{stop();process.exit(0);});
 launch('dotnet',['run','--no-launch-profile','--urls','http://127.0.0.1:5050'],path.join(root,'backend'),{ASPNETCORE_ENVIRONMENT:'Development'});
-launch('npm',['run','dev','--','--host','127.0.0.1'],path.join(root,'frontend'));
+launch('npm',['run','dev','--','--host'],path.join(root,'frontend'));
 console.log('\nBistro & Bloom: website http://127.0.0.1:5173 · POS http://127.0.0.1:5173/pos\n');
