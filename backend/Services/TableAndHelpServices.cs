@@ -324,6 +324,193 @@ public class TableService : ITableService
             table.AssignedWaiter?.Name
         );
     }
+
+    public async Task<bool> UpdateTablePositionAsync(Guid tableId, UpdateTablePositionDto request)
+    {
+        var table = await _db.Tables.FindAsync(tableId);
+        if (table == null) return false;
+
+        table.PositionX = request.PositionX;
+        table.PositionY = request.PositionY;
+        if (!string.IsNullOrWhiteSpace(request.Shape)) table.Shape = request.Shape.Trim().ToUpperInvariant();
+        if (!string.IsNullOrWhiteSpace(request.DiningArea)) table.DiningArea = request.DiningArea.Trim().ToLowerInvariant();
+        table.UpdatedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync();
+
+        await _notifications.NotifyRoleAsync(
+            table.RestaurantId,
+            UserRoles.Receptionist,
+            "TABLE_POSITION_UPDATED",
+            "Table layout updated",
+            $"Table {table.TableNumber} position updated on floor map.",
+            new { TableId = table.TableId, TableNumber = table.TableNumber, PositionX = table.PositionX, PositionY = table.PositionY }
+        );
+
+        return true;
+    }
+
+    public async Task<DiningSessionDto?> GetOrCreateActiveSessionAsync(Guid tableId)
+    {
+        var table = await _db.Tables.FindAsync(tableId);
+        if (table == null) return null;
+
+        DiningSession? session = null;
+        try
+        {
+            session = await _db.DiningSessions
+                .Where(s => s.TableId == tableId && s.Status == "ACTIVE")
+                .OrderByDescending(s => s.CreatedAt)
+                .FirstOrDefaultAsync();
+
+            if (session == null)
+            {
+                var earliestActiveOrder = await _db.Orders
+                    .Where(o => o.TableId == tableId && o.Status != OrderStatuses.Cancelled && o.CreatedAt >= DateTime.UtcNow.AddHours(-6))
+                    .OrderBy(o => o.CreatedAt)
+                    .FirstOrDefaultAsync();
+
+                session = new DiningSession
+                {
+                    RestaurantId = table.RestaurantId,
+                    TableId = tableId,
+                    SessionCode = $"SES-{table.TableNumber}-{DateTime.UtcNow:MMddHHmm}",
+                    Status = "ACTIVE",
+                    CreatedAt = earliestActiveOrder != null ? earliestActiveOrder.CreatedAt.AddSeconds(-1) : DateTime.UtcNow
+                };
+                _db.DiningSessions.Add(session);
+                await _db.SaveChangesAsync();
+            }
+        }
+        catch
+        {
+            _db.ChangeTracker.Clear();
+            session = new DiningSession
+            {
+                SessionId = Guid.NewGuid(),
+                RestaurantId = table.RestaurantId,
+                TableId = tableId,
+                SessionCode = $"SES-{table.TableNumber}-{DateTime.UtcNow:MMddHHmm}",
+                Status = "ACTIVE",
+                CreatedAt = DateTime.UtcNow
+            };
+        }
+
+        var orders = await _db.Orders
+            .Include(o => o.Items)
+            .Where(o => o.TableId == tableId && 
+                       (o.SessionId == session.SessionId || 
+                        o.CreatedAt >= session.CreatedAt ||
+                        (o.Status != OrderStatuses.Cancelled && o.CreatedAt >= DateTime.UtcNow.AddHours(-6))))
+            .OrderByDescending(o => o.CreatedAt)
+            .ToListAsync();
+
+        try
+        {
+            var isPersisted = await _db.DiningSessions.AnyAsync(s => s.SessionId == session.SessionId);
+            if (isPersisted)
+            {
+                var anySessionMissing = false;
+                foreach (var ord in orders)
+                {
+                    if (!ord.SessionId.HasValue)
+                    {
+                        ord.SessionId = session.SessionId;
+                        anySessionMissing = true;
+                    }
+                }
+                if (anySessionMissing)
+                {
+                    await _db.SaveChangesAsync();
+                }
+            }
+        }
+        catch
+        {
+            _db.ChangeTracker.Clear();
+        }
+
+        var orderIds = orders.Select(o => o.OrderId).ToList();
+        var payments = await _db.Payments
+            .Where(p => p.OrderId.HasValue && orderIds.Contains(p.OrderId.Value) && p.Status == PaymentStatuses.Paid)
+            .ToListAsync();
+
+        var paymentsByOrder = payments
+            .GroupBy(p => p.OrderId!.Value)
+            .ToDictionary(g => g.Key, g => g.Sum(p => p.Amount));
+
+        var orderDtos = orders.Select(o => {
+            var paid = paymentsByOrder.TryGetValue(o.OrderId, out var pAmt) ? pAmt : 0m;
+            var paymentStatus = paid >= (o.Total - 0.05m) ? "PAID" : paid > 0 ? "PARTIAL" : "UNPAID";
+            return new OrderDto(
+                o.OrderId,
+                o.OrderNumber,
+                o.RestaurantId,
+                o.CustomerId,
+                o.TableId,
+                table.TableNumber,
+                o.Source,
+                o.Status,
+                o.Subtotal,
+                o.Tax,
+                o.Discount,
+                o.DeliveryFee,
+                o.Total,
+                o.SpecialInstructions,
+                o.RejectionReason,
+                o.CancellationReason,
+                o.CancelledBy,
+                o.CreatedAt,
+                o.Items.Select(i => new OrderItemDto(
+                    i.OrderItemId,
+                    i.MenuItemId,
+                    i.ItemNameSnapshot,
+                    i.PriceSnapshot,
+                    i.Quantity,
+                    i.LineTotal,
+                    i.Customization,
+                    i.SpecialInstruction
+                )).ToList(),
+                PaymentStatus: paymentStatus,
+                PaidAmount: paid,
+                EstimatedPrepTimeMinutes: o.EstimatedPrepTimeMinutes,
+                EstimatedReadyAt: o.EstimatedReadyAt,
+                SessionId: session.SessionId
+            );
+        }).ToList();
+
+        return new DiningSessionDto(
+            session.SessionId,
+            session.RestaurantId,
+            session.TableId,
+            table.TableNumber,
+            string.IsNullOrWhiteSpace(session.SessionCode) ? $"SES-{table.TableNumber}-{session.CreatedAt:MMddHHmm}" : session.SessionCode,
+            session.Status,
+            session.CreatedAt,
+            orderDtos
+        );
+    }
+
+    public async Task<bool> CloseSessionAsync(Guid tableId)
+    {
+        try
+        {
+            var session = await _db.DiningSessions
+                .Where(s => s.TableId == tableId && s.Status == "ACTIVE")
+                .FirstOrDefaultAsync();
+
+            if (session == null) return false;
+
+            session.Status = "CLOSED";
+            session.ClosedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync();
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 }
 
 public class HelpRequestService : IHelpRequestService

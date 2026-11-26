@@ -2,12 +2,11 @@ import React, { useState } from 'react';
 import { api } from '../../services/api';
 import { tableTitle } from '../../services/tablePresentation';
 import { useNotification } from '../../context/NotificationContext';
-import { HelpCircle, GlassWater, UtensilsCrossed, Flame, Candy, UserCheck, X, Check, ScrollText, Sparkles, Receipt } from 'lucide-react';
+import { HelpCircle, GlassWater, UtensilsCrossed, Flame, Candy, UserCheck, X, Check } from 'lucide-react';
 
 export default function CustomerHelpModal({ isOpen, onClose, tableNumber, table }) {
   const { addToast } = useNotification();
   const [selectedIssue, setSelectedIssue] = useState('');
-  const [selectedType, setSelectedType] = useState('CUSTOM');
   const [customText, setCustomText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [statusMessage, setStatusMessage] = useState(null);
@@ -16,39 +15,14 @@ export default function CustomerHelpModal({ isOpen, onClose, tableNumber, table 
 
   const tableName = tableTitle(table || { tableNumber });
 
-  const QUICK_SERVICES = [
-    { id: 'water', label: 'Water', icon: GlassWater, type: 'WATER', message: 'Requested fresh drinking water' },
-    { id: 'tissues', label: 'Tissues', icon: ScrollText, type: 'TISSUES', message: 'Requested fresh napkins & tissues' },
-    { id: 'clean', label: 'Table Cleaning', icon: Sparkles, type: 'TABLE_CLEANING', message: 'Requested table cleaning & wipe' },
-    { id: 'bill', label: 'Get Bill', icon: Receipt, type: 'BILL', message: 'Requested dining bill & payment' }
-  ];
-
   const HELP_OPTIONS = [
-    { id: 'cutlery', label: 'Need cutlery / extra plates', icon: UtensilsCrossed, type: 'CUSTOM' },
-    { id: 'waiter', label: 'Need waiter assistance', icon: UserCheck, type: 'CUSTOM' },
-    { id: 'sweet', label: 'Which food is sweet?', icon: Candy, type: 'CUSTOM' },
-    { id: 'spicy', label: 'Which food is spicy?', icon: Flame, type: 'CUSTOM' }
+    { id: 'water', label: 'Need water', icon: GlassWater },
+    { id: 'cutlery', label: 'Need cutlery / extra plates', icon: UtensilsCrossed },
+    { id: 'waiter', label: 'Need waiter assistance', icon: UserCheck },
+    { id: 'sweet', label: 'Which food is sweet?', icon: Candy },
+    { id: 'spicy', label: 'Which food is spicy?', icon: Flame },
+    { id: 'general', label: 'Need general assistance / recommend food', icon: HelpCircle }
   ];
-
-  const sendQuickService = async (item) => {
-    setIsSubmitting(true);
-    try {
-      await api.createHelpRequest(tableNumber, item.message, item.type);
-      setStatusMessage(`${item.label} request sent! A waiter is on the way.`);
-      addToast(`${item.label} request for ${tableName} sent to floor staff.`, 'info');
-      setTimeout(() => {
-        setIsSubmitting(false);
-        setStatusMessage(null);
-        setSelectedIssue('');
-        setSelectedType('CUSTOM');
-        setCustomText('');
-        onClose();
-      }, 1500);
-    } catch {
-      setIsSubmitting(false);
-      addToast('Failed to send help request. Please try again.', 'error');
-    }
-  };
 
   const handleSubmit = async () => {
     const finalMsg = customText.trim() || selectedIssue;
@@ -56,14 +30,13 @@ export default function CustomerHelpModal({ isOpen, onClose, tableNumber, table 
 
     setIsSubmitting(true);
     try {
-      await api.createHelpRequest(tableNumber, finalMsg, selectedType);
+      await api.createHelpRequest(tableNumber, finalMsg);
       setStatusMessage('Help request sent! A waiter has been alerted.');
       addToast(`Assistance request for ${tableName} sent to floor staff.`, 'info');
       setTimeout(() => {
         setIsSubmitting(false);
         setStatusMessage(null);
         setSelectedIssue('');
-        setSelectedType('CUSTOM');
         setCustomText('');
         onClose();
       }, 1500);
@@ -89,7 +62,7 @@ export default function CustomerHelpModal({ isOpen, onClose, tableNumber, table 
           </div>
           <div>
             <h3 className="text-lg font-bold text-slate-900">{tableName} Assistance</h3>
-            <p className="text-xs text-slate-500">Tap for instant 1-touch service or custom request</p>
+            <p className="text-xs text-slate-500">Tap your request to notify floor staff immediately</p>
           </div>
         </div>
 
@@ -102,55 +75,28 @@ export default function CustomerHelpModal({ isOpen, onClose, tableNumber, table 
           </div>
         ) : (
           <div className="space-y-4">
-            {/* Quick 1-touch Actions */}
-            <div>
-              <p className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">1-Touch Quick Service</p>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {QUICK_SERVICES.map((item) => {
-                  const Icon = item.icon;
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      disabled={isSubmitting}
-                      onClick={() => sendQuickService(item)}
-                      className="flex flex-col items-center justify-center p-2.5 rounded-xl border border-slate-200 bg-slate-50/70 hover:border-brand-500 hover:bg-brand-50 hover:text-brand-700 text-slate-700 text-xs font-semibold transition-all active:scale-95 text-center gap-1.5"
-                    >
-                      <Icon className="w-5 h-5 text-brand-600" />
-                      <span className="leading-tight">{item.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* General Requests */}
-            <div>
-              <p className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Common Inquiries</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {HELP_OPTIONS.map((opt) => {
-                  const Icon = opt.icon;
-                  const isSelected = selectedIssue === opt.label;
-                  return (
-                    <button
-                      key={opt.id}
-                      onClick={() => {
-                        setSelectedIssue(opt.label);
-                        setSelectedType(opt.type);
-                        setCustomText('');
-                      }}
-                      className={`flex items-center space-x-2.5 p-2.5 rounded-xl border text-left text-xs font-medium transition-all ${
-                        isSelected
-                          ? 'border-brand-500 bg-brand-50 text-brand-700 font-semibold ring-1 ring-brand-500'
-                          : 'border-slate-200 hover:border-slate-300 text-slate-700 bg-slate-50/50'
-                      }`}
-                    >
-                      <Icon className="w-4 h-4 flex-shrink-0 text-brand-500" />
-                      <span>{opt.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {HELP_OPTIONS.map((opt) => {
+                const Icon = opt.icon;
+                const isSelected = selectedIssue === opt.label;
+                return (
+                  <button
+                    key={opt.id}
+                    onClick={() => {
+                      setSelectedIssue(opt.label);
+                      setCustomText('');
+                    }}
+                    className={`flex items-center space-x-2.5 p-3 rounded-xl border text-left text-xs font-medium transition-all ${
+                      isSelected
+                        ? 'border-brand-500 bg-brand-50 text-brand-700 font-semibold ring-1 ring-brand-500'
+                        : 'border-slate-200 hover:border-slate-300 text-slate-700 bg-slate-50/50'
+                    }`}
+                  >
+                    <Icon className="w-4 h-4 flex-shrink-0 text-brand-500" />
+                    <span>{opt.label}</span>
+                  </button>
+                );
+              })}
             </div>
 
             <div>
@@ -162,7 +108,6 @@ export default function CustomerHelpModal({ isOpen, onClose, tableNumber, table 
                 onChange={(e) => {
                   setCustomText(e.target.value);
                   setSelectedIssue('');
-                  setSelectedType('CUSTOM');
                 }}
                 rows={2}
                 placeholder="e.g. Please bring extra ice, mild sauce..."

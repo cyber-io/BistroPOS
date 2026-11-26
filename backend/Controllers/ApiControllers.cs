@@ -387,6 +387,83 @@ public class TablesController : ControllerBase
             return BadRequest(new { message = ex.Message });
         }
     }
+
+    [HttpGet("{id:guid}/session")]
+    public async Task<IActionResult> GetTableSession(Guid id)
+    {
+        var session = await _tables.GetOrCreateActiveSessionAsync(id);
+        if (session == null) return NotFound();
+        return Ok(session);
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager},{UserRoles.Receptionist}")]
+    [HttpPost("{id:guid}/session/close")]
+    public async Task<IActionResult> CloseTableSession(Guid id)
+    {
+        var success = await _tables.CloseSessionAsync(id);
+        return Ok(new { success });
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager},{UserRoles.Receptionist}")]
+    [HttpPatch("{id:guid}/position")]
+    public async Task<IActionResult> UpdatePosition(Guid id, [FromBody] UpdateTablePositionDto request)
+    {
+        var success = await _tables.UpdateTablePositionAsync(id, request);
+        if (!success) return NotFound();
+        return Ok(new { success = true, message = "Table floor position updated successfully." });
+    }
+}
+
+[ApiController]
+[Route("api/[controller]")]
+public class InventoryController : ControllerBase
+{
+    private readonly IInventoryService _inventory;
+    private readonly ITenantContext _tenant;
+
+    public InventoryController(IInventoryService inventory, ITenantContext tenant)
+    {
+        _inventory = inventory;
+        _tenant = tenant;
+    }
+
+    [Authorize(Policy = "OperationalStaff")]
+    [HttpGet]
+    public async Task<IActionResult> GetInventory([FromQuery] Guid? restaurantId)
+    {
+        var targetId = _tenant.IsSuperAdmin
+            ? (restaurantId ?? _tenant.RestaurantId ?? UserProvisioning.DefaultRestaurantId)
+            : _tenant.GetRequiredRestaurantId();
+        var items = await _inventory.GetInventoryAsync(targetId);
+        return Ok(items);
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager},{UserRoles.Kitchen}")]
+    [HttpPost]
+    public async Task<IActionResult> CreateItem([FromBody] CreateInventoryItemDto request)
+    {
+        _tenant.EnforceTenantAccess(request.RestaurantId);
+        var created = await _inventory.CreateItemAsync(request);
+        return CreatedAtAction(nameof(GetInventory), new { restaurantId = created.RestaurantId }, created);
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager},{UserRoles.Kitchen},{UserRoles.Receptionist}")]
+    [HttpPatch("{id:guid}/stock")]
+    public async Task<IActionResult> UpdateStock(Guid id, [FromBody] UpdateStockDto request)
+    {
+        var success = await _inventory.UpdateStockAsync(id, request.QuantityChange, request.Reason);
+        if (!success) return NotFound();
+        return Ok(new { success = true, message = "Stock updated successfully." });
+    }
+
+    [Authorize(Policy = "OperationalStaff")]
+    [HttpPost("shortage")]
+    public async Task<IActionResult> ReportShortage([FromBody] ReportShortageDto request)
+    {
+        _tenant.EnforceTenantAccess(request.RestaurantId);
+        var success = await _inventory.ReportShortageAsync(request);
+        return Ok(new { success = true, message = "Shortage alert processed." });
+    }
 }
 
 [ApiController]
