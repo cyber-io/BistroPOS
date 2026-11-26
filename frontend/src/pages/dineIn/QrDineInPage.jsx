@@ -198,9 +198,10 @@ export default function QrDineInPage() {
       }
       if (!currentTable) throw new Error('Invalid table QR code. Please scan the active QR code located on your table.');
       if (currentTable.status === 'OUT_OF_SERVICE') throw new Error('This table is currently out of service. Please ask our team for assistance.');
+      const targetResId = cleanRestaurantId || rest.restaurantId;
       const [cats, itemsList, orders, session] = await Promise.all([
-        api.getCategories(),
-        api.getMenuItems(),
+        api.getCategories(targetResId),
+        api.getMenuItems(targetResId),
         api.getOrders().catch(() => []),
         api.getTableSession(currentTable.tableId).catch(() => null)
       ]);

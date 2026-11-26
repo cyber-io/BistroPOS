@@ -8,7 +8,18 @@ const DEFAULT_RESTAURANT_ID = metaEnv.VITE_RESTAURANT_ID || 'a0000000-0000-0000-
 const TOKEN_KEY = 'rs_api_session';
 const RESOURCE_KEY = 'rs_customer_order_access';
 const HELP_KEY = 'rs_customer_help_access';
+const LEGACY_DUMMY_RESTAURANTS = new Set(['11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222']);
 let restaurantId = DEFAULT_RESTAURANT_ID;
+try {
+  if (typeof localStorage !== 'undefined') {
+    const saved = localStorage.getItem('rs_active_restaurant_id');
+    if (saved && !LEGACY_DUMMY_RESTAURANTS.has(saved)) {
+      restaurantId = saved;
+    } else if (saved) {
+      localStorage.removeItem('rs_active_restaurant_id');
+    }
+  }
+} catch {}
 let restaurantCache = null;
 const listeners = new Set();
 let pollTimer;
@@ -78,7 +89,12 @@ export function setAuthToken(token) {
         restaurantId = claims.restaurant_id;
       } else {
         const saved = localStorage.getItem('rs_active_restaurant_id');
-        if (saved) restaurantId = saved;
+        if (saved && !LEGACY_DUMMY_RESTAURANTS.has(saved)) {
+          restaurantId = saved;
+        } else {
+          restaurantId = DEFAULT_RESTAURANT_ID;
+          if (saved && typeof localStorage !== 'undefined') localStorage.removeItem('rs_active_restaurant_id');
+        }
       }
     } catch { /* the server validates the token before any protected operation */ }
   }
@@ -339,12 +355,12 @@ export const api = {
     return result;
   }),
   validateQr: qrCode => request(`/qr/validate/${encodeURIComponent(qrCode)}`),
-  getCategories: async () => (await request(`/menu/categories${query({ restaurantId })}`)).map(category => ({ ...category, icon: ({ Pizza: '🍕', Burger: '🍔', Chinese: '🥢', Indian: '🍛', 'South Indian': '🥞', 'North Indian': '🥘', Desserts: '🍨', Beverages: '☕' })[category.name] || '🍽️' })),
+  getCategories: async (overrideResId) => (await request(`/menu/categories${query({ restaurantId: overrideResId || restaurantId })}`)).map(category => ({ ...category, icon: ({ Pizza: '🍕', Burger: '🍔', Chinese: '🥢', Indian: '🍛', 'South Indian': '🥞', 'North Indian': '🥘', Desserts: '🍨', Beverages: '☕' })[category.name] || '🍽️' })),
   createCategory: data => request(`/menu/categories`, { method: 'POST', body: { restaurantId, ...data } }),
   updateCategory: (id, data) => request(`/menu/categories/${id}`, { method: 'PUT', body: data }),
   deleteCategory: id => request(`/menu/categories/${id}`, { method: 'DELETE' }),
 
-  getMenuItems: async () => (await request(`/menu/items${query({ restaurantId })}`)).map(item => ({
+  getMenuItems: async (overrideResId) => (await request(`/menu/items${query({ restaurantId: overrideResId || restaurantId })}`)).map(item => ({
     ...item,
     price: Number(item.price),
     vegNonveg: item.vegNonveg || item.vegNonVeg,
