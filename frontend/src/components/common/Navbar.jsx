@@ -50,25 +50,133 @@ export default function Navbar({ onOpenCart }) {
     setMobileMenuOpen(false);
     navigate('/login');
   };
+
+  const [activeSection, setActiveSection] = useState('');
+
+  // Scroll spy to highlight active section on home page
+  useEffect(() => {
+    if (!isHome) {
+      setActiveSection('');
+      return;
+    }
+
+    const onScroll = () => {
+      const scrollPos = window.scrollY + 140;
+      const visitEl = document.getElementById('visit');
+      const storyEl = document.getElementById('our-story');
+
+      if (visitEl && scrollPos >= visitEl.offsetTop) {
+        setActiveSection('#visit');
+      } else if (storyEl && scrollPos >= storyEl.offsetTop) {
+        setActiveSection('#our-story');
+      } else {
+        setActiveSection('');
+      }
+    };
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [isHome]);
+
+  const handleNavigation = (path, hash = '') => {
+    closeNavigation();
+    if (isHome) {
+      if (hash) {
+        const el = document.getElementById(hash.replace('#', ''));
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth' });
+          window.history.pushState(null, '', `/${hash}`);
+          return;
+        }
+      } else {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        window.history.pushState(null, '', '/');
+        return;
+      }
+    }
+
+    if (path === '/') {
+      navigate(hash ? `/${hash}` : '/');
+      if (!hash) {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    } else {
+      navigate(path);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
   const navClass = active => `website-nav-link${active ? ' website-nav-link--active' : ''}`;
-  const homeActive = isHome && !location.hash;
+  const currentHash = isHome ? (activeSection || location.hash) : location.hash;
+  const homeActive = isHome && !currentHash;
   const menuActive = location.pathname === '/menu' || location.pathname === '/delivery' || location.pathname === '/takeaway';
-  const storyActive = isHome && location.hash === '#our-story';
-  const visitActive = isHome && location.hash === '#visit';
+  const storyActive = isHome && currentHash === '#our-story';
+  const visitActive = isHome && currentHash === '#visit';
 
   const navigation = (
     <>
-      <Link to="/" className={navClass(homeActive)} aria-current={homeActive ? 'page' : undefined} onClick={closeNavigation}>Home</Link>
-      <Link to="/menu" className={navClass(menuActive)} aria-current={menuActive ? 'page' : undefined} onClick={closeNavigation}>Our menu</Link>
-      <a href="/#our-story" className={navClass(storyActive)} aria-current={storyActive ? 'location' : undefined} onClick={closeNavigation}>Our story</a>
-      <a href="/#visit" className={navClass(visitActive)} aria-current={visitActive ? 'location' : undefined} onClick={closeNavigation}>Visit us</a>
+      <Link
+        to="/"
+        className={navClass(homeActive)}
+        aria-current={homeActive ? 'page' : undefined}
+        onClick={(e) => {
+          e.preventDefault();
+          handleNavigation('/', '');
+        }}
+      >
+        Home
+      </Link>
+      <Link
+        to="/menu"
+        className={navClass(menuActive)}
+        aria-current={menuActive ? 'page' : undefined}
+        onClick={(e) => {
+          e.preventDefault();
+          handleNavigation('/menu', '');
+        }}
+      >
+        Our menu
+      </Link>
+      <Link
+        to="/#our-story"
+        className={navClass(storyActive)}
+        aria-current={storyActive ? 'location' : undefined}
+        onClick={(e) => {
+          e.preventDefault();
+          handleNavigation('/', '#our-story');
+        }}
+      >
+        Our story
+      </Link>
+      <Link
+        to="/#visit"
+        className={navClass(visitActive)}
+        aria-current={visitActive ? 'location' : undefined}
+        onClick={(e) => {
+          e.preventDefault();
+          handleNavigation('/', '#visit');
+        }}
+      >
+        Visit
+      </Link>
     </>
   );
 
   return (
     <header className="website-header">
       <div className="website-header-inner">
-        <Link to="/" className="website-brand" aria-label="Bistro and Bloom home">
+        <Link
+          to="/"
+          className="website-brand"
+          aria-label="Bistro and Bloom home"
+          onClick={(e) => {
+            if (isHome) {
+              e.preventDefault();
+              handleNavigation('/', '');
+            }
+          }}
+        >
           <svg className="website-brand-mark" width="40" height="40" viewBox="0 0 44 44" fill="none" aria-hidden="true">
             <circle cx="22" cy="14" r="5.5" stroke="#AF905C" strokeWidth="1.6" />
             <circle cx="22" cy="30" r="5.5" stroke="#AF905C" strokeWidth="1.6" />

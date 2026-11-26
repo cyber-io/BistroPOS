@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { ArrowRight, ArrowUpRight, Clock, Coffee, Leaf, MapPin, Phone, Mail, Plus, QrCode, Truck, UtensilsCrossed } from 'lucide-react';
 import { api, subscribeRealtimeEvents } from '../../services/api';
 import ItemCustomizationModal from '../../components/common/ItemCustomizationModal';
@@ -29,6 +29,7 @@ const formatHour = value => {
 const HERO_DISH_IMAGE = '/images/reference/salad-bowl.webp';
 
 export default function HomePage() {
+  const location = useLocation();
   const [restaurant, setRestaurant] = useState(null);
   const [popularItems, setPopularItems] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -39,6 +40,26 @@ export default function HomePage() {
 
   const { addItem, setOrderSource } = useCart();
   const { addToast } = useNotification();
+
+  // Smooth scroll handler for in-page navigation (e.g. #our-story, #visit)
+  useEffect(() => {
+    if (location.hash) {
+      const targetId = location.hash.replace('#', '');
+      const scrollToSection = () => {
+        const el = document.getElementById(targetId);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth' });
+        }
+      };
+      scrollToSection();
+      const t1 = setTimeout(scrollToSection, 150);
+      const t2 = setTimeout(scrollToSection, 450);
+      return () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+      };
+    }
+  }, [location.pathname, location.hash]);
 
   useEffect(() => { setOrderSource('DELIVERY'); }, [setOrderSource]);
 
