@@ -113,6 +113,29 @@ export default function PosShell({ children, alertCount = 0, onAlerts, menuDots 
     ? 'Kitchen'
     : 'Waiter';
 
+  if (role !== 'SUPER_ADMIN' && currentRestaurant?.status === 'INACTIVE') {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center bg-slate-50">
+        <div className="max-w-md w-full bg-white rounded-3xl p-8 shadow-xl border border-red-100 flex flex-col items-center">
+          <div className="w-16 h-16 rounded-2xl bg-red-50 border border-red-200 text-red-600 flex items-center justify-center font-bold text-3xl mb-4 shadow-sm">
+            🚫
+          </div>
+          <h2 className="text-2xl font-black text-slate-900 mb-2">Restaurant Suspended</h2>
+          <p className="text-sm text-slate-600 mb-6 leading-relaxed">
+            <strong>{currentRestaurant?.name || 'This restaurant'}</strong> has been deactivated or suspended by platform administration.
+            Staff access to Manager POS, kitchen, waiter, and receptionist workspaces is currently disabled.
+          </p>
+          <button
+            onClick={signOut}
+            className="w-full inline-flex items-center justify-center py-3 px-5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-black text-sm shadow-lg shadow-red-500/25 transition-all cursor-pointer"
+          >
+            Sign Out
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={`pos-app ${dark ? 'pos-dark' : ''}`}>
       <header className="pos-topbar">

@@ -174,8 +174,20 @@ public class RestaurantsController : ControllerBase
     {
         var restaurant = await _db.Restaurants.FindAsync(id);
         if (restaurant == null) return NotFound();
-        restaurant.Status = dto.Status.ToUpperInvariant();
+        var newStatus = dto.Status.ToUpperInvariant();
+        restaurant.Status = newStatus;
         restaurant.UpdatedAt = DateTime.UtcNow;
+
+        // Cascade status to all staff users belonging to this restaurant (except Super Admin)
+        var staffUsers = await _db.Users
+            .Where(u => u.RestaurantId == id && u.Role != UserRoles.SuperAdmin)
+            .ToListAsync();
+        foreach (var staff in staffUsers)
+        {
+            staff.Status = newStatus;
+            staff.UpdatedAt = DateTime.UtcNow;
+        }
+
         await _db.SaveChangesAsync();
         return Ok(restaurant);
     }

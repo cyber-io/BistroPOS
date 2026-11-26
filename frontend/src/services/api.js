@@ -127,7 +127,13 @@ async function request(path, { method = 'GET', body, accessToken, signal } = {})
     if ([429, 502, 503].includes(response.status)) {
       rateLimitBackoffUntil = Date.now() + 15000;
     }
-    if (response.status === 401 && token) {
+    const isInactiveOrSuspended = response.status === 403 && (
+      data?.title === 'Restaurant Inactive' ||
+      data?.Title === 'Restaurant Inactive' ||
+      data?.title === 'Account Deactivated' ||
+      data?.Title === 'Account Deactivated'
+    );
+    if ((response.status === 401 || isInactiveOrSuspended) && token) {
       setAuthToken(null);
       window.dispatchEvent(new Event('rs_session_expired'));
     }

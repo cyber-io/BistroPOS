@@ -459,7 +459,16 @@ public class AuthService(
         if (string.Equals(user.Status, "DISABLED", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(user.Status, "INACTIVE", StringComparison.OrdinalIgnoreCase))
         {
-            return new(false, "", null, "This account has been disabled by management.");
+            return new(false, "", null, "This staff account has been deactivated or suspended by platform administration.");
+        }
+
+        if (user.Role != UserRoles.SuperAdmin && user.RestaurantId.HasValue)
+        {
+            var restaurant = await db.Restaurants.FindAsync(user.RestaurantId.Value);
+            if (restaurant != null && string.Equals(restaurant.Status, "INACTIVE", StringComparison.OrdinalIgnoreCase))
+            {
+                return new(false, "", null, $"The restaurant '{restaurant.Name}' is currently inactive or suspended. All staff access (Manager, POS, Kitchen, Waiter, Receptionist) has been disabled by platform administration.");
+            }
         }
 
         await audit.LogAsync(user.RestaurantId, user.UserId, user.Role, "USER_LOGIN", "users");
