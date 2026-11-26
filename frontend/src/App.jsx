@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation, Link } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { CartProvider } from './context/CartContext';
@@ -9,22 +9,25 @@ import Navbar from './components/common/Navbar';
 import ToastContainer from './components/common/ToastContainer';
 import CartDrawer from './components/common/CartDrawer';
 
-// Pages
+// Pages: HomePage is loaded eagerly for instant first contentful paint
 import HomePage from './pages/public/HomePage';
-import PublicMenuPage from './pages/public/PublicMenuPage';
-import DeliveryPage from './pages/public/DeliveryPage';
-import TakeawayPage from './pages/public/TakeawayPage';
-import BookTablePage from './pages/public/BookTablePage';
-import TrackOrderPage from './pages/public/TrackOrderPage';
-import CustomerProfilePage from './pages/public/CustomerProfilePage';
-import QrDineInPage from './pages/dineIn/QrDineInPage';
-import KitchenDashboard from './pages/kitchen/KitchenDashboard';
-import WaiterDashboard from './pages/waiter/WaiterDashboard';
-import ReceptionistDashboard from './pages/receptionist/ReceptionistDashboard';
-import LoginPage from './pages/auth/LoginPage';
-import CustomerLoginPage from './pages/auth/CustomerLoginPage';
-import PosWorkspace from './pages/pos/PosWorkspace';
-import SuperAdminDashboard from './pages/admin/SuperAdminDashboard';
+
+// Other route components are code-split & lazy-loaded on demand to reduce initial bundle size
+const PublicMenuPage = lazy(() => import('./pages/public/PublicMenuPage'));
+const DeliveryPage = lazy(() => import('./pages/public/DeliveryPage'));
+const TakeawayPage = lazy(() => import('./pages/public/TakeawayPage'));
+const BookTablePage = lazy(() => import('./pages/public/BookTablePage'));
+const TrackOrderPage = lazy(() => import('./pages/public/TrackOrderPage'));
+const CustomerProfilePage = lazy(() => import('./pages/public/CustomerProfilePage'));
+const QrDineInPage = lazy(() => import('./pages/dineIn/QrDineInPage'));
+const KitchenDashboard = lazy(() => import('./pages/kitchen/KitchenDashboard'));
+const WaiterDashboard = lazy(() => import('./pages/waiter/WaiterDashboard'));
+const ReceptionistDashboard = lazy(() => import('./pages/receptionist/ReceptionistDashboard'));
+const LoginPage = lazy(() => import('./pages/auth/LoginPage'));
+const CustomerLoginPage = lazy(() => import('./pages/auth/CustomerLoginPage'));
+const PosWorkspace = lazy(() => import('./pages/pos/PosWorkspace'));
+const SuperAdminDashboard = lazy(() => import('./pages/admin/SuperAdminDashboard'));
+
 import PosShell from './components/pos/PosShell';
 import { Spinner } from './components/pos/PosUI';
 import './styles/website.css';
@@ -165,7 +168,8 @@ function MainApp() {
 
       {/* 4. Main Route View */}
       <div className="flex-1">
-        <Routes>
+        <Suspense fallback={<div className="min-h-[50vh] flex items-center justify-center"><Spinner /></div>}>
+          <Routes>
           {/* Customer & Staff Authentication Routes */}
           <Route path="/login" element={<CustomerLoginPage />} />
           <Route path="/pos/login" element={<LoginPage />} />
@@ -244,6 +248,7 @@ function MainApp() {
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </Suspense>
       </div>
     </div>
   );
