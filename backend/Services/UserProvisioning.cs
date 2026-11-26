@@ -51,6 +51,9 @@ public static class UserProvisioning
             var devPasswordHash = BCrypt.Net.BCrypt.HashPassword(
                 Environment.GetEnvironmentVariable("DEV_DEMO_SEED_PASSWORD") ?? "Password@123");
 
+            const string fullOpeningHours = "{\"monday\": {\"open\": \"10:00\", \"close\": \"23:00\"}, \"tuesday\": {\"open\": \"10:00\", \"close\": \"23:00\"}, \"wednesday\": {\"open\": \"10:00\", \"close\": \"23:00\"}, \"thursday\": {\"open\": \"10:00\", \"close\": \"23:00\"}, \"friday\": {\"open\": \"10:00\", \"close\": \"23:30\"}, \"saturday\": {\"open\": \"10:00\", \"close\": \"23:30\"}, \"sunday\": {\"open\": \"10:00\", \"close\": \"23:00\"}}";
+            const string palaceOpeningHours = "{\"monday\": {\"open\": \"11:00\", \"close\": \"23:30\"}, \"tuesday\": {\"open\": \"11:00\", \"close\": \"23:30\"}, \"wednesday\": {\"open\": \"11:00\", \"close\": \"23:30\"}, \"thursday\": {\"open\": \"11:00\", \"close\": \"23:30\"}, \"friday\": {\"open\": \"11:00\", \"close\": \"23:30\"}, \"saturday\": {\"open\": \"11:00\", \"close\": \"23:30\"}, \"sunday\": {\"open\": \"11:00\", \"close\": \"23:30\"}}";
+
             var restaurantsToSeed = new[]
             {
                 new Restaurant
@@ -62,7 +65,7 @@ public static class UserProvisioning
                     Phone = "+91 98765 43210",
                     Email = "contact@sunrisecafe.com",
                     Status = "ACTIVE",
-                    OpeningHours = "{\"monday\": {\"open\": \"10:00\", \"close\": \"23:00\"}}",
+                    OpeningHours = fullOpeningHours,
                     Settings = "{\"tax_rate\": 0.05, \"delivery_fee\": 40.00, \"currency\": \"INR\"}"
                 },
                 new Restaurant
@@ -74,7 +77,7 @@ public static class UserProvisioning
                     Phone = "+91 98000 00001",
                     Email = "contact@royalpalace.com",
                     Status = "ACTIVE",
-                    OpeningHours = "{\"monday\": {\"open\": \"11:00\", \"close\": \"23:30\"}}",
+                    OpeningHours = palaceOpeningHours,
                     Settings = "{\"tax_rate\": 0.05, \"delivery_fee\": 50.00, \"currency\": \"INR\"}"
                 },
                 new Restaurant
@@ -86,16 +89,21 @@ public static class UserProvisioning
                     Phone = "+91 98000 00002",
                     Email = "contact@cityrestaurant.com",
                     Status = "ACTIVE",
-                    OpeningHours = "{\"monday\": {\"open\": \"10:00\", \"close\": \"23:00\"}}",
+                    OpeningHours = fullOpeningHours,
                     Settings = "{\"tax_rate\": 0.05, \"delivery_fee\": 40.00, \"currency\": \"INR\"}"
                 }
             };
 
             foreach (var r in restaurantsToSeed)
             {
-                if (!await db.Restaurants.AnyAsync(x => x.RestaurantId == r.RestaurantId))
+                var existing = await db.Restaurants.FirstOrDefaultAsync(x => x.RestaurantId == r.RestaurantId);
+                if (existing == null)
                 {
                     db.Restaurants.Add(r);
+                }
+                else if (string.IsNullOrWhiteSpace(existing.OpeningHours) || !existing.OpeningHours.Contains("sunday"))
+                {
+                    existing.OpeningHours = r.OpeningHours;
                 }
             }
             await db.SaveChangesAsync();

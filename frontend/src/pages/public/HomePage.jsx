@@ -7,9 +7,22 @@ import { useCart } from '../../context/CartContext';
 import { useNotification } from '../../context/NotificationContext';
 
 const weekdays = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+const DEFAULT_HOURS = {
+  monday: { open: '10:00', close: '23:00' },
+  tuesday: { open: '10:00', close: '23:00' },
+  wednesday: { open: '10:00', close: '23:00' },
+  thursday: { open: '10:00', close: '23:00' },
+  friday: { open: '10:00', close: '23:30' },
+  saturday: { open: '10:00', close: '23:30' },
+  sunday: { open: '10:00', close: '23:00' }
+};
+
 const formatHour = value => {
+  if (!value) return '';
   if (/AM|PM/i.test(value)) return value;
-  const [h, m] = value.split(':');
+  const parts = String(value).split(':');
+  if (parts.length < 2) return value;
+  const [h, m] = parts;
   return `${Number(h) % 12 || 12}:${m} ${Number(h) >= 12 ? 'PM' : 'AM'}`;
 };
 
@@ -45,9 +58,28 @@ export default function HomePage() {
     return () => { active = false; unsubscribe(); };
   }, [retry]);
 
-  const hours = Object.entries(restaurant?.openingHours || {})
-    .filter(([, value]) => value && typeof value === 'object' && value.open && value.close)
-    .sort(([a], [b]) => weekdays.indexOf(a) - weekdays.indexOf(b));
+  const rawHours = (restaurant?.openingHours && typeof restaurant.openingHours === 'object')
+    ? restaurant.openingHours
+    : {};
+
+  const normalizeDayValue = (val, dayName) => {
+    if (val && typeof val === 'object' && val.open && val.close) {
+      return `${formatHour(val.open)} – ${formatHour(val.close)}`;
+    }
+    if (typeof val === 'string' && val.includes('-')) {
+      const [o, c] = val.split('-');
+      return `${formatHour(o.trim())} – ${formatHour(c.trim())}`;
+    }
+    const def = DEFAULT_HOURS[dayName] || { open: '10:00', close: '23:00' };
+    return `${formatHour(def.open)} – ${formatHour(def.close)}`;
+  };
+
+  const hours = weekdays.map(day => {
+    const val = rawHours[day] || rawHours[day.slice(0, 3)];
+    const timeDisplay = normalizeDayValue(val, day);
+    const dayLabel = day.charAt(0).toUpperCase() + day.slice(1);
+    return [dayLabel, timeDisplay];
+  });
   const address = restaurant?.address;
 
   return (
@@ -215,7 +247,7 @@ export default function HomePage() {
           <div>
             <h3><Clock size={18} />Opening hours</h3>
             {hours.length ? (
-              <dl>{hours.map(([day, value]) => <div key={day}><dt>{day}</dt><dd>{formatHour(value.open)} – {formatHour(value.close)}</dd></div>)}</dl>
+              <dl>{hours.map(([day, timeDisplay]) => <div key={day}><dt>{day}</dt><dd>{timeDisplay}</dd></div>)}</dl>
             ) : <p>Contact the restaurant for today’s opening hours.</p>}
           </div>
           <div>
