@@ -33,6 +33,8 @@ export default function SuperAdminDashboard() {
   const [showAddRestaurant, setShowAddRestaurant] = useState(false);
   const [showAddManager, setShowAddManager] = useState(false);
   const [selectedRestaurantForManager, setSelectedRestaurantForManager] = useState(null);
+  const [showSelfPassword, setShowSelfPassword] = useState(false);
+  const [selectedUserForPassword, setSelectedUserForPassword] = useState(null);
   const [notification, setNotification] = useState(null);
 
   useEffect(() => {
@@ -215,6 +217,24 @@ export default function SuperAdminDashboard() {
             }}
           >
             <Users size={16} /> Assign Hotel GM
+          </button>
+
+          <button
+            onClick={() => setShowSelfPassword(true)}
+            className="pos-button"
+            title="Change Super Admin password"
+            style={{
+              padding: '8px 14px',
+              fontSize: 13,
+              fontWeight: 650,
+              gap: 6,
+              borderRadius: 10,
+              border: '1px solid var(--p-border)',
+              background: 'var(--p-surface)',
+              color: 'var(--p-text)'
+            }}
+          >
+            <KeyRound size={15} style={{ color: '#6366f1' }} /> My Password
           </button>
 
           <button
@@ -738,17 +758,27 @@ export default function SuperAdminDashboard() {
                       </span>
                     </td>
                     <td style={{ padding: '14px 20px', textAlign: 'right' }}>
-                      <button
-                        className="pos-button small"
-                        onClick={() => {
-                          if (m.restaurantId) {
-                            setActiveRestaurantId(m.restaurantId);
-                            navigate('/pos');
-                          }
-                        }}
-                      >
-                        View Outlet <ArrowRight size={11} />
-                      </button>
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        <button
+                          className="pos-button small"
+                          title={`Change password for ${m.name}`}
+                          onClick={() => setSelectedUserForPassword(m)}
+                          style={{ gap: 4 }}
+                        >
+                          <KeyRound size={12} style={{ color: '#4f46e5' }} /> Password
+                        </button>
+                        <button
+                          className="pos-button small"
+                          onClick={() => {
+                            if (m.restaurantId) {
+                              setActiveRestaurantId(m.restaurantId);
+                              navigate('/pos');
+                            }
+                          }}
+                        >
+                          View Outlet <ArrowRight size={11} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -864,6 +894,20 @@ export default function SuperAdminDashboard() {
             setSelectedRestaurantForManager(null);
             showToast(`General Manager account created for ${newManager.name}!`, 'success');
             loadData();
+          }}
+        />
+      )}
+      {/* Change Password Modal (For Self or Manager) */}
+      {(showSelfPassword || selectedUserForPassword) && (
+        <ChangePasswordModal
+          user={selectedUserForPassword || currentUser}
+          isSelf={showSelfPassword}
+          onClose={() => {
+            setShowSelfPassword(false);
+            setSelectedUserForPassword(null);
+          }}
+          onSuccess={(msg) => {
+            showToast(msg, 'success');
           }}
         />
       )}
@@ -1258,6 +1302,186 @@ Is login se aap apna Menu, Staff aur Table QR codes manage kar sakte hain.`;
             <button type="submit" className="pos-button primary" disabled={busy}>
               {busy ? <RefreshCw size={14} className="pos-spin" /> : <UserCheck size={14} />}
               {busy ? 'Creating Manager…' : 'Create Manager Account'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function ChangePasswordModal({ user, isSelf, onClose, onSuccess }) {
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const generateRandomPassword = () => {
+    const letters = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz';
+    const numbers = '23456789';
+    const specials = '!@#$%&*';
+    let res = '';
+    for (let i = 0; i < 6; i++) res += letters[Math.floor(Math.random() * letters.length)];
+    for (let i = 0; i < 3; i++) res += numbers[Math.floor(Math.random() * numbers.length)];
+    for (let i = 0; i < 2; i++) res += specials[Math.floor(Math.random() * specials.length)];
+    setNewPassword(res);
+    setConfirmPassword(res);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError(null);
+
+    if (newPassword.length < 8) {
+      setError('Password must be at least 8 characters long.');
+      return;
+    }
+    if (!/[A-Za-z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+      setError('Password must contain both letters and numbers.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError('New passwords do not match.');
+      return;
+    }
+
+    setBusy(true);
+    try {
+      if (isSelf) {
+        await api.changeMyPassword({ currentPassword, newPassword });
+        onSuccess('Your password has been changed successfully.');
+      } else {
+        await api.updateUserPassword(user.userId, newPassword);
+        onSuccess(`Password for ${user.name} (${user.role || 'Manager'}) updated successfully.`);
+      }
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Failed to update password.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{
+      position: 'fixed',
+      inset: 0,
+      backgroundColor: 'rgba(15, 23, 42, 0.65)',
+      backdropFilter: 'blur(4px)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1000,
+      padding: 20
+    }}>
+      <div style={{
+        backgroundColor: 'var(--p-surface, #ffffff)',
+        borderRadius: 16,
+        maxWidth: 440,
+        width: '100%',
+        boxShadow: '0 20px 50px rgba(0,0,0,0.25)',
+        border: '1px solid var(--p-border, #e2e8f0)',
+        overflow: 'hidden'
+      }}>
+        <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--p-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(99, 102, 241, 0.12)', color: '#4f46e5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <KeyRound size={18} />
+            </div>
+            <div>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>
+                {isSelf ? 'Change My Password' : `Change Password: ${user.name}`}
+              </h3>
+              <p style={{ margin: 0, fontSize: 11, color: 'var(--p-muted)' }}>
+                {isSelf ? 'Update your platform credentials' : `${user.role || 'Manager'} · ${user.email}`}
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="pos-icon-button" style={{ width: 32, height: 32, borderRadius: 8 }}>
+            <X size={16} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} style={{ padding: '20px 24px' }}>
+          {error && (
+            <div style={{ padding: '10px 14px', borderRadius: 8, background: '#fee2e2', border: '1px solid #fecaca', color: '#b91c1c', fontSize: 12, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <AlertCircle size={15} style={{ flexShrink: 0 }} />
+              <span>{error}</span>
+            </div>
+          )}
+
+          {isSelf && (
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Current Password (Optional for Super Admin)</label>
+              <input
+                type={showPassword ? 'text' : 'password'}
+                className="pos-input"
+                style={{ width: '100%' }}
+                value={currentPassword}
+                onChange={e => setCurrentPassword(e.target.value)}
+                placeholder="Enter current password"
+              />
+            </div>
+          )}
+
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <label style={{ fontSize: 12, fontWeight: 600 }}>New Password</label>
+              <button
+                type="button"
+                onClick={generateRandomPassword}
+                style={{ background: 'transparent', border: 'none', color: '#4f46e5', fontSize: 11, fontWeight: 650, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+              >
+                <Sparkles size={11} /> Generate
+              </button>
+            </div>
+            <div style={{ position: 'relative' }}>
+              <input
+                type={showPassword ? 'text' : 'password'}
+                required
+                className="pos-input"
+                style={{ width: '100%', paddingRight: 40 }}
+                value={newPassword}
+                onChange={e => setNewPassword(e.target.value)}
+                placeholder="Min 8 characters with letters & numbers"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(s => !s)}
+                style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: 'var(--p-muted)', cursor: 'pointer' }}
+              >
+                {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+              </button>
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 20 }}>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Confirm New Password</label>
+            <input
+              type={showPassword ? 'text' : 'password'}
+              required
+              className="pos-input"
+              style={{ width: '100%' }}
+              value={confirmPassword}
+              onChange={e => setConfirmPassword(e.target.value)}
+              placeholder="Re-enter new password"
+            />
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 14, borderTop: '1px solid var(--p-border)' }}>
+            <button type="button" onClick={onClose} className="pos-button" disabled={busy}>
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="pos-button primary"
+              disabled={busy}
+              style={{ background: 'linear-gradient(135deg, #4f46e5, #3b82f6)', borderColor: '#4f46e5', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              {busy ? <RefreshCw size={14} className="pos-spin" /> : <KeyRound size={14} />}
+              <span>Save Password</span>
             </button>
           </div>
         </form>

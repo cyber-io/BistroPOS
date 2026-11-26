@@ -490,6 +490,15 @@ public record CreateStaffDto(
     string? Password
 );
 
+public record ResetStaffPasswordDto(
+    [Required, MinLength(8)] string NewPassword
+);
+
+public record ChangeOwnPasswordRequest(
+    string? CurrentPassword,
+    [Required, MinLength(8)] string NewPassword
+);
+
 public record CreateManagerRequest(
     [Required] Guid RestaurantId,
     [Required, MaxLength(150)] string Name,

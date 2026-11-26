@@ -1129,6 +1129,103 @@ public class UsersController : ControllerBase
         await _audit.LogAsync(user.RestaurantId, _tenant.CurrentUserId, _tenant.CurrentRole, "STAFF_DELETED", "users", new { DeletedUserId = user.UserId, user.Role });
         return Ok(new { message = "Staff member removed successfully." });
     }
+
+    [Authorize]
+    [HttpPut("me/password")]
+    public async Task<IActionResult> ChangeMyPassword([FromBody] ChangeOwnPasswordRequest request)
+    {
+        var userId = _tenant.CurrentUserId;
+        if (!userId.HasValue) return Unauthorized();
+
+        if (string.IsNullOrWhiteSpace(request.NewPassword) || request.NewPassword.Length < 8 ||
+            !request.NewPassword.Any(char.IsLetter) || !request.NewPassword.Any(char.IsDigit))
+        {
+            return BadRequest(new { message = "New password must be at least 8 characters and include both letters and numbers." });
+        }
+
+        var user = await _db.Users.FindAsync(userId.Value);
+        if (user == null) return NotFound(new { message = "User account not found." });
+
+        if (!_tenant.IsSuperAdmin && !string.IsNullOrEmpty(request.CurrentPassword))
+        {
+            bool valid = false;
+            try
+            {
+                if (!string.IsNullOrEmpty(user.PasswordHash) && user.PasswordHash != "SUPABASE_MANAGED")
+                {
+                    valid = BCrypt.Net.BCrypt.Verify(request.CurrentPassword, user.PasswordHash);
+                }
+            }
+            catch {}
+            if (!valid)
+            {
+                return BadRequest(new { message = "Current password is incorrect." });
+            }
+        }
+
+        user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
+        user.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        await _audit.LogAsync(user.RestaurantId, user.UserId, user.Role, "SELF_PASSWORD_CHANGED", "users");
+        return Ok(new { success = true, message = "Your password has been changed successfully." });
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
+    [HttpPut("{id:guid}/password")]
+    public async Task<IActionResult> UpdateUserPassword(Guid id, [FromBody] ResetStaffPasswordDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.NewPassword) || dto.NewPassword.Length < 8 ||
+            !dto.NewPassword.Any(char.IsLetter) || !dto.NewPassword.Any(char.IsDigit))
+        {
+            return BadRequest(new { message = "New password must be at least 8 characters and include both letters and numbers." });
+        }
+
+        var targetUser = await _db.Users.FindAsync(id);
+        if (targetUser == null)
+        {
+            return NotFound(new { message = "User not found." });
+        }
+
+        var isSuperAdmin = User.IsInRole(UserRoles.SuperAdmin);
+
+        // RBAC & Tenant Isolation Rules:
+        // 1. Super Admin can change password for ANY account (Self, Managers, Staff).
+        // 2. Manager can change own password, OR staff (Waiter, Kitchen, Receptionist) within their assigned restaurant.
+        // 3. Manager CANNOT change Super Admin or another Manager's password.
+        if (!isSuperAdmin)
+        {
+            if (targetUser.Role == UserRoles.SuperAdmin)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Managers cannot modify Super Admin passwords." });
+            }
+
+            if (_tenant.CurrentUserId != targetUser.UserId)
+            {
+                if (targetUser.Role == UserRoles.Manager)
+                {
+                    return StatusCode(StatusCodes.Status403Forbidden, new { message = "Managers cannot modify other managers' passwords." });
+                }
+
+                _tenant.EnforceTenantAccess(targetUser.RestaurantId);
+            }
+        }
+
+        targetUser.PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.NewPassword);
+        targetUser.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        await _audit.LogAsync(
+            targetUser.RestaurantId,
+            _tenant.CurrentUserId,
+            _tenant.CurrentRole,
+            "USER_PASSWORD_RESET",
+            "users",
+            new { TargetUserId = targetUser.UserId, targetUser.Role, targetUser.Email }
+        );
+
+        return Ok(new { success = true, message = $"Password for {targetUser.Name} ({targetUser.Role}) updated successfully." });
+    }
 }
 
 [ApiController]
