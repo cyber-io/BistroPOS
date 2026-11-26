@@ -128,7 +128,11 @@ builder.Services.AddScoped<IEmailReceiptService, EmailReceiptService>();
 builder.Services.AddScoped<IWaitlistService, WaitlistService>();
 
 // 6. Controllers and OpenAPI Documentation
-builder.Services.AddControllers(options => options.Filters.AddService<ResourceAccessFilter>());
+builder.Services.AddControllers(options => options.Filters.AddService<ResourceAccessFilter>())
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
+    });
 builder.Services.AddFluentValidationAutoValidation();
 builder.Services.AddValidatorsFromAssemblyContaining<CreateOrderRequestValidator>();
 builder.Services.AddEndpointsApiExplorer();

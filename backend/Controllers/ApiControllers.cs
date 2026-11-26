@@ -695,6 +695,148 @@ public class MenuController : ControllerBase
 
         return Ok(new { success = true, availability = request.Availability });
     }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
+    [HttpPost("items")]
+    public async Task<IActionResult> CreateMenuItem([FromBody] CreateMenuItemRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name))
+            return BadRequest(new { message = "Item name is required." });
+
+        Guid targetRestaurantId;
+        if (_tenant.IsManager)
+        {
+            targetRestaurantId = _tenant.GetRequiredRestaurantId();
+        }
+        else if (_tenant.IsSuperAdmin)
+        {
+            targetRestaurantId = request.RestaurantId ?? _tenant.RestaurantId ?? UserProvisioning.DefaultRestaurantId;
+        }
+        else
+        {
+            return Forbid();
+        }
+
+        var category = await _db.MenuCategories.FindAsync(request.CategoryId);
+        if (category == null || category.RestaurantId != targetRestaurantId)
+        {
+            return BadRequest(new { message = "Selected category does not exist for this restaurant." });
+        }
+
+        var item = new MenuItem
+        {
+            MenuItemId = Guid.NewGuid(),
+            RestaurantId = targetRestaurantId,
+            CategoryId = request.CategoryId,
+            Name = request.Name.Trim(),
+            Description = request.Description?.Trim(),
+            Price = request.Price,
+            Image = string.IsNullOrWhiteSpace(request.Image) ? "/images/bistro-hero-plate.png" : request.Image.Trim(),
+            VegNonVeg = string.Equals(request.VegNonVeg, "NON_VEG", StringComparison.OrdinalIgnoreCase) ? "NON_VEG" : "VEG",
+            Availability = request.Availability ?? true,
+            SpiceLevel = request.SpiceLevel ?? "NONE",
+            IsSweet = request.IsSweet ?? false,
+            CustomizationOptions = request.CustomizationOptions ?? "[]",
+            AddOns = request.AddOns ?? "[]",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        _db.MenuItems.Add(item);
+        await _db.SaveChangesAsync();
+
+        var dto = new MenuItemDto(
+            item.MenuItemId,
+            item.CategoryId,
+            category.Name,
+            item.Name,
+            item.Description,
+            item.Price,
+            item.Image,
+            item.VegNonVeg,
+            item.Availability,
+            item.SpiceLevel,
+            item.IsSweet,
+            item.AddOns,
+            item.CustomizationOptions
+        );
+
+        return Created($"/api/menu/items/{item.MenuItemId}", dto);
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
+    [HttpPut("items/{id:guid}")]
+    public async Task<IActionResult> UpdateMenuItem(Guid id, [FromBody] UpdateMenuItemRequest updated)
+    {
+        var existing = await _db.MenuItems.FindAsync(id);
+        if (existing == null) return NotFound(new { message = "Item not found." });
+
+        if (_tenant.IsManager && existing.RestaurantId != _tenant.GetRequiredRestaurantId())
+            return Forbid();
+
+        string categoryName = "";
+        if (updated.CategoryId.HasValue)
+        {
+            var cat = await _db.MenuCategories.FindAsync(updated.CategoryId.Value);
+            if (cat != null && cat.RestaurantId == existing.RestaurantId)
+            {
+                existing.CategoryId = updated.CategoryId.Value;
+                categoryName = cat.Name;
+            }
+        }
+        else
+        {
+            var cat = await _db.MenuCategories.FindAsync(existing.CategoryId);
+            categoryName = cat?.Name ?? "";
+        }
+
+        existing.Name = updated.Name.Trim();
+        existing.Description = updated.Description?.Trim();
+        existing.Price = updated.Price;
+        if (!string.IsNullOrWhiteSpace(updated.Image)) existing.Image = updated.Image.Trim();
+        if (!string.IsNullOrWhiteSpace(updated.VegNonVeg)) existing.VegNonVeg = updated.VegNonVeg.ToUpper();
+        if (updated.Availability.HasValue) existing.Availability = updated.Availability.Value;
+        if (!string.IsNullOrWhiteSpace(updated.SpiceLevel)) existing.SpiceLevel = updated.SpiceLevel;
+        if (updated.IsSweet.HasValue) existing.IsSweet = updated.IsSweet.Value;
+        if (!string.IsNullOrWhiteSpace(updated.CustomizationOptions)) existing.CustomizationOptions = updated.CustomizationOptions;
+        if (!string.IsNullOrWhiteSpace(updated.AddOns)) existing.AddOns = updated.AddOns;
+        existing.UpdatedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync();
+
+        var dto = new MenuItemDto(
+            existing.MenuItemId,
+            existing.CategoryId,
+            categoryName,
+            existing.Name,
+            existing.Description,
+            existing.Price,
+            existing.Image,
+            existing.VegNonVeg,
+            existing.Availability,
+            existing.SpiceLevel,
+            existing.IsSweet,
+            existing.AddOns,
+            existing.CustomizationOptions
+        );
+
+        return Ok(dto);
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
+    [HttpDelete("items/{id:guid}")]
+    public async Task<IActionResult> DeleteMenuItem(Guid id)
+    {
+        var existing = await _db.MenuItems.FindAsync(id);
+        if (existing == null) return NotFound(new { message = "Item not found." });
+
+        if (_tenant.IsManager && existing.RestaurantId != _tenant.GetRequiredRestaurantId())
+            return Forbid();
+
+        _db.MenuItems.Remove(existing);
+        await _db.SaveChangesAsync();
+        return Ok(new { success = true, message = "Menu item deleted successfully." });
+    }
 }
 
 [ApiController]
