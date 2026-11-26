@@ -201,7 +201,7 @@ export default function PosShell({ children, alertCount = 0, onAlerts, menuDots 
               title="Return to Super Admin SaaS Control Plane"
             >
               <Shield size={14} />
-              <span>SaaS Admin</span>
+              <span>Admin Dashboard</span>
             </Link>
           </div>
         ) : (

@@ -211,6 +211,9 @@ function MainApp() {
               </RoleRoute>
             }
           />
+          <Route path="/admin-panel" element={<Navigate to="/admin" replace />} />
+          <Route path="/admin-dashboard" element={<Navigate to="/admin" replace />} />
+          <Route path="/adminpanel" element={<Navigate to="/admin" replace />} />
 
           {/* Smart Portal & Dashboard Route Redirectors */}
           <Route path="/portal" element={<SmartPortalRedirect />} />

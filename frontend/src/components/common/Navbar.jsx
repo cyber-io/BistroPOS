@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { ShoppingBag, User, ArrowUpRight, Menu, X, Truck, PackageCheck, Compass, LogOut } from 'lucide-react';
+import { ShoppingBag, User, ArrowUpRight, Menu, X, Truck, PackageCheck, Compass, LogOut, Shield } from 'lucide-react';
 import { useCart } from '../../context/CartContext';
 import { useAuth } from '../../context/AuthContext';
 
@@ -148,6 +148,17 @@ export default function Navbar({ onOpenCart }) {
         <nav aria-label="Main navigation" className="website-nav">{navigation}</nav>
 
         <div className="website-header-actions">
+          {role === 'SUPER_ADMIN' && (
+            <Link
+              to="/admin"
+              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold hover:bg-indigo-100 transition-colors shadow-xs"
+              title="Super Admin Dashboard"
+            >
+              <Shield size={14} className="text-indigo-600" />
+              <span>Admin Panel</span>
+            </Link>
+          )}
+
           <button type="button" onClick={onOpenCart} className="website-icon-button" aria-label={`View cart${itemCount ? `, ${itemCount} ${itemCount === 1 ? 'item' : 'items'}` : ''}`}>
             <ShoppingBag size={19} aria-hidden="true" />
             {itemCount > 0 && <span className="website-cart-count">{itemCount}</span>}
@@ -194,17 +205,38 @@ export default function Navbar({ onOpenCart }) {
                   <Compass size={15} aria-hidden="true" />
                   <span>Track Live Order</span>
                 </Link>
-                {['SUPER_ADMIN', 'MANAGER', 'RECEPTIONIST'].includes(role) && (
+                {role === 'SUPER_ADMIN' && (
                   <Link
-                    to="/pos"
+                    to="/admin"
                     className="website-account-link"
-                    onClick={() => setUserDropdownOpen(false)}
+                    onClick={() => { setUserDropdownOpen(false); closeNavigation(); }}
                   >
-                    <PackageCheck size={15} aria-hidden="true" />
-                    <span>{role === 'MANAGER' ? 'Manager POS Portal' : role === 'SUPER_ADMIN' ? 'Platform POS Workspace' : 'Front Desk POS'}</span>
+                    <Shield size={15} aria-hidden="true" className="text-indigo-600" />
+                    <span className="font-bold text-indigo-700">Admin Dashboard</span>
                     <ArrowUpRight size={13} className="ml-auto opacity-60" aria-hidden="true" />
                   </Link>
                 )}
+                {role === 'SUPER_ADMIN' ? (
+                  <Link
+                    to="/pos"
+                    className="website-account-link"
+                    onClick={() => { setUserDropdownOpen(false); closeNavigation(); }}
+                  >
+                    <PackageCheck size={15} aria-hidden="true" />
+                    <span>Restaurant POS Workspace</span>
+                    <ArrowUpRight size={13} className="ml-auto opacity-60" aria-hidden="true" />
+                  </Link>
+                ) : ['MANAGER', 'RECEPTIONIST'].includes(role) ? (
+                  <Link
+                    to="/pos"
+                    className="website-account-link"
+                    onClick={() => { setUserDropdownOpen(false); closeNavigation(); }}
+                  >
+                    <PackageCheck size={15} aria-hidden="true" />
+                    <span>{role === 'MANAGER' ? 'Manager POS Portal' : 'Front Desk POS'}</span>
+                    <ArrowUpRight size={13} className="ml-auto opacity-60" aria-hidden="true" />
+                  </Link>
+                ) : null}
                 <button type="button" onClick={signOut} className="website-signout"><LogOut size={15} aria-hidden="true" />Sign out</button>
               </div>
             )}
@@ -240,17 +272,38 @@ export default function Navbar({ onOpenCart }) {
                 <Link to="/profile" className="website-account-link" onClick={closeNavigation}>
                   <User size={15} aria-hidden="true" />My Profile &amp; Orders<ArrowUpRight size={14} className="ml-auto" aria-hidden="true" />
                 </Link>
-                {['SUPER_ADMIN', 'MANAGER', 'RECEPTIONIST'].includes(role) && (
+                {role === 'SUPER_ADMIN' && (
                   <Link
-                    to="/pos"
+                    to="/admin"
                     className="website-account-link"
-                    onClick={() => setUserDropdownOpen(false)}
+                    onClick={() => { setUserDropdownOpen(false); closeNavigation(); }}
                   >
-                    <PackageCheck size={15} aria-hidden="true" />
-                    <span>{role === 'MANAGER' ? 'Manager POS Portal' : role === 'SUPER_ADMIN' ? 'Platform POS Workspace' : 'Front Desk POS'}</span>
+                    <Shield size={15} aria-hidden="true" className="text-indigo-600" />
+                    <span className="font-bold text-indigo-700">Admin Dashboard</span>
                     <ArrowUpRight size={13} className="ml-auto opacity-60" aria-hidden="true" />
                   </Link>
                 )}
+                {role === 'SUPER_ADMIN' ? (
+                  <Link
+                    to="/pos"
+                    className="website-account-link"
+                    onClick={() => { setUserDropdownOpen(false); closeNavigation(); }}
+                  >
+                    <PackageCheck size={15} aria-hidden="true" />
+                    <span>Restaurant POS Workspace</span>
+                    <ArrowUpRight size={13} className="ml-auto opacity-60" aria-hidden="true" />
+                  </Link>
+                ) : ['MANAGER', 'RECEPTIONIST'].includes(role) ? (
+                  <Link
+                    to="/pos"
+                    className="website-account-link"
+                    onClick={() => { setUserDropdownOpen(false); closeNavigation(); }}
+                  >
+                    <PackageCheck size={15} aria-hidden="true" />
+                    <span>{role === 'MANAGER' ? 'Manager POS Portal' : 'Front Desk POS'}</span>
+                    <ArrowUpRight size={13} className="ml-auto opacity-60" aria-hidden="true" />
+                  </Link>
+                ) : null}
                 <button type="button" onClick={signOut} className="website-signout"><LogOut size={15} aria-hidden="true" />Sign out</button>
               </>
             ) : <Link to="/login" className="website-account-link" onClick={closeNavigation}>Sign in to your account<ArrowUpRight size={15} aria-hidden="true" /></Link>}

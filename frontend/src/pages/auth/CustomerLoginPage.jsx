@@ -25,7 +25,18 @@ export default function CustomerLoginPage() {
       } else {
         const result = mode === 'register' ? await register(form) : await login(form.email, form.password);
         if (result.success) {
-          navigate(redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/profile', { replace: true });
+          const userRole = result.user?.role;
+          if (userRole === 'SUPER_ADMIN') {
+            navigate('/admin', { replace: true });
+          } else if (['MANAGER', 'RECEPTIONIST'].includes(userRole)) {
+            navigate('/pos', { replace: true });
+          } else if (userRole === 'KITCHEN') {
+            navigate('/kitchen', { replace: true });
+          } else if (userRole === 'WAITER') {
+            navigate('/waiter', { replace: true });
+          } else {
+            navigate(redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/profile', { replace: true });
+          }
         } else {
           setMessage({ text: result.message, error: true });
         }
