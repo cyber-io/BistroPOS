@@ -41,19 +41,19 @@ export default function HomePage() {
   const { addItem, setOrderSource } = useCart();
   const { addToast } = useNotification();
 
-  // Smooth scroll handler for in-page navigation (e.g. #our-story, #visit)
+  // Instant section jump handler for in-page navigation (e.g. #our-story, #visit)
   useEffect(() => {
     if (location.hash) {
       const targetId = location.hash.replace('#', '');
-      const scrollToSection = () => {
+      const jumpToSection = () => {
         const el = document.getElementById(targetId);
         if (el) {
-          el.scrollIntoView({ behavior: 'smooth' });
+          el.scrollIntoView({ behavior: 'auto' });
         }
       };
-      scrollToSection();
-      const t1 = setTimeout(scrollToSection, 150);
-      const t2 = setTimeout(scrollToSection, 450);
+      jumpToSection();
+      const t1 = setTimeout(jumpToSection, 40);
+      const t2 = setTimeout(jumpToSection, 150);
       return () => {
         clearTimeout(t1);
         clearTimeout(t2);

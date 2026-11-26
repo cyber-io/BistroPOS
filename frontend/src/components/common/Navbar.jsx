@@ -57,9 +57,9 @@ export default function Navbar({ onOpenCart }) {
     if (isHome) {
       const el = document.getElementById(sectionId);
       if (el) {
-        el.scrollIntoView({ behavior: 'smooth' });
+        el.scrollIntoView({ behavior: 'auto' });
       }
-      navigate(`/#${sectionId}`);
+      navigate(`/#${sectionId}`, { replace: true });
     } else {
       navigate(`/#${sectionId}`);
     }
@@ -69,8 +69,17 @@ export default function Navbar({ onOpenCart }) {
     closeNavigation();
     if (isHome) {
       e.preventDefault();
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      navigate('/');
+      window.scrollTo({ top: 0, behavior: 'auto' });
+      if (location.hash) {
+        navigate('/');
+      }
+    }
+  };
+
+  const handleMenuClick = () => {
+    closeNavigation();
+    if (location.pathname === '/menu') {
+      window.scrollTo({ top: 0, behavior: 'auto' });
     }
   };
 
@@ -94,7 +103,7 @@ export default function Navbar({ onOpenCart }) {
         to="/menu"
         className={navClass(menuActive)}
         aria-current={menuActive ? 'page' : undefined}
-        onClick={closeNavigation}
+        onClick={handleMenuClick}
       >
         Our menu
       </Link>
