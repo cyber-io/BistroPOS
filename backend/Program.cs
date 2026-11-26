@@ -181,6 +181,13 @@ builder.Services.AddCors(options =>
     });
 });
 
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto;
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+
 var app = builder.Build();
 
 // 8. Middleware Pipeline
@@ -213,13 +220,14 @@ app.MapGet("/api/health", async (RestaurantDbContext db) => {
 app.MapControllers();
 app.MapHub<NotificationHub>("/hubs/notifications");
 
-// Ensure PostgreSQL tables_status_check allows CLEANING status & purge requested stale orders
+// Ensure PostgreSQL schema migrations & tables_status_check allows CLEANING status
 try
 {
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<RestaurantDbContext>();
     if (db.Database.IsNpgsql())
     {
+        await DatabaseMigrationService.ApplyMigrationsAsync(db, app.Logger);
         await db.Database.ExecuteSqlRawAsync(@"
             DO $$
             BEGIN
@@ -230,23 +238,11 @@ try
             END $$;
         ");
     }
-
-    var targetOrderNumbers = new[] { "ORD-0D10DC7FC6", "ORD-66A6B8C8CB" };
-    var targetOrders = await db.Orders.Where(o => targetOrderNumbers.Contains(o.OrderNumber)).ToListAsync();
-    if (targetOrders.Any())
-    {
-        var targetIds = targetOrders.Select(o => o.OrderId).ToList();
-        var targetItems = await db.OrderItems.Where(i => targetIds.Contains(i.OrderId)).ToListAsync();
-        db.OrderItems.RemoveRange(targetItems);
-        var targetPayments = await db.Payments.Where(p => p.OrderId.HasValue && targetIds.Contains(p.OrderId.Value)).ToListAsync();
-        db.Payments.RemoveRange(targetPayments);
-        var targetIssues = await db.CustomerIssues.Where(i => i.OrderId.HasValue && targetIds.Contains(i.OrderId.Value)).ToListAsync();
-        db.CustomerIssues.RemoveRange(targetIssues);
-        db.Orders.RemoveRange(targetOrders);
-        await db.SaveChangesAsync();
-    }
 }
-catch { /* Database initialization or mock environment */ }
+catch (Exception ex)
+{
+    app.Logger.LogWarning(ex, "Database migrations could not be completed automatically.");
+}
 
 try
 {

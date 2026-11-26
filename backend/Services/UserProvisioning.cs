@@ -41,8 +41,51 @@ public static class UserProvisioning
                 catch { /* Ignore if offline */ }
             }
 
+            const string fullOpeningHours = "{\"monday\": {\"open\": \"10:00\", \"close\": \"23:00\"}, \"tuesday\": {\"open\": \"10:00\", \"close\": \"23:00\"}, \"wednesday\": {\"open\": \"10:00\", \"close\": \"23:00\"}, \"thursday\": {\"open\": \"10:00\", \"close\": \"23:00\"}, \"friday\": {\"open\": \"10:00\", \"close\": \"23:30\"}, \"saturday\": {\"open\": \"10:00\", \"close\": \"23:30\"}, \"sunday\": {\"open\": \"10:00\", \"close\": \"23:00\"}}";
+            const string palaceOpeningHours = "{\"monday\": {\"open\": \"11:00\", \"close\": \"23:30\"}, \"tuesday\": {\"open\": \"11:00\", \"close\": \"23:30\"}, \"wednesday\": {\"open\": \"11:00\", \"close\": \"23:30\"}, \"thursday\": {\"open\": \"11:00\", \"close\": \"23:30\"}, \"friday\": {\"open\": \"11:00\", \"close\": \"23:30\"}, \"saturday\": {\"open\": \"11:00\", \"close\": \"23:30\"}, \"sunday\": {\"open\": \"11:00\", \"close\": \"23:30\"}}";
+
             if (!allowDevSeedCredentials)
             {
+                // In production, ensure at least one active restaurant exists
+                if (!await db.Restaurants.AnyAsync())
+                {
+                    db.Restaurants.Add(new Restaurant
+                    {
+                        RestaurantId = DefaultRestaurantId,
+                        Name = "Bistro & Bloom",
+                        Logo = "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=300&q=80",
+                        Address = "Plot 42, Gourmet Boulevard, Cyber Hub, Gurugram, HR - 122002",
+                        Phone = "+91 98765 43210",
+                        Email = "contact@sunrisecafe.com",
+                        Status = "ACTIVE",
+                        OpeningHours = fullOpeningHours,
+                        Settings = "{\"tax_rate\": 0.05, \"delivery_fee\": 40.00, \"currency\": \"INR\"}"
+                    });
+                    await db.SaveChangesAsync();
+                }
+
+                // In production, ensure initial Super Admin exists so administrator is never locked out
+                if (!await db.Users.AnyAsync(u => u.Role == UserRoles.SuperAdmin))
+                {
+                    var adminEmail = Environment.GetEnvironmentVariable("ADMIN_INITIAL_EMAIL") ?? "superadmin@bistropos.com";
+                    var adminPass = Environment.GetEnvironmentVariable("ADMIN_INITIAL_PASSWORD") ?? "Admin@Bistro2026!";
+                    db.Users.Add(new User
+                    {
+                        UserId = Guid.Parse("b0000000-0000-0000-0000-000000000001"),
+                        RestaurantId = null,
+                        Name = "Super Admin",
+                        Email = adminEmail.Trim().ToLowerInvariant(),
+                        Phone = "+91 99999 00001",
+                        PasswordHash = BCrypt.Net.BCrypt.HashPassword(adminPass),
+                        Role = UserRoles.SuperAdmin,
+                        Status = "ACTIVE",
+                        EmailVerified = true,
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow
+                    });
+                    await db.SaveChangesAsync();
+                }
+
                 await EnsureRestaurantDataAsync(db);
                 Volatile.Write(ref _initialized, 1);
                 return;
@@ -50,9 +93,6 @@ public static class UserProvisioning
 
             var devPasswordHash = BCrypt.Net.BCrypt.HashPassword(
                 Environment.GetEnvironmentVariable("DEV_DEMO_SEED_PASSWORD") ?? "Password@123");
-
-            const string fullOpeningHours = "{\"monday\": {\"open\": \"10:00\", \"close\": \"23:00\"}, \"tuesday\": {\"open\": \"10:00\", \"close\": \"23:00\"}, \"wednesday\": {\"open\": \"10:00\", \"close\": \"23:00\"}, \"thursday\": {\"open\": \"10:00\", \"close\": \"23:00\"}, \"friday\": {\"open\": \"10:00\", \"close\": \"23:30\"}, \"saturday\": {\"open\": \"10:00\", \"close\": \"23:30\"}, \"sunday\": {\"open\": \"10:00\", \"close\": \"23:00\"}}";
-            const string palaceOpeningHours = "{\"monday\": {\"open\": \"11:00\", \"close\": \"23:30\"}, \"tuesday\": {\"open\": \"11:00\", \"close\": \"23:30\"}, \"wednesday\": {\"open\": \"11:00\", \"close\": \"23:30\"}, \"thursday\": {\"open\": \"11:00\", \"close\": \"23:30\"}, \"friday\": {\"open\": \"11:00\", \"close\": \"23:30\"}, \"saturday\": {\"open\": \"11:00\", \"close\": \"23:30\"}, \"sunday\": {\"open\": \"11:00\", \"close\": \"23:30\"}}";
 
             var restaurantsToSeed = new[]
             {

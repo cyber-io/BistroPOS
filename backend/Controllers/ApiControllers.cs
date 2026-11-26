@@ -277,6 +277,77 @@ public class RestaurantsController : ControllerBase
             wifiEnabled = restaurant.WifiEnabled
         });
     }
+
+    [Authorize(Roles = UserRoles.SuperAdmin)]
+    [HttpPost]
+    public async Task<IActionResult> CreateRestaurant([FromBody] CreateRestaurantDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Name))
+            return BadRequest(new { message = "Restaurant name is required." });
+        if (string.IsNullOrWhiteSpace(dto.Address))
+            return BadRequest(new { message = "Restaurant address is required." });
+        if (string.IsNullOrWhiteSpace(dto.Phone))
+            return BadRequest(new { message = "Contact phone is required." });
+        if (string.IsNullOrWhiteSpace(dto.Email))
+            return BadRequest(new { message = "Contact email is required." });
+
+        var restaurant = new Restaurant
+        {
+            RestaurantId = Guid.NewGuid(),
+            Name = dto.Name.Trim(),
+            Address = dto.Address.Trim(),
+            Phone = dto.Phone.Trim(),
+            Email = dto.Email.Trim().ToLowerInvariant(),
+            Logo = dto.Logo?.Trim(),
+            OpeningHours = dto.OpeningHours ?? "{\"mon\":\"09:00 - 22:00\",\"tue\":\"09:00 - 22:00\",\"wed\":\"09:00 - 22:00\",\"thu\":\"09:00 - 22:00\",\"fri\":\"09:00 - 23:00\",\"sat\":\"09:00 - 23:00\",\"sun\":\"09:00 - 22:00\"}",
+            Settings = System.Text.Json.JsonSerializer.Serialize(new { taxRate = dto.TaxRate ?? 0.05m, currency = "INR" }),
+            Status = "ACTIVE",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        _db.Restaurants.Add(restaurant);
+
+        // Auto-seed initial tables if specified
+        var tableCount = dto.InitialTableCount ?? 10;
+        if (tableCount > 0)
+        {
+            for (int i = 1; i <= Math.Min(tableCount, 50); i++)
+            {
+                _db.Tables.Add(new TableEntity
+                {
+                    TableId = Guid.NewGuid(),
+                    RestaurantId = restaurant.RestaurantId,
+                    TableNumber = i,
+                    Capacity = (i % 4 == 0) ? 6 : (i % 2 == 0) ? 2 : 4,
+                    Status = TableStatuses.Available,
+                    QrIdentifier = $"rest_{restaurant.RestaurantId.ToString("N")[..8]}_tbl_{i:D02}",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
+            }
+        }
+
+        // Auto-seed starter menu categories
+        var defaultCategories = new[] { "Starters & Appetizers", "Main Course", "Breads & Rice", "Desserts", "Beverages" };
+        int sort = 0;
+        foreach (var catName in defaultCategories)
+        {
+            _db.MenuCategories.Add(new MenuCategory
+            {
+                CategoryId = Guid.NewGuid(),
+                RestaurantId = restaurant.RestaurantId,
+                Name = catName,
+                SortOrder = sort++,
+                Status = "ACTIVE",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+        }
+
+        await _db.SaveChangesAsync();
+        return CreatedAtAction(nameof(GetRestaurantById), new { id = restaurant.RestaurantId }, restaurant);
+    }
 }
 
 [ApiController]
@@ -317,6 +388,130 @@ public class TablesController : ControllerBase
         var success = await _tables.UpdateTableStatusAsync(id, request);
         if (!success) return NotFound();
         return Ok(new { success = true, message = "Table status updated successfully." });
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
+    [HttpPost]
+    public async Task<IActionResult> CreateTable([FromBody] CreateTableRequest request, [FromQuery] Guid? restaurantId)
+    {
+        Guid targetRestaurantId;
+        if (_tenant.IsManager)
+        {
+            targetRestaurantId = _tenant.GetRequiredRestaurantId();
+        }
+        else if (_tenant.IsSuperAdmin)
+        {
+            targetRestaurantId = request.RestaurantId ?? restaurantId ?? _tenant.RestaurantId ?? UserProvisioning.DefaultRestaurantId;
+        }
+        else
+        {
+            return Forbid();
+        }
+
+        var created = await _tables.CreateTableAsync(request, targetRestaurantId);
+        return CreatedAtAction(nameof(GetTableById), new { id = created.TableId }, created);
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
+    [HttpPut("{id:guid}")]
+    public async Task<IActionResult> UpdateTable(Guid id, [FromBody] UpdateTableRequest request)
+    {
+        var updated = await _tables.UpdateTableAsync(id, request);
+        if (updated == null) return NotFound();
+        return Ok(updated);
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> DeleteTable(Guid id)
+    {
+        try
+        {
+            var success = await _tables.DeleteTableAsync(id);
+            if (!success) return NotFound();
+            return Ok(new { success = true, message = "Table deleted successfully." });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("{id:guid}/session")]
+    public async Task<IActionResult> GetTableSession(Guid id)
+    {
+        var session = await _tables.GetOrCreateActiveSessionAsync(id);
+        if (session == null) return NotFound();
+        return Ok(session);
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager},{UserRoles.Receptionist}")]
+    [HttpPost("{id:guid}/session/close")]
+    public async Task<IActionResult> CloseTableSession(Guid id)
+    {
+        var success = await _tables.CloseSessionAsync(id);
+        return Ok(new { success });
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager},{UserRoles.Receptionist}")]
+    [HttpPatch("{id:guid}/position")]
+    public async Task<IActionResult> UpdatePosition(Guid id, [FromBody] UpdateTablePositionDto request)
+    {
+        var success = await _tables.UpdateTablePositionAsync(id, request);
+        if (!success) return NotFound();
+        return Ok(new { success = true, message = "Table floor position updated successfully." });
+    }
+}
+
+[ApiController]
+[Route("api/[controller]")]
+public class InventoryController : ControllerBase
+{
+    private readonly IInventoryService _inventory;
+    private readonly ITenantContext _tenant;
+
+    public InventoryController(IInventoryService inventory, ITenantContext tenant)
+    {
+        _inventory = inventory;
+        _tenant = tenant;
+    }
+
+    [Authorize(Policy = "OperationalStaff")]
+    [HttpGet]
+    public async Task<IActionResult> GetInventory([FromQuery] Guid? restaurantId)
+    {
+        var targetId = _tenant.IsSuperAdmin
+            ? (restaurantId ?? _tenant.RestaurantId ?? UserProvisioning.DefaultRestaurantId)
+            : _tenant.GetRequiredRestaurantId();
+        var items = await _inventory.GetInventoryAsync(targetId);
+        return Ok(items);
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager},{UserRoles.Kitchen}")]
+    [HttpPost]
+    public async Task<IActionResult> CreateItem([FromBody] CreateInventoryItemDto request)
+    {
+        _tenant.EnforceTenantAccess(request.RestaurantId);
+        var created = await _inventory.CreateItemAsync(request);
+        return CreatedAtAction(nameof(GetInventory), new { restaurantId = created.RestaurantId }, created);
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager},{UserRoles.Kitchen},{UserRoles.Receptionist}")]
+    [HttpPatch("{id:guid}/stock")]
+    public async Task<IActionResult> UpdateStock(Guid id, [FromBody] UpdateStockDto request)
+    {
+        var success = await _inventory.UpdateStockAsync(id, request.QuantityChange, request.Reason);
+        if (!success) return NotFound();
+        return Ok(new { success = true, message = "Stock updated successfully." });
+    }
+
+    [Authorize(Policy = "OperationalStaff")]
+    [HttpPost("shortage")]
+    public async Task<IActionResult> ReportShortage([FromBody] ReportShortageDto request)
+    {
+        _tenant.EnforceTenantAccess(request.RestaurantId);
+        var success = await _inventory.ReportShortageAsync(request);
+        return Ok(new { success = true, message = "Shortage alert processed." });
     }
 }
 
