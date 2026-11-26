@@ -3,7 +3,7 @@ import { tableTitle } from './tablePresentation.js';
 // All business operations go through the .NET API. Failed requests never become
 // local success records: the database remains the authority for orders and bookings.
 const metaEnv = (typeof import.meta !== 'undefined' && import.meta.env) ? import.meta.env : {};
-const API_BASE = (metaEnv.VITE_API_URL || '/api').replace(/\/$/, '');
+const API_BASE = (metaEnv.VITE_API_URL || metaEnv.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
 const DEFAULT_RESTAURANT_ID = metaEnv.VITE_RESTAURANT_ID || 'a0000000-0000-0000-0000-000000000001';
 const TOKEN_KEY = 'rs_api_session';
 const RESOURCE_KEY = 'rs_customer_order_access';
