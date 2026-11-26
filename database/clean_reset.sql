@@ -4,27 +4,72 @@
 -- data and reset the system to a clean, fresh state.
 -- ============================================================================
 
--- METHOD 1 (Recommended & 100% Fail-Safe): 
--- Dynamically truncates all existing tables in restaurant_pos schema
--- so it NEVER fails even if some optional migration tables do not exist.
+SET search_path TO restaurant_pos, public;
+
+-- ----------------------------------------------------------------------------
+-- STEP 1: Ensure all schema extension columns exist so inserts never fail
+-- ----------------------------------------------------------------------------
+DO $$
+BEGIN
+    -- 1.1 Tables columns (Phase 2 Floor Plan & Dining Area)
+    BEGIN
+        ALTER TABLE tables ADD COLUMN IF NOT EXISTS position_x INT DEFAULT 0;
+        ALTER TABLE tables ADD COLUMN IF NOT EXISTS position_y INT DEFAULT 0;
+        ALTER TABLE tables ADD COLUMN IF NOT EXISTS shape VARCHAR(50) DEFAULT 'SQUARE';
+        ALTER TABLE tables ADD COLUMN IF NOT EXISTS dining_area VARCHAR(50) DEFAULT 'everyday';
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+
+    -- 1.2 Menu Items columns (Phase 1 Portions, Allergens & Prep Time)
+    BEGIN
+        ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS allergens JSONB DEFAULT '[]'::jsonb;
+        ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS ingredients TEXT;
+        ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS portions JSONB DEFAULT '[]'::jsonb;
+        ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS dietary_tags JSONB DEFAULT '[]'::jsonb;
+        ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS is_special BOOLEAN DEFAULT FALSE;
+        ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS prep_time_minutes INT DEFAULT 15;
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+
+    -- 1.3 Users role check constraint (Support SUPER_ADMIN & MANAGER)
+    BEGIN
+        ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+        ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('SUPER_ADMIN', 'MANAGER', 'RECEPTIONIST', 'KITCHEN', 'WAITER', 'CUSTOMER'));
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+END $$;
+
+-- ----------------------------------------------------------------------------
+-- STEP 2: Fail-Safe Dynamic Truncate (Wipes all transactional & entity tables)
+-- ----------------------------------------------------------------------------
 DO $$
 DECLARE
     tbl RECORD;
 BEGIN
     FOR tbl IN (
-        SELECT tablename 
+        SELECT schemaname, tablename 
         FROM pg_tables 
-        WHERE schemaname = 'restaurant_pos' 
-          AND tablename NOT IN ('schema_migrations')
+        WHERE schemaname IN ('restaurant_pos', 'public')
+          AND tablename IN (
+              'order_items', 'orders', 'payments', 'dining_sessions',
+              'reservations', 'help_requests', 'customer_issues', 'notifications',
+              'delivery_addresses', 'customer_feedbacks', 'customer_loyalty',
+              'walk_in_waitlist', 'receipt_deliveries', 'audit_logs',
+              'inventory_items', 'menu_items', 'menu_categories',
+              'tables', 'users', 'restaurants'
+          )
     ) LOOP
-        EXECUTE 'TRUNCATE TABLE restaurant_pos.' || quote_ident(tbl.tablename) || ' CASCADE;';
+        BEGIN
+            EXECUTE 'TRUNCATE TABLE ' || quote_ident(tbl.schemaname) || '.' || quote_ident(tbl.tablename) || ' CASCADE;';
+        EXCEPTION WHEN OTHERS THEN NULL;
+        END LOOP;
     END LOOP;
 END $$;
 
 -- ----------------------------------------------------------------------------
--- 1. Insert primary clean restaurant shell
+-- STEP 3: Insert primary clean restaurant shell
 -- ----------------------------------------------------------------------------
-INSERT INTO restaurant_pos.restaurants (
+INSERT INTO restaurants (
     restaurant_id,
     name,
     logo,
@@ -54,9 +99,9 @@ SET name = 'Bistro & Bloom',
     updated_at = NOW();
 
 -- ----------------------------------------------------------------------------
--- 2. Insert primary Super Admin account (Password: Admin@12345)
+-- STEP 4: Insert primary Super Admin account (Password: Admin@12345)
 -- ----------------------------------------------------------------------------
-INSERT INTO restaurant_pos.users (
+INSERT INTO users (
     user_id,
     restaurant_id,
     name,
@@ -74,7 +119,7 @@ INSERT INTO restaurant_pos.users (
     'Super Admin',
     'admin@bistropos.com',
     '+91 99999 00001',
-    '$2a$11$w8/q3m2eA8zJ5m7nB3r9TuG4h.8Z.u2v8kP.vYg/H8K1.p2wEa2XW', -- Auto-verified and synced by backend on startup
+    '$2a$11$w8/q3m2eA8zJ5m7nB3r9TuG4h.8Z.u2v8kP.vYg/H8K1.p2wEa2XW', -- Verified & synced by backend startup
     'SUPER_ADMIN',
     'ACTIVE',
     TRUE,
@@ -87,36 +132,46 @@ SET email = 'admin@bistropos.com',
     updated_at = NOW();
 
 -- ----------------------------------------------------------------------------
--- 3. Insert 12 clean empty tables for floor plan and QR dine-in
+-- STEP 5: Insert 12 clean empty tables for floor plan and QR dine-in
+-- (Uses base schema columns; dining_area is updated below if available)
 -- ----------------------------------------------------------------------------
-INSERT INTO restaurant_pos.tables (
+INSERT INTO tables (
     table_id,
     restaurant_id,
     table_number,
     capacity,
     status,
     qr_identifier,
-    dining_area,
     created_at,
     updated_at
 ) VALUES 
-    (gen_random_uuid(), 'a0000000-0000-0000-0000-000000000001', 1, 2, 'AVAILABLE', 'QR_a0000000000000000000000000000001_TBL01', 'everyday', NOW(), NOW()),
-    (gen_random_uuid(), 'a0000000-0000-0000-0000-000000000001', 2, 2, 'AVAILABLE', 'QR_a0000000000000000000000000000001_TBL02', 'everyday', NOW(), NOW()),
-    (gen_random_uuid(), 'a0000000-0000-0000-0000-000000000001', 3, 4, 'AVAILABLE', 'QR_a0000000000000000000000000000001_TBL03', 'everyday', NOW(), NOW()),
-    (gen_random_uuid(), 'a0000000-0000-0000-0000-000000000001', 4, 4, 'AVAILABLE', 'QR_a0000000000000000000000000000001_TBL04', 'everyday', NOW(), NOW()),
-    (gen_random_uuid(), 'a0000000-0000-0000-0000-000000000001', 5, 4, 'AVAILABLE', 'QR_a0000000000000000000000000000001_TBL05', 'everyday', NOW(), NOW()),
-    (gen_random_uuid(), 'a0000000-0000-0000-0000-000000000001', 6, 6, 'AVAILABLE', 'QR_a0000000000000000000000000000001_TBL06', 'group', NOW(), NOW()),
-    (gen_random_uuid(), 'a0000000-0000-0000-0000-000000000001', 7, 6, 'AVAILABLE', 'QR_a0000000000000000000000000000001_TBL07', 'group', NOW(), NOW()),
-    (gen_random_uuid(), 'a0000000-0000-0000-0000-000000000001', 8, 8, 'AVAILABLE', 'QR_a0000000000000000000000000000001_TBL08', 'group', NOW(), NOW()),
-    (gen_random_uuid(), 'a0000000-0000-0000-0000-000000000001', 9, 2, 'AVAILABLE', 'QR_a0000000000000000000000000000001_TBL09', 'everyday', NOW(), NOW()),
-    (gen_random_uuid(), 'a0000000-0000-0000-0000-000000000001', 10, 4, 'AVAILABLE', 'QR_a0000000000000000000000000000001_TBL10', 'everyday', NOW(), NOW()),
-    (gen_random_uuid(), 'a0000000-0000-0000-0000-000000000001', 11, 4, 'AVAILABLE', 'QR_a0000000000000000000000000000001_TBL11', 'everyday', NOW(), NOW()),
-    (gen_random_uuid(), 'a0000000-0000-0000-0000-000000000001', 12, 8, 'AVAILABLE', 'QR_a0000000000000000000000000000001_TBL12', 'group', NOW(), NOW());
+    (gen_random_uuid(), 'a0000000-0000-0000-0000-000000000001', 1, 2, 'AVAILABLE', 'QR_a0000000000000000000000000000001_TBL01', NOW(), NOW()),
+    (gen_random_uuid(), 'a0000000-0000-0000-0000-000000000001', 2, 2, 'AVAILABLE', 'QR_a0000000000000000000000000000001_TBL02', NOW(), NOW()),
+    (gen_random_uuid(), 'a0000000-0000-0000-0000-000000000001', 3, 4, 'AVAILABLE', 'QR_a0000000000000000000000000000001_TBL03', NOW(), NOW()),
+    (gen_random_uuid(), 'a0000000-0000-0000-0000-000000000001', 4, 4, 'AVAILABLE', 'QR_a0000000000000000000000000000001_TBL04', NOW(), NOW()),
+    (gen_random_uuid(), 'a0000000-0000-0000-0000-000000000001', 5, 4, 'AVAILABLE', 'QR_a0000000000000000000000000000001_TBL05', NOW(), NOW()),
+    (gen_random_uuid(), 'a0000000-0000-0000-0000-000000000001', 6, 6, 'AVAILABLE', 'QR_a0000000000000000000000000000001_TBL06', NOW(), NOW()),
+    (gen_random_uuid(), 'a0000000-0000-0000-0000-000000000001', 7, 6, 'AVAILABLE', 'QR_a0000000000000000000000000000001_TBL07', NOW(), NOW()),
+    (gen_random_uuid(), 'a0000000-0000-0000-0000-000000000001', 8, 8, 'AVAILABLE', 'QR_a0000000000000000000000000000001_TBL08', NOW(), NOW()),
+    (gen_random_uuid(), 'a0000000-0000-0000-0000-000000000001', 9, 2, 'AVAILABLE', 'QR_a0000000000000000000000000000001_TBL09', NOW(), NOW()),
+    (gen_random_uuid(), 'a0000000-0000-0000-0000-000000000001', 10, 4, 'AVAILABLE', 'QR_a0000000000000000000000000000001_TBL10', NOW(), NOW()),
+    (gen_random_uuid(), 'a0000000-0000-0000-0000-000000000001', 11, 4, 'AVAILABLE', 'QR_a0000000000000000000000000000001_TBL11', NOW(), NOW()),
+    (gen_random_uuid(), 'a0000000-0000-0000-0000-000000000001', 12, 8, 'AVAILABLE', 'QR_a0000000000000000000000000000001_TBL12', NOW(), NOW());
+
+-- Safe assignment of dining_area for group tables
+DO $$
+BEGIN
+    UPDATE tables 
+    SET dining_area = 'group' 
+    WHERE restaurant_id = 'a0000000-0000-0000-0000-000000000001' 
+      AND table_number IN (6, 7, 8, 12);
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
 
 -- ----------------------------------------------------------------------------
--- 4. Insert baseline starter menu categories
+-- STEP 6: Insert baseline starter menu categories
 -- ----------------------------------------------------------------------------
-INSERT INTO restaurant_pos.menu_categories (category_id, restaurant_id, name, description, sort_order, status, created_at, updated_at)
+INSERT INTO menu_categories (category_id, restaurant_id, name, description, sort_order, status, created_at, updated_at)
 VALUES
     ('c0000001-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', 'Pizza', 'Wood-fired artisan pizzas', 1, 'ACTIVE', NOW(), NOW()),
     ('c0000001-0000-0000-0000-000000000002', 'a0000000-0000-0000-0000-000000000001', 'Burger', 'Handcrafted burgers on brioche buns', 2, 'ACTIVE', NOW(), NOW()),
@@ -128,9 +183,10 @@ VALUES
 ON CONFLICT (category_id) DO NOTHING;
 
 -- ----------------------------------------------------------------------------
--- 5. Insert baseline starter dishes
+-- STEP 7: Insert baseline starter dishes
+-- (Uses base schema columns guaranteed across all migrations)
 -- ----------------------------------------------------------------------------
-INSERT INTO restaurant_pos.menu_items (
+INSERT INTO menu_items (
     menu_item_id, restaurant_id, category_id, name, description, price, image,
     veg_nonveg, availability, spice_level, is_sweet, customization_options, add_ons, created_at, updated_at
 ) VALUES
