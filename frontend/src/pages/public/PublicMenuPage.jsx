@@ -18,11 +18,13 @@ export default function PublicMenuPage({ onOpenCart }) {
   const [isCategoryOpen, setIsCategoryOpen] = useState(false);
   const categoryPanelRef = useRef(null);
   const [selectedItemForModal, setSelectedItemForModal] = useState(null);
+  const [lang, setLang] = useState('en');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
 
-  const { addItem, itemCount, orderSource, setOrderSource } = useCart();
+  const t = translations[lang] || translations.en;
+  const { addItem, items, itemCount, orderSource, setOrderSource } = useCart();
   const { addToast } = useNotification();
 
   useEffect(() => {
@@ -295,7 +297,7 @@ export default function PublicMenuPage({ onOpenCart }) {
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   loading="lazy"
                 />
-                <div className="absolute top-2.5 left-2.5 flex items-center space-x-1.5">
+                <div className="absolute top-2.5 left-2.5 flex items-center space-x-1.5 flex-wrap gap-1">
                   <span className={`w-4 h-4 rounded-sm border bg-white/95 flex items-center justify-center ${
                     item.vegNonveg === 'VEG' ? 'border-emerald-600' : 'border-rose-600'
                   }`}>
@@ -306,6 +308,11 @@ export default function PublicMenuPage({ onOpenCart }) {
                   <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#11164B]/80 text-[#FAF1F0] backdrop-blur-xs">
                     {item.categoryName}
                   </span>
+                  {item.isSpecial && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500 text-white shadow-xs">
+                      ⭐ Chef Special
+                    </span>
+                  )}
                 </div>
                 {!item.availability && (
                   <div className="absolute inset-0 bg-[#11164B]/70 flex items-center justify-center text-[#FAF1F0] font-medium text-xs">
@@ -321,21 +328,20 @@ export default function PublicMenuPage({ onOpenCart }) {
                 <p className="text-xs text-[#75666B] line-clamp-2 mt-1 leading-relaxed">
                   {item.description}
                 </p>
-                <div className="flex items-center space-x-2 mt-2">
-                  {item.isSweet && (
+                {item.isSweet && (
+                  <div className="flex flex-wrap items-center gap-1.5 mt-2">
                     <span className="text-[10px] text-pink-700 bg-pink-50 border border-pink-200 px-2 py-0.5 rounded font-medium">Sweet</span>
-                  )}
-                  {item.spiceLevel !== 'NONE' && (
-                    <span className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded font-medium">{item.spiceLevel}</span>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             </div>
 
             <div className="flex items-center justify-between pt-3 mt-3 border-t border-[#E8D1CE]">
               <div>
                 <span className="text-[10px] uppercase font-bold tracking-wider text-[#75666B]">Price</span>
-                <p className="text-base font-bold text-[#11164B]">₹{item.price}</p>
+                <p className="text-base font-bold text-[#11164B]">
+                  ₹{item.portions && item.portions.length > 0 ? item.portions[0].price : item.price}
+                </p>
               </div>
 
               {item.availability ? (
@@ -359,9 +365,9 @@ export default function PublicMenuPage({ onOpenCart }) {
         isOpen={Boolean(selectedItemForModal)}
         onClose={() => setSelectedItemForModal(null)}
         item={selectedItemForModal}
-        onAddToCart={(item, qty, cust, addons, note) => {
-          addItem(item, qty, cust, addons, note);
-          addToast(`Added ${item.name} to cart.`, 'success');
+        onAddToCart={(item, qty, cust, addons, note, portion) => {
+          addItem(item, qty, cust, addons, note, portion);
+          addToast(`Added ${item.name}${portion ? ` (${portion.name})` : ''} to cart.`, 'success');
         }}
       />
     </div>
