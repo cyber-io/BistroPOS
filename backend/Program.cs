@@ -1,6 +1,7 @@
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.ResponseCompression;
 using FluentValidation;
 using FluentValidation.AspNetCore;
 using RestaurantSystem.Api.Validators;
@@ -188,10 +189,18 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     options.KnownProxies.Clear();
 });
 
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+});
+
 var app = builder.Build();
 
 // 8. Middleware Pipeline
 app.UseForwardedHeaders();
+app.UseResponseCompression();
 app.UseMiddleware<SecurityHeadersMiddleware>();
 if (!app.Environment.IsDevelopment())
 {

@@ -116,21 +116,29 @@ export default function HomePage() {
             className="website-hero-leaf website-hero-leaf--top"
             src="/images/reference/basil-leaf.webp"
             alt=""
+            loading="lazy"
+            decoding="async"
           />
           <img
             className="website-hero-leaf website-hero-leaf--bottom"
             src="/images/reference/basil-leaf.webp"
             alt=""
+            loading="lazy"
+            decoding="async"
           />
           <img
             className="website-hero-tomato website-hero-tomato--top"
             src="/images/reference/cherry-tomato.webp"
             alt=""
+            loading="lazy"
+            decoding="async"
           />
           <img
             className="website-hero-tomato website-hero-tomato--bottom"
             src="/images/reference/cherry-tomato.webp"
             alt=""
+            loading="lazy"
+            decoding="async"
           />
           <Leaf
             className="website-hero-sketch website-hero-sketch--one"

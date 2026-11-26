@@ -296,6 +296,7 @@ export default function PublicMenuPage({ onOpenCart }) {
                   alt={item.name}
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   loading="lazy"
+                  decoding="async"
                 />
                 <div className="absolute top-2.5 left-2.5 flex items-center space-x-1.5 flex-wrap gap-1">
                   <span className={`w-4 h-4 rounded-sm border bg-white/95 flex items-center justify-center ${
