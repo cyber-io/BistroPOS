@@ -141,7 +141,7 @@ async function request(path, { method = 'GET', body, accessToken, signal } = {})
           : response.status === 401
             ? 'Please sign in to continue.'
             : 'The request could not be completed. Please try again.';
-    const error = new Error(data?.detail || data?.Detail || data?.message || data?.Message || data?.title || data?.Title || validation || fallbackMsg);
+    const error = new Error(data?.detail || data?.Detail || data?.message || data?.Message || data?.error || data?.Error || data?.title || data?.Title || validation || fallbackMsg);
     error.status = response.status;
     throw error;
   }
@@ -321,37 +321,13 @@ export const api = {
     };
     return restaurantCache;
   },
-  getTables: (targetRestaurantId) => request(`/tables${query({ restaurantId: targetRestaurantId || restaurantId })}`),
-  getTableById: async (tableId, targetRestaurantId) => {
-    if (!tableId) return null;
-    const resId = targetRestaurantId || restaurantId;
-    if (/^\d+$/.test(String(tableId))) {
-      try {
-        const tables = await api.getTables(resId);
-        const found = tables.find(t => t.tableNumber === Number(tableId) || String(t.tableId).toLowerCase() === String(tableId).toLowerCase());
-        if (found) return found;
-      } catch {}
-    }
-    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(tableId))) {
-      try {
-        const table = await request(`/tables/${encodeURIComponent(tableId)}`);
-        if (table) return table;
-      } catch {}
-    }
-    try {
-      const tables = await api.getTables(resId);
-      return tables.find(t =>
-        String(t.tableId).toLowerCase() === String(tableId).toLowerCase() ||
-        String(t.tableNumber) === String(tableId) ||
-        String(t.qrIdentifier).toLowerCase() === String(tableId).toLowerCase()
-      ) || null;
-    } catch {
-      return null;
-    }
+  getTables: () => request(`/tables${query({ restaurantId })}`),
+  getTableById: async tableId => {
+    if (/^\d+$/.test(String(tableId))) return (await api.getTables()).find(table => table.tableNumber === Number(tableId)) || null;
+    return request(`/tables/${encodeURIComponent(tableId)}`);
   },
-  createTable: data => request(`/tables${query({ restaurantId: data?.restaurantId || restaurantId })}`, { method: 'POST', body: data }),
-  updateTable: (id, data) => request(`/tables/${id}`, { method: 'PUT', body: data }),
-  deleteTable: id => request(`/tables/${id}`, { method: 'DELETE' }),
+  getTableSession: async () => null,
+  closeTableSession: async () => ({ success: true }),
   updateTableStatus: (tableId, status, customerName = null, assignedWaiterId = null) => request(`/tables/${tableId}/status`, { method: 'PUT', body: { status, customerName, assignedWaiterId } }).then(result => {
     broadcastEvent('TABLE_STATUS_UPDATED', { tableId, status, customerName });
     return result;

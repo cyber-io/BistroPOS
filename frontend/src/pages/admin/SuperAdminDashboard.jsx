@@ -38,6 +38,7 @@ export default function SuperAdminDashboard() {
   useEffect(() => {
     localStorage.setItem('bistro_pos_theme', dark ? 'dark' : 'light');
     document.documentElement.classList.toggle('dark', dark);
+    document.documentElement.classList.toggle('pos-dark', dark);
   }, [dark]);
 
   const loadData = async () => {
@@ -110,7 +111,7 @@ export default function SuperAdminDashboard() {
   }, [managers, search]);
 
   return (
-    <div className={`saas-admin-container ${dark ? 'dark' : ''}`} style={{
+    <div className={`saas-admin-container pos-app ${dark ? 'pos-dark dark' : ''}`} style={{
       minHeight: '100vh',
       backgroundColor: 'var(--p-bg, #f8fafc)',
       color: 'var(--p-text, #0f172a)',
@@ -171,9 +172,11 @@ export default function SuperAdminDashboard() {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <button
-            onClick={() => setDark(!dark)}
+            type="button"
+            onClick={() => setDark(d => !d)}
             className="pos-icon-button"
-            title="Toggle theme"
+            title={dark ? 'Switch to light theme' : 'Switch to dark theme'}
+            aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'}
             style={{ width: 38, height: 38, borderRadius: 10, border: '1px solid var(--p-border)' }}
           >
             {dark ? <Sun size={17} /> : <Moon size={17} />}

@@ -47,6 +47,22 @@ export default function QrDineInPage() {
   const [activeCategory, setActiveCategory] = useState('ALL');
   const [vegFilter, setVegFilter] = useState('ALL'); // ALL, VEG, NON_VEG
   const [searchQuery, setSearchQuery] = useState('');
+  const [timeBudget, setTimeBudget] = useState(0); // 0 = any, 15, 25, 35 mins
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const filterPanelRef = useRef(null);
+  const [isCategoryOpen, setIsCategoryOpen] = useState(false);
+  const categoryPanelRef = useRef(null);
+  const [tableSession, setTableSession] = useState(null);
+  const [tableOrders, setTableOrders] = useState([]);
+  const [paidOrderIds, setPaidOrderIds] = useState(new Set());
+  const [activeTab, setActiveTab] = useState('MENU'); // 'MENU' | 'TABLE_ORDERS' | 'ENTERTAINMENT'
+  const [lang, setLang] = useState('en'); // 'en' or 'hi'
+  const [isSplitModalOpen, setIsSplitModalOpen] = useState(false);
+  const [isPayModalOpen, setIsPayModalOpen] = useState(false);
+  const [isFeedbackReceiptOpen, setIsFeedbackReceiptOpen] = useState(false);
+  const [isEntertainmentOpen, setIsEntertainmentOpen] = useState(false);
+  const [selectedOrderForFeedback, setSelectedOrderForFeedback] = useState(null);
+  const t = translations[lang] || translations.en;
 
   // Modals & Drawers
   const [isHelpOpen, setIsHelpOpen] = useState(false);
@@ -188,6 +204,21 @@ export default function QrDineInPage() {
     return () => clearInterval(interval);
   }, [activeOrder]);
 
+  // Click-outside to close filter & category dropdowns
+  useEffect(() => {
+    if (!isFilterOpen && !isCategoryOpen) return;
+    const handler = (e) => {
+      if (isFilterOpen && filterPanelRef.current && !filterPanelRef.current.contains(e.target)) {
+        setIsFilterOpen(false);
+      }
+      if (isCategoryOpen && categoryPanelRef.current && !categoryPanelRef.current.contains(e.target)) {
+        setIsCategoryOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [isFilterOpen, isCategoryOpen]);
+
   // Checkout and Guest Details Verification
   const handleCheckoutClick = () => {
     if (!items.length) return;
@@ -282,30 +313,34 @@ export default function QrDineInPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 pb-28">
-      {/* 1. Mobile-First Dedicated QR Menu Header (Section 4) */}
-      <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-sm">
-        <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
+      {/* 1. Mobile-First Dedicated QR Menu Header matching screenshot */}
+      <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-xs">
+        <div className="max-w-2xl mx-auto px-3 sm:px-4 py-3 flex items-center justify-between gap-2">
+          {/* Left: Restaurant Logo & Table Title */}
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
             <img
               src={restaurant.logo || '/favicon.svg'}
               alt={restaurant?.name}
-              className="w-10 h-10 rounded-xl object-cover shadow-sm ring-2 ring-brand-100"
+              className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl object-cover shadow-sm ring-1 ring-slate-200 shrink-0"
             />
-            <div>
-              <h1 className="text-sm font-black text-slate-900 leading-tight">
+            <div className="min-w-0 flex-1">
+              <h1 className="text-sm font-black text-slate-900 leading-tight truncate">
                 {restaurant.name}
               </h1>
-              <div className="flex items-center space-x-1.5 mt-0.5">
-                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-black bg-brand-500 text-white shadow-sm">
+              <div className="flex items-center gap-1.5 sm:gap-2 mt-0.5 min-w-0">
+                <span className="inline-flex items-center px-2 sm:px-2.5 py-0.5 rounded-full text-[11px] font-black bg-[#1a382b] text-white shadow-xs shrink-0 whitespace-nowrap">
                   {tableTitle(table)}
                 </span>
-                <span className="text-[11px] text-slate-500">Dine-In Menu</span>
+                <span className="text-[11px] sm:text-xs text-slate-500 font-medium truncate">
+                  Dine-In Menu
+                </span>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center space-x-2">
-            {/* Help Button in Upper Right Corner (Section 7) */}
+          {/* Right: 4 Pill Action Buttons (Languages, Gamepad, Help, Cart) */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {/* 1. Language Toggle Button */}
             <button
               onClick={() => setIsHelpOpen(true)}
               className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold shadow-md shadow-amber-500/20 active:scale-95 transition-all"
@@ -475,35 +510,267 @@ export default function QrDineInPage() {
             />
           </div>
 
-          {/* Veg / Non-Veg Filters */}
-          <div className="flex items-center justify-between gap-2 overflow-x-auto pb-1">
-            <div className="flex items-center space-x-1.5 bg-slate-200/60 p-1 rounded-xl">
-              <button
-                onClick={() => setVegFilter('ALL')}
-                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                  vegFilter === 'ALL' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'
-                }`}
-              >
-                All
-              </button>
-              <button
-                onClick={() => setVegFilter('VEG')}
-                className={`px-3 py-1 rounded-lg text-xs font-bold flex items-center space-x-1 transition-all ${
-                  vegFilter === 'VEG' ? 'bg-emerald-600 text-white shadow-sm' : 'text-emerald-700'
-                }`}
-              >
-                <span className="w-2 h-2 rounded-full bg-emerald-300" />
-                <span>Pure Veg</span>
-              </button>
-              <button
-                onClick={() => setVegFilter('NON_VEG')}
-                className={`px-3 py-1 rounded-lg text-xs font-bold flex items-center space-x-1 transition-all ${
-                  vegFilter === 'NON_VEG' ? 'bg-rose-600 text-white shadow-sm' : 'text-rose-700'
-                }`}
-              >
-                <span className="w-2 h-2 rounded-full bg-rose-300" />
-                <span>Non-Veg</span>
-              </button>
+        {/* Tab 2: Menu & Ordering (Feature 1 & Feature 9) */}
+        {activeTab === 'MENU' && (
+          <>
+            {/* AI Recommendations Rail (Feature 9) */}
+            <AiRecommendationsRail menuItems={menuItems} cartItems={items} lang={lang} />
+
+            {/* Search & Filters matching screenshot */}
+            <div className="space-y-2.5">
+              {/* Search Bar */}
+              <div className="relative">
+                <Search className="w-4 h-4 absolute left-3.5 top-3.5 text-slate-400" />
+                <input
+                  type="text"
+                  aria-label="Search dishes, ingredients"
+                  placeholder="Search dishes, ingredients (e.g. Paneer, Pizza, Dosa)..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full text-xs pl-10 pr-4 py-3 rounded-2xl border border-slate-200 bg-white shadow-xs focus:outline-none focus:ring-2 focus:ring-slate-300 placeholder:text-slate-400 text-slate-800"
+                />
+              </div>
+
+              {/* ── Compact Filter Row: dropdown trigger + category tabs ── */}
+              {(() => {
+                // Count active filters for badge
+                const activeFilterCount = [
+                  dietaryFilter !== 'ALL',
+                  timeBudget !== 0,
+                ].filter(Boolean).length;
+
+                const timeBudgetOptions = [
+                  { label: 'Any time', mins: 0 },
+                  { label: '⚡ 15m', mins: 15 },
+                  { label: '⏱️ 25m', mins: 25 },
+                  { label: '🍲 35m', mins: 35 },
+                ];
+
+                const dietaryLabel = {
+                  ALL: 'All',
+                  VEG: '🟢 Pure Veg',
+                  NON_VEG: '🔴 Non-Veg',
+                  VEGAN: '🌱 Vegan',
+                  GLUTEN_FREE: '🌾 Gluten-Free',
+                  SPECIAL: '⭐ Specials',
+                }[dietaryFilter] || 'All';
+
+                const timeBudgetLabel = timeBudget === 0
+                  ? 'Any time'
+                  : timeBudgetOptions.find(b => b.mins === timeBudget)?.label;
+
+                return (
+                  <div className="flex items-center gap-2">
+
+                    {/* ── Filter Dropdown Trigger ── */}
+                    <div className="relative shrink-0" ref={filterPanelRef}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsFilterOpen(o => !o);
+                          setIsCategoryOpen(false);
+                        }}
+                        className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-all shadow-xs ${
+                          activeFilterCount > 0
+                            ? 'bg-slate-900 text-white border-slate-900'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        <SlidersHorizontal className="w-3.5 h-3.5" />
+                        <span>Filters</span>
+                        {activeFilterCount > 0 && (
+                          <span className="bg-orange-400 text-white text-[9px] font-black rounded-full w-4 h-4 flex items-center justify-center leading-none">
+                            {activeFilterCount}
+                          </span>
+                        )}
+                        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isFilterOpen ? 'rotate-180' : ''}`} />
+                      </button>
+
+                      {/* ── Dropdown Panel ── */}
+                      {isFilterOpen && (
+                        <div className="absolute top-full left-0 mt-1.5 z-50 bg-white rounded-2xl border border-slate-200 shadow-xl p-4 w-72">
+
+                          {/* Header */}
+                          <div className="flex items-center justify-between mb-3">
+                            <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                              <SlidersHorizontal className="w-3.5 h-3.5" /> Filters
+                            </span>
+                            {activeFilterCount > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => { setDietaryFilter('ALL'); setTimeBudget(0); }}
+                                className="text-[10px] text-orange-500 font-bold hover:text-orange-700 flex items-center gap-0.5"
+                              >
+                                <X className="w-3 h-3" /> Clear all
+                              </button>
+                            )}
+                          </div>
+
+                          {/* ── Type: Veg / Non-Veg ── */}
+                          <div className="mb-3">
+                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Type</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {[
+                                { val: 'ALL', label: 'All' },
+                                { val: 'VEG', label: '🟢 Pure Veg' },
+                                { val: 'NON_VEG', label: '🔴 Non-Veg' },
+                              ].map(opt => (
+                                <button
+                                  key={opt.val}
+                                  type="button"
+                                  onClick={() => setDietaryFilter(opt.val)}
+                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all ${
+                                    dietaryFilter === opt.val
+                                      ? 'bg-slate-900 text-white border-slate-900'
+                                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                                  }`}
+                                >
+                                  {opt.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* ── Prep Time ── */}
+                          <div className="mb-3">
+                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Prep Time</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {timeBudgetOptions.map(b => (
+                                <button
+                                  key={b.mins}
+                                  type="button"
+                                  onClick={() => setTimeBudget(b.mins)}
+                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all ${
+                                    timeBudget === b.mins
+                                      ? 'bg-amber-500 text-white border-amber-500'
+                                      : 'bg-amber-50 text-amber-900 border-amber-200 hover:bg-amber-100'
+                                  }`}
+                                >
+                                  {b.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* ── Dietary Tags ── */}
+                          <div>
+                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Dietary</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {[
+                                { val: 'SPECIAL', label: '⭐ Daily Specials' },
+                                { val: 'VEGAN',   label: '🌱 Vegan' },
+                                { val: 'GLUTEN_FREE', label: '🌾 Gluten-Free' },
+                              ].map(opt => (
+                                <button
+                                  key={opt.val}
+                                  type="button"
+                                  onClick={() => setDietaryFilter(dietaryFilter === opt.val ? 'ALL' : opt.val)}
+                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all ${
+                                    dietaryFilter === opt.val
+                                      ? 'bg-emerald-600 text-white border-emerald-600'
+                                      : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+                                  }`}
+                                >
+                                  {opt.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Active filter summary */}
+                          {activeFilterCount > 0 && (
+                            <div className="mt-3 pt-3 border-t border-slate-100 text-[10px] text-slate-500 font-medium flex flex-wrap gap-1">
+                              {dietaryFilter !== 'ALL' && (
+                                <span className="bg-slate-100 px-2 py-0.5 rounded-full">{dietaryLabel}</span>
+                              )}
+                              {timeBudget !== 0 && (
+                                <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">{timeBudgetLabel}</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ── Category Dropdown Trigger ── */}
+                    {(() => {
+                      const activeCatObj = categories.find(c => c.categoryId === activeCategory);
+                      const isCatFiltered = activeCategory !== 'ALL' && Boolean(activeCatObj);
+                      return (
+                        <div className="relative shrink-0" ref={categoryPanelRef}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsCategoryOpen(o => !o);
+                              setIsFilterOpen(false);
+                            }}
+                            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-all shadow-xs ${
+                              isCatFiltered
+                                ? 'bg-[#0f172a] text-white border-[#0f172a]'
+                                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                            }`}
+                          >
+                            <Utensils className="w-3.5 h-3.5" />
+                            <span>Category</span>
+                            {isCatFiltered && (
+                              <span className="bg-white/20 text-white text-[10px] font-semibold px-1.5 py-0.5 rounded-md max-w-[110px] truncate">
+                                {activeCatObj.icon || getCategoryIcon(activeCatObj.name)} {activeCatObj.name}
+                              </span>
+                            )}
+                            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isCategoryOpen ? 'rotate-180' : ''}`} />
+                          </button>
+
+                          {isCategoryOpen && (
+                            <div className="absolute top-full left-0 mt-1.5 z-50 bg-white rounded-2xl border border-slate-200 shadow-xl p-2 w-56 max-h-72 overflow-y-auto">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveCategory('ALL');
+                                  setIsCategoryOpen(false);
+                                }}
+                                className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all ${
+                                  activeCategory === 'ALL'
+                                    ? 'bg-[#0f172a] text-white'
+                                    : 'text-slate-700 hover:bg-slate-50'
+                                }`}
+                              >
+                                <span>All Items</span>
+                                {activeCategory === 'ALL' && <Check className="w-3.5 h-3.5" />}
+                              </button>
+
+                              {categories.map((cat) => {
+                                const icon = cat.icon || getCategoryIcon(cat.name);
+                                const isActive = activeCategory === cat.categoryId;
+                                return (
+                                  <button
+                                    key={cat.categoryId}
+                                    type="button"
+                                    onClick={() => {
+                                      setActiveCategory(cat.categoryId);
+                                      setIsCategoryOpen(false);
+                                    }}
+                                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all mt-0.5 ${
+                                      isActive
+                                        ? 'bg-[#0f172a] text-white'
+                                        : 'text-slate-800 hover:bg-slate-50'
+                                    }`}
+                                  >
+                                    <span className="flex items-center gap-2 truncate">
+                                      <span>{icon}</span>
+                                      <span className="truncate">{cat.name}</span>
+                                    </span>
+                                    {isActive && <Check className="w-3.5 h-3.5 shrink-0" />}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                );
+              })()}
             </div>
           </div>
 

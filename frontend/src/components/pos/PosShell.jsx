@@ -11,7 +11,7 @@ const frontLinks = [
   ['/pos/tables', 'Table', Armchair],
   ['/pos/reservations', 'Reservation', CalendarDays],
   ['/pos/history', 'History', History],
-  ['/pos/inventory', 'Inventory', Package],
+  ['/pos/inventory', 'Menu', Package],
 ];
 
 export default function PosShell({ children, alertCount = 0, onAlerts, menuDots = {} }) {
@@ -43,6 +43,8 @@ export default function PosShell({ children, alertCount = 0, onAlerts, menuDots 
 
   useEffect(() => {
     localStorage.setItem('bistro_pos_theme', dark ? 'dark' : 'light');
+    document.documentElement.classList.toggle('dark', dark);
+    document.documentElement.classList.toggle('pos-dark', dark);
   }, [dark]);
 
   // Load current restaurant details and full outlet list for Super Admin
@@ -226,9 +228,10 @@ export default function PosShell({ children, alertCount = 0, onAlerts, menuDots 
 
         <div className="pos-top-actions">
           <button
+            type="button"
             className="pos-icon-button"
             aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'}
-            onClick={() => setDark(!dark)}
+            onClick={() => setDark(d => !d)}
           >
             {dark ? <Sun size={18} /> : <Moon size={18} />}
           </button>
