@@ -168,50 +168,7 @@ public class AuthService(
 
         if (user == null)
         {
-            if (targetRole == UserRoles.Manager)
-            {
-                // Prefer the default restaurant manager (Rohit Mehta at Bistro & Bloom) matching Receptionist demo experience
-                user = await db.Users.FirstOrDefaultAsync(u => u.Role == targetRole && u.RestaurantId == UserProvisioning.DefaultRestaurantId)
-                    ?? await db.Users.FirstOrDefaultAsync(u => u.Role == targetRole);
-            }
-            else
-            {
-                user = await db.Users.FirstOrDefaultAsync(u => u.Role == targetRole);
-            }
-        }
-
-        var devSecret = Environment.GetEnvironmentVariable("DEV_DEMO_SEED_PASSWORD") ?? "Password@123";
-        if (user == null && targetRole == UserRoles.Manager)
-        {
-            var firstRestaurant = restaurantId.HasValue
-                ? await db.Restaurants.FindAsync(restaurantId.Value)
-                : await db.Restaurants.FirstOrDefaultAsync();
-
-            var existingByEmail = await db.Users.FirstOrDefaultAsync(u => u.Email.ToLower() == "manager.rahul@royalpalace.com" || u.Email.ToLower() == "manager@sunrisecafe.com");
-            if (existingByEmail != null)
-            {
-                existingByEmail.Role = UserRoles.Manager;
-                existingByEmail.Status = "ACTIVE";
-                user = existingByEmail;
-            }
-            else
-            {
-                user = new User
-                {
-                    UserId = Guid.NewGuid(),
-                    RestaurantId = firstRestaurant?.RestaurantId,
-                    Name = "Rahul Sharma (Manager)",
-                    Email = "manager.rahul@royalpalace.com",
-                    Phone = "+91 98000 00010",
-                    Role = UserRoles.Manager,
-                    Status = "ACTIVE",
-                    PasswordHash = BCrypt.Net.BCrypt.HashPassword(devSecret),
-                    EmailVerified = true
-                };
-                db.Users.Add(user);
-            }
-
-            await db.SaveChangesAsync();
+            user = await db.Users.FirstOrDefaultAsync(u => u.Role == targetRole);
         }
 
         return user == null
