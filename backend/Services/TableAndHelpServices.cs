@@ -21,6 +21,15 @@ public class TableService : ITableService
 
     public async Task<List<TableDto>> GetTablesAsync(Guid restaurantId)
     {
+        if (restaurantId == Guid.Empty)
+        {
+            restaurantId = await _db.Restaurants.Where(r => r.Status == "ACTIVE").Select(r => r.RestaurantId).FirstOrDefaultAsync();
+            if (restaurantId == Guid.Empty)
+                restaurantId = await _db.Restaurants.Select(r => r.RestaurantId).FirstOrDefaultAsync();
+            if (restaurantId == Guid.Empty)
+                restaurantId = UserProvisioning.DefaultRestaurantId;
+        }
+
         var tables = await _db.Tables
             .Include(t => t.AssignedWaiter)
             .Where(t => t.RestaurantId == restaurantId)

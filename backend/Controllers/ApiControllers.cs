@@ -364,9 +364,14 @@ public class TablesController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<IActionResult> GetTables([FromQuery] Guid restaurantId)
+    public async Task<IActionResult> GetTables([FromQuery] Guid? restaurantId)
     {
-        var list = await _tables.GetTablesAsync(restaurantId);
+        var targetId = (restaurantId.HasValue && restaurantId.Value != Guid.Empty)
+            ? restaurantId.Value
+            : (_tenant.RestaurantId.HasValue && _tenant.RestaurantId.Value != Guid.Empty
+                ? _tenant.RestaurantId.Value
+                : Guid.Empty);
+        var list = await _tables.GetTablesAsync(targetId);
         if (User.Identity?.IsAuthenticated != true || User.IsInRole(UserRoles.Customer))
             list = list.Select(t => t with { CurrentCustomerName = null, AssignedWaiterId = null, AssignedWaiterName = null, QrIdentifier = "" }).ToList();
         return Ok(list);
