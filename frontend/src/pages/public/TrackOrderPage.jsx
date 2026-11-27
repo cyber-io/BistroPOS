@@ -26,7 +26,7 @@ export default function TrackOrderPage() {
   useEffect(() => { if (activeQuery) fetchOrder(activeQuery); }, [activeQuery, fetchOrder]);
   useEffect(() => {
     if (!activeQuery) return;
-    const timer = setInterval(() => fetchOrder(activeQuery, true), 5000);
+    const timer = setInterval(() => fetchOrder(activeQuery, true), 30000);
     const unsub = subscribeRealtimeEvents((type, payload) => {
       if (type === 'ORDER_STATUS_CHANGED' && payload.orderId === order?.orderId) fetchOrder(activeQuery, true);
     });

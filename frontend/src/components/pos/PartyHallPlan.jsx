@@ -19,7 +19,6 @@ function Speaker({ x }) {
       <rect className="pos-party-speaker" width={34} height={54} rx={5} />
       <circle className="pos-party-speaker-cone" cx={17} cy={13} r={4} />
       <circle className="pos-party-speaker-cone" cx={17} cy={34} r={10} />
-      <text className="pos-party-small-label" x={17} y={72} textAnchor="middle">PA</text>
     </g>
   );
 }
@@ -65,12 +64,9 @@ export default function PartyHallPlan({ table = null, onSelect, statusLabel, gue
             {bookingLabel && <span className="pos-party-map-booking">{bookingLabel}</span>}
             {hasBill && <span className="pos-party-map-bill"><span>Open bill</span><strong>{billTotal}</strong></span>}
           </span>}
-          <svg viewBox="0 0 720 530" role="img" aria-hidden={canSelect || undefined} aria-labelledby="pos-party-map-title pos-party-map-description">
-            <title id="pos-party-map-title">Party hall seating plan</title>
-            <desc id="pos-party-map-description">Stage and two PA speakers face 70 chairs in seven rows, A to G. Each row has five chairs on either side of a center aisle. Sound control is at the back.</desc>
+          <svg viewBox="0 0 720 530" role="img" aria-hidden={canSelect || undefined}>
             <rect className="pos-party-stage" x={120} y={14} width={480} height={72} rx={10} />
-            <text className="pos-party-stage-title" x={360} y={46} textAnchor="middle">STAGE</text>
-            <text className="pos-party-stage-subtitle" x={360} y={67} textAnchor="middle">Performance &amp; presentation</text>
+            <text className="pos-party-stage-title" x={360} y={56} textAnchor="middle">STAGE</text>
             <rect className="pos-party-stage-step" x={270} y={87} width={180} height={10} rx={3} />
             <Speaker x={57} />
             <Speaker x={629} />
@@ -82,17 +78,13 @@ export default function PartyHallPlan({ table = null, onSelect, statusLabel, gue
                 ))}
               </g>
             ))}
-            <text className="pos-party-aisle-label" x={360} y={500} textAnchor="middle">CENTER AISLE</text>
             <SoundControl />
           </svg>
-          {canSelect && <span className="pos-party-map-action">Manage hall <span aria-hidden="true">↗</span></span>}
         </MapContainer>
-        {canSelect && <p className="pos-party-map-hint">Select the hall to view orders or update status.</p>}
       </div>
       <aside className="pos-party-food-stalls" aria-label="Food stalls">
         <header>
           <h3>Food stalls</h3>
-          <p>Buffet &amp; refreshments</p>
         </header>
         {foodStalls.map(stall => (
           <figure className="pos-party-food-stall" key={stall}>

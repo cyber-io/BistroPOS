@@ -7,7 +7,6 @@ public interface IAuthService
 {
     Task<AuthResponse> RegisterAsync(RegisterRequest request);
     Task<AuthResponse> LoginAsync(LoginRequest request);
-    Task<AuthResponse> DemoLoginAsync(string role, Guid? restaurantId = null);
     Task<UserDto?> GetUserByIdAsync(Guid userId);
     Task<AuthResponse> UpdateProfileAsync(Guid userId, UpdateProfileRequest request);
     Task<(bool Success, StaffDto? Staff, string Message)> CreateStaffAsync(CreateStaffRequest request);
@@ -55,14 +54,7 @@ public interface ITableService
     Task<bool> UpdateTablePositionAsync(Guid tableId, UpdateTablePositionDto request);
     Task<DiningSessionDto?> GetOrCreateActiveSessionAsync(Guid tableId);
     Task<bool> CloseSessionAsync(Guid tableId);
-}
-
-public interface IInventoryService
-{
-    Task<List<InventoryItemDto>> GetInventoryAsync(Guid restaurantId);
-    Task<InventoryItemDto> CreateItemAsync(CreateInventoryItemDto request);
-    Task<bool> UpdateStockAsync(Guid itemId, decimal quantityChange, string? reason);
-    Task<bool> ReportShortageAsync(ReportShortageDto request);
+    Task<bool> UpdateTablePositionAsync(Guid tableId, UpdateTablePositionDto request);
 }
 
 public interface IHelpRequestService
@@ -121,4 +113,23 @@ public interface IFeedbackService
 {
     Task<CustomerFeedbackDto> CreateFeedbackAsync(CreateFeedbackDto request);
     Task<List<CustomerFeedbackDto>> GetFeedbacksAsync(Guid restaurantId);
+}
+
+public interface ISmsService
+{
+    Task<TextBeeConfigDto> GetConfigAsync(Guid restaurantId);
+    Task<TextBeeConfigDto> UpdateConfigAsync(Guid restaurantId, UpdateTextBeeConfigDto dto);
+    Task<(bool Success, string Message)> SendSmsAsync(Guid? restaurantId, string phoneNumber, string message, string eventType = "SMS", string? referenceId = null, bool isPromotional = false);
+    Task EnqueueEventSmsAsync(Guid? restaurantId, string eventType, string? phoneNumber, Dictionary<string, string> variables, string? referenceId = null, bool isPromotional = false);
+    Task<(bool Success, string Message)> SendOrderReceiptSmsAsync(Guid orderId, string phoneNumber);
+    Task<List<SmsLogDto>> GetLogsAsync(Guid restaurantId, string? status = null, int limit = 50);
+    Task<SmsPreferenceDto> GetPreferencesAsync(Guid restaurantId);
+    Task<SmsPreferenceDto> UpdatePreferencesAsync(Guid restaurantId, UpdateSmsPreferenceDto dto);
+    Task<SmsConnectivityDto> CheckConnectivityAsync(Guid restaurantId);
+    Task<bool> ProcessWebhookAsync(TextBeeWebhookDto payload, string? signatureHeader, string rawBody);
+    Task SetConsentAsync(Guid restaurantId, string phoneNumber, bool promotionalOptIn, bool optedOut);
+}
+
+public interface ITextBeeSmsService : ISmsService
+{
 }

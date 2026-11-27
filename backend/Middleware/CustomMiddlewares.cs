@@ -3,6 +3,8 @@ using System.Net;
 using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using RestaurantSystem.Api.Models;
+using RestaurantSystem.Api.Repositories;
 using RestaurantSystem.Api.Security;
 
 namespace RestaurantSystem.Api.Middleware;
@@ -161,6 +163,27 @@ public class TenantSecurityMiddleware
         if (!string.IsNullOrEmpty(restaurantClaim) && Guid.TryParse(restaurantClaim, out var claimRestaurantId))
         {
             context.Items["TenantRestaurantId"] = claimRestaurantId;
+
+            // Inactive restaurant check: Block all non-superadmin staff requests if the restaurant is inactive
+            if (!(context.User?.IsInRole(UserRoles.SuperAdmin) ?? false))
+            {
+                var db = context.RequestServices.GetService<RestaurantDbContext>();
+                if (db != null)
+                {
+                    var restaurant = await db.Restaurants.FindAsync(claimRestaurantId);
+                    if (restaurant != null && string.Equals(restaurant.Status, "INACTIVE", StringComparison.OrdinalIgnoreCase))
+                    {
+                        context.Response.StatusCode = (int)HttpStatusCode.Forbidden;
+                        await context.Response.WriteAsJsonAsync(new ProblemDetails
+                        {
+                            Status = 403,
+                            Title = "Restaurant Inactive",
+                            Detail = $"The restaurant '{restaurant.Name}' has been deactivated or suspended by platform administration. Access to POS, kitchen, waiter, and receptionist workspaces is suspended."
+                        });
+                        return;
+                    }
+                }
+            }
 
             // Check if header specifies another restaurant
             if (context.Request.Headers.TryGetValue("X-Restaurant-Id", out var headerResId) &&

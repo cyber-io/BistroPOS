@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api, subscribeRealtimeEvents } from '../../services/api';
 import { useCart } from '../../context/CartContext';
@@ -22,6 +22,20 @@ export default function PublicMenuPage({ onOpenCart }) {
   const { addToast } = useNotification();
 
   useEffect(() => {
+    if (!isFilterOpen && !isCategoryOpen) return;
+    const handler = (e) => {
+      if (isFilterOpen && filterPanelRef.current && !filterPanelRef.current.contains(e.target)) {
+        setIsFilterOpen(false);
+      }
+      if (isCategoryOpen && categoryPanelRef.current && !categoryPanelRef.current.contains(e.target)) {
+        setIsCategoryOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [isFilterOpen, isCategoryOpen]);
+
+  useEffect(() => {
     const requestedSource = searchParams.get('source');
     if (requestedSource === 'TAKEAWAY' || requestedSource === 'DELIVERY') setOrderSource(requestedSource);
     else if (orderSource === 'DINE_IN_QR') setOrderSource('DELIVERY');
@@ -38,7 +52,7 @@ export default function PublicMenuPage({ onOpenCart }) {
     };
     load();
     const unsubscribe = subscribeRealtimeEvents(type => { if (type === 'FOOD_AVAILABILITY_CHANGED') load(true); });
-    const timer = setInterval(() => load(true), 15000);
+    const timer = setInterval(() => load(true), 30000);
     return () => { active = false; unsubscribe(); clearInterval(timer); };
   }, [retry]);
 
@@ -74,7 +88,7 @@ export default function PublicMenuPage({ onOpenCart }) {
       </div>
       {loading && <p role="status" className="py-8 text-center text-sm text-[#75666B]">Loading today’s menu…</p>}
       {error && <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-center text-sm text-amber-900">{error}<button onClick={() => setRetry(n=>n+1)} className="ml-3 underline">Try again</button></div>}
-      {!loading && !error && !filteredItems.length && <p className="rounded-xl border border-[#E8D1CE] bg-white py-10 text-center text-sm text-[#75666B]">No dishes match your selection. Try another category or search.</p>}
+      {!loading && !error && !filteredItems.length && <p className="rounded-xl border border-[#E8D1CE] bg-white py-10 text-center text-sm text-[#75666B]">No dishes match your selection. Try another category or filter.</p>}
 
       {/* Filter and Search Bar */}
       <div className="bg-white p-4 sm:p-5 rounded-2xl border border-[#E8D1CE] shadow-xs space-y-4">
@@ -121,33 +135,81 @@ export default function PublicMenuPage({ onOpenCart }) {
           </div>
         </div>
 
-        {/* Categories Bar */}
-        <div className="flex items-center space-x-2 overflow-x-auto pb-1 no-scrollbar">
-          <button
-            onClick={() => setActiveCategory('ALL')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
-              activeCategory === 'ALL'
-                ? 'bg-[#11164B] text-[#FAF1F0] shadow-xs'
-                : 'bg-[#FAF1F0] text-[#75666B] hover:text-[#11164B] border border-[#E8D1CE]'
-            }`}
-          >
-            All Categories
-          </button>
-          {categories.map(cat => (
-            <button
-              key={cat.categoryId}
-              onClick={() => setActiveCategory(cat.categoryId)}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all flex items-center space-x-1.5 ${
-                activeCategory === cat.categoryId
-                  ? 'bg-[#11164B] text-[#FAF1F0] shadow-xs'
-                  : 'bg-[#FAF1F0] text-[#75666B] hover:text-[#11164B] border border-[#E8D1CE]'
-              }`}
-            >
-              <span>{cat.icon}</span>
-              <span>{cat.name}</span>
-            </button>
-          ))}
-        </div>
+        {/* Category Dropdown */}
+        {(() => {
+          const activeCatObj = categories.find(c => c.categoryId === activeCategory);
+          const isCatFiltered = activeCategory !== 'ALL' && Boolean(activeCatObj);
+          return (
+            <div className="relative shrink-0" ref={categoryPanelRef}>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsCategoryOpen(o => !o);
+                  setIsFilterOpen(false);
+                }}
+                className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold border transition-all shadow-xs ${
+                  isCatFiltered
+                    ? 'bg-[#11164B] text-[#FAF1F0] border-[#11164B]'
+                    : 'bg-white text-[#11164B] border-[#E8D1CE] hover:bg-[#FAF1F0]'
+                }`}
+              >
+                <Utensils className="w-3.5 h-3.5" />
+                <span>Category</span>
+                {isCatFiltered && (
+                  <span className="bg-white/20 text-[#FAF1F0] text-[10px] font-semibold px-1.5 py-0.5 rounded-md max-w-[110px] truncate">
+                    {activeCatObj.icon} {activeCatObj.name}
+                  </span>
+                )}
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isCategoryOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {isCategoryOpen && (
+                <div className="absolute top-full left-0 mt-1.5 z-50 bg-white rounded-2xl border border-[#E8D1CE] shadow-xl p-2 w-56 max-h-72 overflow-y-auto">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveCategory('ALL');
+                      setIsCategoryOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all ${
+                      activeCategory === 'ALL'
+                        ? 'bg-[#11164B] text-[#FAF1F0]'
+                        : 'text-[#75666B] hover:bg-[#FAF1F0] hover:text-[#11164B]'
+                    }`}
+                  >
+                    <span>All Categories</span>
+                    {activeCategory === 'ALL' && <Check className="w-3.5 h-3.5 shrink-0" />}
+                  </button>
+
+                  {categories.map(cat => {
+                    const isActive = activeCategory === cat.categoryId;
+                    return (
+                      <button
+                        key={cat.categoryId}
+                        type="button"
+                        onClick={() => {
+                          setActiveCategory(cat.categoryId);
+                          setIsCategoryOpen(false);
+                        }}
+                        className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all mt-0.5 ${
+                          isActive
+                            ? 'bg-[#11164B] text-[#FAF1F0]'
+                            : 'text-[#75666B] hover:bg-[#FAF1F0] hover:text-[#11164B]'
+                        }`}
+                      >
+                        <span className="flex items-center gap-2 truncate">
+                          <span>{cat.icon}</span>
+                          <span className="truncate">{cat.name}</span>
+                        </span>
+                        {isActive && <Check className="w-3.5 h-3.5 shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       {/* Menu Cards */}
@@ -166,6 +228,7 @@ export default function PublicMenuPage({ onOpenCart }) {
                   alt={item.name}
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   loading="lazy"
+                  decoding="async"
                 />
                 <div className="absolute top-2.5 left-2.5 flex items-center space-x-1.5">
                   <span className={`w-4 h-4 rounded-sm border bg-white/95 flex items-center justify-center ${
@@ -213,7 +276,7 @@ export default function PublicMenuPage({ onOpenCart }) {
               {item.availability ? (
                 <button
                   onClick={() => setSelectedItemForModal(item)}
-                  className="btn-3d-menu-add px-4 py-2 rounded-lg text-[#FAF1F0] text-xs font-medium inline-flex items-center gap-1.5 transition-all"
+                  className="btn-3d-crimson px-4 py-2 rounded-lg text-white text-xs font-medium inline-flex items-center gap-1.5 transition-all"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>Add to Order</span>

@@ -5,14 +5,16 @@ import { useAuth } from '../../context/AuthContext';
 
 export default function CustomerLoginPage() {
   const { login, register, resetPassword, currentUser, logout } = useAuth();
-  const [mode, setMode] = useState('login'); // 'login' | 'register' | 'reset'
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  const initialMode = params.get('mode') === 'register' ? 'register' : params.get('mode') === 'reset' ? 'reset' : 'login';
+  const [mode, setMode] = useState(initialMode); // 'login' | 'register' | 'reset'
   const [form, setForm] = useState({ name: '', email: '', password: '', phone: '' });
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(null);
   const navigate = useNavigate();
-  const location = useLocation();
-  const redirect = new URLSearchParams(location.search).get('redirect') || '/profile';
+  const redirect = params.get('redirect') || '/profile';
 
   const submit = async event => {
     event.preventDefault();
@@ -25,7 +27,18 @@ export default function CustomerLoginPage() {
       } else {
         const result = mode === 'register' ? await register(form) : await login(form.email, form.password);
         if (result.success) {
-          navigate(redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/profile', { replace: true });
+          const userRole = result.user?.role;
+          if (userRole === 'SUPER_ADMIN') {
+            navigate('/admin', { replace: true });
+          } else if (['MANAGER', 'RECEPTIONIST'].includes(userRole)) {
+            navigate('/pos', { replace: true });
+          } else if (userRole === 'KITCHEN') {
+            navigate('/kitchen', { replace: true });
+          } else if (userRole === 'WAITER') {
+            navigate('/waiter', { replace: true });
+          } else {
+            navigate(redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/profile', { replace: true });
+          }
         } else {
           setMessage({ text: result.message, error: true });
         }
@@ -200,14 +213,14 @@ export default function CustomerLoginPage() {
             )}
           </div>
 
-          <div className="mt-6 rounded-xl bg-[#faf1f0] p-4 text-xs text-[#75666b] flex items-center gap-3">
-            <Compass size={20} className="text-[#a61920] shrink-0" />
-            <div className="flex-1">
-              <strong className="block text-[#11164b]">Guest order?</strong>
-              <span>Track an existing delivery or takeaway without logging in.</span>
-            </div>
-            <Link to="/track-order" className="text-xs font-semibold text-[#a61920] hover:underline shrink-0">
-              Track &rarr;
+          <div className="mt-5">
+            <Link
+              to="/track-order"
+              className="w-full py-2.5 px-4 rounded-xl border border-[#ecd3d0] bg-[#faf1f0] hover:bg-[#f3e5e3] text-[#11164b] font-semibold text-xs flex items-center justify-center gap-2 transition-colors"
+            >
+              <Compass size={15} className="text-[#a61920]" />
+              <span>Track order</span>
+              <ArrowRight size={14} className="text-[#a61920]" />
             </Link>
           </div>
         </div>

@@ -19,7 +19,7 @@ FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
 WORKDIR /app
 EXPOSE 5000
 ENV ASPNETCORE_URLS=http://+:5000
-ENV ASPNETCORE_ENVIRONMENT=Development
+ENV ASPNETCORE_ENVIRONMENT=Production
 
 COPY --from=publish /app/publish .
 ENTRYPOINT ["dotnet", "RestaurantSystem.Api.dll"]

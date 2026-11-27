@@ -32,7 +32,8 @@ public record UserDto(
     string Email,
     string? Phone,
     string Role,
-    string Status
+    string Status,
+    string? EmployeeCode = null
 );
 
 public record UpdateProfileRequest(
@@ -371,7 +372,9 @@ public record InitiatePaymentRequest(
     string? IdempotencyKey,
     decimal TipAmount = 0,
     int SplitCount = 1,
-    string SplitType = "FULL"
+    string SplitType = "FULL",
+    string? CustomerName = null,
+    string? CustomerPhone = null
 );
 
 public record VerifyPaymentRequest(
@@ -446,8 +449,6 @@ public record ResolveIssueDto(
     bool Escalate
 );
 
-public record DemoLoginRequest(string Role, Guid? RestaurantId = null);
-
 // --- RESTAURANT & STAFF MANAGEMENT DTOS (PHASE 2 RBAC) ---
 public record CreateRestaurantDto(
     [Required, MaxLength(255)] string Name,
@@ -487,7 +488,26 @@ public record CreateStaffDto(
     [Required, EmailAddress] string Email,
     string? Phone,
     string? Role,
-    string? Password
+    string? Password,
+    Guid? RestaurantId = null
+);
+
+public record UpdateStaffDto(
+    [Required] string Name,
+    [Required, EmailAddress] string Email,
+    string? Phone,
+    string? Status,
+    Guid? RestaurantId = null,
+    string? Password = null
+);
+
+public record ResetStaffPasswordDto(
+    [Required, MinLength(8)] string NewPassword
+);
+
+public record ChangeOwnPasswordRequest(
+    string? CurrentPassword,
+    [Required, MinLength(8)] string NewPassword
 );
 
 public record CreateManagerRequest(
@@ -507,7 +527,8 @@ public record StaffDto(
     string? Phone,
     string Role,
     string Status,
-    DateTime CreatedAt
+    DateTime CreatedAt,
+    string? EmployeeCode = null
 );
 
 public record UpdateStaffStatusRequest(
@@ -522,7 +543,8 @@ public record CurrentUserContextDto(
     string Role,
     string Status,
     bool IsSuperAdmin,
-    bool IsManager
+    bool IsManager,
+    string? EmployeeCode = null
 );
 
 // --- LOYALTY, FEEDBACK & SAAS DTOS ---
@@ -726,4 +748,106 @@ public record WaitEstimateDto(
     int WaitingPartiesCount,
     int SuitableTablesCount,
     string Message
+);
+
+public record TextBeeConfigDto(
+    bool Enabled,
+    string BaseUrl,
+    bool HasApiKey,
+    string MaskedApiKey,
+    string DeviceId,
+    string DefaultCountryCode,
+    int? SimSlotIndex
+);
+
+public record UpdateTextBeeConfigDto(
+    bool? Enabled,
+    string? BaseUrl,
+    string? ApiKey,
+    string? DeviceId,
+    string? DefaultCountryCode,
+    int? SimSlotIndex
+);
+
+public record SendTestSmsDto(
+    [Required] string Phone,
+    string? Message
+);
+
+public record SmsReceiptRequest(
+    [Required] string Phone
+);
+
+public record SmsLogDto(
+    Guid SmsLogId,
+    Guid? RestaurantId,
+    string EventType,
+    string RecipientPhone,
+    string MessageBody,
+    string? ProviderMessageId,
+    string Status,
+    int Attempts,
+    string? ErrorMessage,
+    string? ReferenceId,
+    DateTime CreatedAt,
+    DateTime? SentAt,
+    DateTime? DeliveredAt
+);
+
+public record SmsPreferenceDto(
+    Guid RestaurantId,
+    bool OrderConfirmationEnabled,
+    bool OrderStatusEnabled,
+    bool DigitalReceiptEnabled,
+    bool ReservationEnabled,
+    bool PaymentConfirmationEnabled,
+    bool StaffShiftEnabled,
+    bool InventoryAlertEnabled,
+    bool LoyaltyEnabled,
+    bool PromotionalEnabled,
+    string? ManagerAlertPhone,
+    Dictionary<string, string> Templates
+);
+
+public record UpdateSmsPreferenceDto(
+    bool? OrderConfirmationEnabled,
+    bool? OrderStatusEnabled,
+    bool? DigitalReceiptEnabled,
+    bool? ReservationEnabled,
+    bool? PaymentConfirmationEnabled,
+    bool? StaffShiftEnabled,
+    bool? InventoryAlertEnabled,
+    bool? LoyaltyEnabled,
+    bool? PromotionalEnabled,
+    string? ManagerAlertPhone,
+    Dictionary<string, string>? Templates
+);
+
+public record SmsConnectivityDto(
+    bool Connected,
+    string StatusMessage,
+    int DeviceCount,
+    List<TextBeeDeviceDto> Devices
+);
+
+public record TextBeeDeviceDto(
+    string Id,
+    string Name,
+    bool Enabled,
+    string? LastSeen
+);
+
+public record TextBeeWebhookDto(
+    string? Event,
+    string? SmsId,
+    string? SmsBatchId,
+    string? Status,
+    string? Error,
+    string? Recipient
+);
+
+public record SmsConsentDto(
+    [Required] string Phone,
+    bool PromotionalOptIn,
+    bool OptedOut = false
 );

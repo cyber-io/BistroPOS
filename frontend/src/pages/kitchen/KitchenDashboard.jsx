@@ -4,14 +4,11 @@ import { tableTitle } from '../../services/tablePresentation';
 import { useNotification } from '../../context/NotificationContext';
 import { soundEffects } from '../../services/soundEffects';
 import { Badge, Empty, Modal, Spinner, label, money, time } from '../../components/pos/PosUI';
-import { ChefHat, Clock, Bell, RefreshCw, Search, Check, Ban, AlertCircle, Package, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChefHat, Clock, Bell, RefreshCw, Search, Check, Ban, AlertCircle, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
 
 const tabs = [
   ['NEW', 'New orders', ['NEW', 'ACCEPTED']],
   ['PREPARING', 'Preparing', ['PREPARING']],
-  ['READY', 'Ready', ['READY', 'READY_FOR_PICKUP']],
-  ['SERVICE', 'In service', ['PENDING_CONFIRMATION', 'CONFIRMATION_TIMEOUT', 'OUT_FOR_DELIVERY']],
-  ['DELIVERED', 'Completed', ['DELIVERED', 'PICKED_UP']], ['CANCELLED', 'Cancelled', ['CANCELLED']]
 ];
 
 function getLocalDateString(value = new Date()) {
@@ -80,7 +77,7 @@ export default function KitchenDashboard() {
   const [tab, setTabState] = useState(() => {
     try {
       const saved = localStorage.getItem('bistro_kitchen_tab');
-      if (saved && (tabs.some(([k]) => k === saved) || saved === 'AVAILABILITY' || saved === 'INVENTORY')) {
+      if (saved && (tabs.some(([k]) => k === saved) || saved === 'INVENTORY')) {
         return saved;
       }
     } catch {
@@ -107,49 +104,6 @@ export default function KitchenDashboard() {
   const [busy, setBusy] = useState(null);
   const [rejectOrder, setRejectOrder] = useState(null);
   const [reason, setReason] = useState('Ingredients out of stock');
-  const [stockModal, setStockModal] = useState(false);
-  const [stockSubmitting, setStockSubmitting] = useState(false);
-  const [stockItemType, setStockItemType] = useState('DISH');
-  const [selectedMenuItemId, setSelectedMenuItemId] = useState('');
-  const [customItemName, setCustomItemName] = useState('');
-  const [shortageReason, setShortageReason] = useState('Out of stock');
-  const [urgency, setUrgency] = useState('HIGH');
-  const [markSoldOut, setMarkSoldOut] = useState(true);
-
-  const handleReportShortage = async (e) => {
-    e.preventDefault();
-    if (stockSubmitting) return;
-    setStockSubmitting(true);
-    try {
-      const selectedDish = stockItemType === 'DISH' ? menu.find(m => m.menuItemId === selectedMenuItemId) : null;
-      const itemName = stockItemType === 'DISH'
-        ? selectedDish?.name || 'Dish'
-        : customItemName.trim();
-
-      await api.reportShortage({
-        itemType: stockItemType,
-        menuItemId: stockItemType === 'DISH' && selectedMenuItemId ? selectedMenuItemId : null,
-        ingredientName: stockItemType === 'INGREDIENT' ? customItemName.trim() : itemName,
-        shortageStatus: shortageReason === 'Out of stock' ? 'OUT_OF_STOCK' : 'LOW_STOCK',
-        urgencyLevel: urgency,
-        markDishSoldOut: stockItemType === 'DISH' && markSoldOut && Boolean(selectedMenuItemId)
-      });
-
-      if (stockItemType === 'DISH' && markSoldOut && selectedMenuItemId) {
-        setMenu(prev => prev.map(m => m.menuItemId === selectedMenuItemId ? { ...m, availability: false } : m));
-      }
-
-      addToast(`Reported shortage for "${itemName}" (${shortageReason})`, 'success');
-      setStockModal(false);
-      setSelectedMenuItemId('');
-      setCustomItemName('');
-      load(true);
-    } catch (err) {
-      addToast(err.message || 'Failed to report shortage', 'error');
-    } finally {
-      setStockSubmitting(false);
-    }
-  };
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
@@ -203,7 +157,7 @@ export default function KitchenDashboard() {
         load(true);
       }
     });
-    const heartbeat = setInterval(() => load(true), 3000);
+    const heartbeat = setInterval(() => load(true), 30000);
     return () => { unsubscribe(); clearInterval(heartbeat); };
   }, [load]);
   const transition = async (order, status, rejectionReason) => {
@@ -261,9 +215,6 @@ export default function KitchenDashboard() {
         <p>Keep every ticket moving, from the first order to the last plate.</p>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <button className="pos-button" onClick={() => setStockModal(true)}>
-          <Package size={15} /> Report Stock Shortage
-        </button>
         <button className="pos-button" onClick={() => load()} disabled={loading}>
           <RefreshCw size={15} className={loading ? 'pos-spin' : ''} />Refresh
         </button>
@@ -271,7 +222,7 @@ export default function KitchenDashboard() {
     </div>
 
     <div className="pos-toolbar" style={{ gap: 12, marginBottom: 19 }}>
-      <div className="pos-segment" style={{ flexWrap: 'wrap' }}>{tabs.map(([key, title, states]) => { const count = getTabCount(key, states); return <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{title}{count > 0 && <span className="pos-count" style={{ marginLeft: 7 }}>{count}</span>}</button>; })}<button className={tab === 'AVAILABILITY' ? 'active' : ''} onClick={() => setTab('AVAILABILITY')}>Dish availability</button></div>
+      <div className="pos-segment" style={{ flexWrap: 'wrap' }}>{tabs.map(([key, title, states]) => { const count = getTabCount(key, states); return <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{title}{count > 0 && <span className="pos-count" style={{ marginLeft: 7 }}>{count}</span>}</button>; })}</div>
       <div className="pos-toolbar-actions" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <div className="pos-search" style={{ minWidth: 260 }}>
           <Search size={15} />
@@ -455,130 +406,5 @@ export default function KitchenDashboard() {
       </article>)}
     </div>}
     {rejectOrder && <Modal title={`Reject ${rejectOrder.orderNumber}`} onClose={() => { if (!busy) setRejectOrder(null); }}><div className="pos-modal-body"><p style={{ color: 'var(--p-muted)', fontSize: 11, lineHeight: 1.8, marginBottom: 18 }}>Let the customer know why their order cannot be prepared.</p><label className="pos-field"><span>Reason</span><select className="pos-select" style={{ width: '100%' }} value={reason} onChange={event => setReason(event.target.value)}><option>Ingredients out of stock</option><option>Kitchen at maximum capacity</option><option>Special request cannot be fulfilled</option><option>Kitchen closing shortly</option></select></label><button className="pos-button danger full" style={{ marginTop: 20 }} disabled={Boolean(busy)} onClick={() => transition(rejectOrder, 'CANCELLED', reason)}>{busy ? 'Saving…' : 'Confirm rejection'}</button></div></Modal>}
-    {stockModal && (
-      <Modal title="Report Stock Shortage" onClose={() => { if (!stockSubmitting) setStockModal(false); }}>
-        <form onSubmit={handleReportShortage} style={{ margin: 0, width: '100%', boxSizing: 'border-box' }}>
-          <div className="pos-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <p style={{ color: 'var(--p-muted)', fontSize: 11, margin: 0, lineHeight: 1.6 }}>
-              Report an unavailable dish or depleted ingredient to notify staff and update live menus.
-            </p>
-
-            <div className="pos-field">
-              <span>Item type</span>
-              <div className="pos-segment" style={{ display: 'flex', width: '100%', boxSizing: 'border-box' }}>
-                <button
-                  type="button"
-                  className={stockItemType === 'DISH' ? 'active' : ''}
-                  onClick={() => setStockItemType('DISH')}
-                  style={{ flex: 1 }}
-                >
-                  Menu dish
-                </button>
-                <button
-                  type="button"
-                  className={stockItemType === 'INGREDIENT' ? 'active' : ''}
-                  onClick={() => setStockItemType('INGREDIENT')}
-                  style={{ flex: 1 }}
-                >
-                  Raw ingredient / Supply
-                </button>
-              </div>
-            </div>
-
-            {stockItemType === 'DISH' ? (
-              <div className="pos-field">
-                <span>Select menu dish *</span>
-                <select
-                  className="pos-select"
-                  value={selectedMenuItemId}
-                  onChange={e => setSelectedMenuItemId(e.target.value)}
-                  required
-                >
-                  <option value="">-- Choose a dish --</option>
-                  {menu.map(item => (
-                    <option key={item.menuItemId} value={item.menuItemId}>
-                      {item.name} ({item.categoryName || 'General'}) {item.availability ? '' : '[Already Sold Out]'}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ) : (
-              <div className="pos-field">
-                <span>Ingredient / Supply name *</span>
-                <input
-                  className="pos-input"
-                  value={customItemName}
-                  onChange={e => setCustomItemName(e.target.value)}
-                  placeholder="e.g. Cooking oil, Mozzarella cheese, Burger buns, Paneer"
-                  required
-                />
-              </div>
-            )}
-
-            <div className="pos-form-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12, width: '100%', boxSizing: 'border-box' }}>
-              <div className="pos-field" style={{ minWidth: 0, width: '100%', boxSizing: 'border-box' }}>
-                <span>Shortage status</span>
-                <select
-                  className="pos-select"
-                  style={{ width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}
-                  value={shortageReason}
-                  onChange={e => setShortageReason(e.target.value)}
-                >
-                  <option value="Out of stock">Out of stock (0 left)</option>
-                  <option value="Running low">Running low (few left)</option>
-                  <option value="Spoiled or damaged">Spoiled / Damaged</option>
-                  <option value="Supplier delivery delayed">Delivery delayed</option>
-                </select>
-              </div>
-
-              <div className="pos-field" style={{ minWidth: 0, width: '100%', boxSizing: 'border-box' }}>
-                <span>Urgency level</span>
-                <select
-                  className="pos-select"
-                  style={{ width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}
-                  value={urgency}
-                  onChange={e => setUrgency(e.target.value)}
-                >
-                  <option value="HIGH">High (Immediate)</option>
-                  <option value="MEDIUM">Medium (Next shift)</option>
-                  <option value="LOW">Low (Reorder)</option>
-                </select>
-              </div>
-            </div>
-
-            {stockItemType === 'DISH' && (
-              <label style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 11, cursor: 'pointer', lineHeight: 1.5, userSelect: 'none', marginTop: 2 }}>
-                <input
-                  type="checkbox"
-                  style={{ width: 15, height: 15, accentColor: 'var(--p-blue)', cursor: 'pointer', margin: 0, flexShrink: 0 }}
-                  checked={markSoldOut}
-                  onChange={e => setMarkSoldOut(e.target.checked)}
-                />
-                <span>Automatically mark this dish as <strong>Sold out</strong> on QR code &amp; POS menus immediately</span>
-              </label>
-            )}
-          </div>
-
-          <div className="pos-modal-footer">
-            <button
-              type="button"
-              className="pos-button"
-              onClick={() => setStockModal(false)}
-              disabled={stockSubmitting}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="pos-button primary"
-              disabled={stockSubmitting || (stockItemType === 'DISH' ? !selectedMenuItemId : !customItemName.trim())}
-            >
-              <Package size={14} />
-              {stockSubmitting ? 'Reporting…' : 'Report shortage'}
-            </button>
-          </div>
-        </form>
-      </Modal>
-    )}
   </section>;
 }

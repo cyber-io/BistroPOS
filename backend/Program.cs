@@ -1,6 +1,7 @@
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.ResponseCompression;
 using FluentValidation;
 using FluentValidation.AspNetCore;
 using RestaurantSystem.Api.Validators;
@@ -25,9 +26,9 @@ if (string.IsNullOrEmpty(builder.Configuration["urls"])) builder.WebHost.UseUrls
 builder.Services.Configure<SupabaseOptions>(builder.Configuration.GetSection(SupabaseOptions.SectionName));
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
 builder.Services.Configure<SecurityOptions>(builder.Configuration.GetSection(SecurityOptions.SectionName));
-builder.Services.Configure<FeaturesOptions>(builder.Configuration.GetSection(FeaturesOptions.SectionName));
 builder.Services.Configure<BusinessRulesOptions>(builder.Configuration.GetSection(BusinessRulesOptions.SectionName));
 builder.Services.Configure<PaymentGatewayOptions>(builder.Configuration.GetSection(PaymentGatewayOptions.SectionName));
+builder.Services.Configure<TextBeeOptions>(builder.Configuration.GetSection(TextBeeOptions.SectionName));
 
 var jwtOptions = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>() ?? new JwtOptions();
 if (string.IsNullOrWhiteSpace(jwtOptions.SecretKey) || jwtOptions.SecretKey.Length < 32)
@@ -104,7 +105,9 @@ builder.Services.AddAuthorization(options =>
 
 // 4. SignalR Real-Time Communications
 builder.Services.AddSignalR();
+builder.Services.AddSingleton<SmsQueue>();
 builder.Services.AddHostedService<WorkflowExpiryService>();
+builder.Services.AddHostedService<SmsBackgroundWorker>();
 
 // 5. Application Services Dependency Injection
 builder.Services.AddHttpClient();
@@ -124,10 +127,17 @@ builder.Services.AddScoped<IPaymentService, PaymentService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<IAuditLogService, AuditLogService>();
 builder.Services.AddScoped<IEmailReceiptService, EmailReceiptService>();
+builder.Services.AddScoped<TextBeeSmsService>();
+builder.Services.AddScoped<ITextBeeSmsService>(sp => sp.GetRequiredService<TextBeeSmsService>());
+builder.Services.AddScoped<ISmsService>(sp => sp.GetRequiredService<TextBeeSmsService>());
 builder.Services.AddScoped<IWaitlistService, WaitlistService>();
 
 // 6. Controllers and OpenAPI Documentation
-builder.Services.AddControllers(options => options.Filters.AddService<ResourceAccessFilter>());
+builder.Services.AddControllers(options => options.Filters.AddService<ResourceAccessFilter>())
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
+    });
 builder.Services.AddFluentValidationAutoValidation();
 builder.Services.AddValidatorsFromAssemblyContaining<CreateOrderRequestValidator>();
 builder.Services.AddEndpointsApiExplorer();
@@ -181,10 +191,25 @@ builder.Services.AddCors(options =>
     });
 });
 
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto;
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+});
+
 var app = builder.Build();
 
 // 8. Middleware Pipeline
 app.UseForwardedHeaders();
+app.UseResponseCompression();
 app.UseMiddleware<SecurityHeadersMiddleware>();
 if (!app.Environment.IsDevelopment())
 {
@@ -213,13 +238,14 @@ app.MapGet("/api/health", async (RestaurantDbContext db) => {
 app.MapControllers();
 app.MapHub<NotificationHub>("/hubs/notifications");
 
-// Ensure PostgreSQL tables_status_check allows CLEANING status & purge requested stale orders
+// Ensure PostgreSQL schema migrations & tables_status_check allows CLEANING status
 try
 {
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<RestaurantDbContext>();
     if (db.Database.IsNpgsql())
     {
+        await DatabaseMigrationService.ApplyMigrationsAsync(db, app.Logger);
         await db.Database.ExecuteSqlRawAsync(@"
             DO $$
             BEGIN
@@ -230,23 +256,11 @@ try
             END $$;
         ");
     }
-
-    var targetOrderNumbers = new[] { "ORD-0D10DC7FC6", "ORD-66A6B8C8CB" };
-    var targetOrders = await db.Orders.Where(o => targetOrderNumbers.Contains(o.OrderNumber)).ToListAsync();
-    if (targetOrders.Any())
-    {
-        var targetIds = targetOrders.Select(o => o.OrderId).ToList();
-        var targetItems = await db.OrderItems.Where(i => targetIds.Contains(i.OrderId)).ToListAsync();
-        db.OrderItems.RemoveRange(targetItems);
-        var targetPayments = await db.Payments.Where(p => p.OrderId.HasValue && targetIds.Contains(p.OrderId.Value)).ToListAsync();
-        db.Payments.RemoveRange(targetPayments);
-        var targetIssues = await db.CustomerIssues.Where(i => i.OrderId.HasValue && targetIds.Contains(i.OrderId.Value)).ToListAsync();
-        db.CustomerIssues.RemoveRange(targetIssues);
-        db.Orders.RemoveRange(targetOrders);
-        await db.SaveChangesAsync();
-    }
 }
-catch { /* Database initialization or mock environment */ }
+catch (Exception ex)
+{
+    app.Logger.LogWarning(ex, "Database migrations could not be completed automatically.");
+}
 
 try
 {
@@ -254,6 +268,15 @@ try
     var db = scope.ServiceProvider.GetRequiredService<RestaurantDbContext>();
     await UserProvisioning.EnsureDefaultDataAsync(db, allowDevSeedCredentials: app.Environment.IsDevelopment());
     await DiningAreaProvisioning.EnsureDefaultDiningAreasAsync(db);
+    var smsMigrationPath = Path.Combine(app.Environment.ContentRootPath, "scripts", "20261126_add_textbee_sms.sql");
+    if (db.Database.IsRelational() && File.Exists(smsMigrationPath))
+    {
+        var conn = db.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = await File.ReadAllTextAsync(smsMigrationPath);
+        await cmd.ExecuteNonQueryAsync();
+    }
 }
 catch (Exception exception)
 {

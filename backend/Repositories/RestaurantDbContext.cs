@@ -33,6 +33,9 @@ public class RestaurantDbContext : DbContext
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<WalkInWaitlist> WalkInWaitlists => Set<WalkInWaitlist>();
     public DbSet<ReceiptDelivery> ReceiptDeliveries => Set<ReceiptDelivery>();
+    public DbSet<SmsLog> SmsLogs => Set<SmsLog>();
+    public DbSet<SmsPreference> SmsPreferences => Set<SmsPreference>();
+    public DbSet<SmsConsent> SmsConsents => Set<SmsConsent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -69,6 +72,9 @@ public class RestaurantDbContext : DbContext
         modelBuilder.Entity<Payment>().Property(p => p.ProviderResponse).HasColumnType("jsonb");
         modelBuilder.Entity<AuditLog>().Property(a => a.Metadata).HasColumnType("jsonb");
         modelBuilder.Entity<AuditLog>().Ignore(a => a.IpAddress);
+        modelBuilder.Entity<SmsPreference>().Property(s => s.TemplatesJson).HasColumnType("jsonb");
+        modelBuilder.Entity<SmsPreference>().HasIndex(s => s.RestaurantId).IsUnique();
+        modelBuilder.Entity<SmsConsent>().HasIndex(c => new { c.RestaurantId, c.CustomerPhone }).IsUnique();
 
         // Multi-tenant indexes and unique constraints
         modelBuilder.Entity<TableEntity>()

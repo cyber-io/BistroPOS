@@ -86,6 +86,8 @@ export default function QrDineInPage() {
   const [timeBudget, setTimeBudget] = useState(0); // 0 = any, 15, 25, 35 mins
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const filterPanelRef = useRef(null);
+  const [isCategoryOpen, setIsCategoryOpen] = useState(false);
+  const categoryPanelRef = useRef(null);
   const [tableSession, setTableSession] = useState(null);
   const [tableOrders, setTableOrders] = useState([]);
   const [paidOrderIds, setPaidOrderIds] = useState(new Set());
@@ -196,9 +198,10 @@ export default function QrDineInPage() {
       }
       if (!currentTable) throw new Error('Invalid table QR code. Please scan the active QR code located on your table.');
       if (currentTable.status === 'OUT_OF_SERVICE') throw new Error('This table is currently out of service. Please ask our team for assistance.');
+      const targetResId = cleanRestaurantId || rest.restaurantId;
       const [cats, itemsList, orders, session] = await Promise.all([
-        api.getCategories(),
-        api.getMenuItems(),
+        api.getCategories(targetResId),
+        api.getMenuItems(targetResId),
         api.getOrders().catch(() => []),
         api.getTableSession(currentTable.tableId).catch(() => null)
       ]);
@@ -279,7 +282,7 @@ export default function QrDineInPage() {
       if (type === 'HELP_REQUEST_RESOLVED' && payload.tableId === table.tableId) setWaiterArrivingMsg(null);
       if (type === 'FOOD_AVAILABILITY_CHANGED') setMenuItems(previous => previous.map(item => item.menuItemId === payload.menuItemId ? { ...item, availability: payload.availability } : item));
     });
-    const timer = setInterval(syncTableSession, 3000);
+    const timer = setInterval(syncTableSession, 30000);
     return () => { active = false; unsub(); clearInterval(timer); };
   }, [table, updateActiveOrder]);
 
@@ -309,17 +312,20 @@ export default function QrDineInPage() {
     return () => clearInterval(interval);
   }, [activeOrder]);
 
-  // Click-outside to close filter dropdown
+  // Click-outside to close filter & category dropdowns
   useEffect(() => {
-    if (!isFilterOpen) return;
+    if (!isFilterOpen && !isCategoryOpen) return;
     const handler = (e) => {
-      if (filterPanelRef.current && !filterPanelRef.current.contains(e.target)) {
+      if (isFilterOpen && filterPanelRef.current && !filterPanelRef.current.contains(e.target)) {
         setIsFilterOpen(false);
+      }
+      if (isCategoryOpen && categoryPanelRef.current && !categoryPanelRef.current.contains(e.target)) {
+        setIsCategoryOpen(false);
       }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [isFilterOpen]);
+  }, [isFilterOpen, isCategoryOpen]);
 
   // Checkout and Guest Details Verification
   const handleCheckoutClick = () => {
@@ -474,23 +480,23 @@ export default function QrDineInPage() {
     <div className="min-h-screen bg-slate-50 pb-28">
       {/* 1. Mobile-First Dedicated QR Menu Header matching screenshot */}
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-xs">
-        <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
+        <div className="max-w-2xl mx-auto px-3 sm:px-4 py-3 flex items-center justify-between gap-2">
           {/* Left: Restaurant Logo & Table Title */}
-          <div className="flex items-center space-x-3 min-w-0">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
             <img
               src={restaurant.logo || '/favicon.svg'}
               alt={restaurant?.name}
-              className="w-11 h-11 rounded-2xl object-cover shadow-sm ring-1 ring-slate-200 shrink-0"
+              className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl object-cover shadow-sm ring-1 ring-slate-200 shrink-0"
             />
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <h1 className="text-sm font-black text-slate-900 leading-tight truncate">
                 {restaurant.name}
               </h1>
-              <div className="flex items-center space-x-2 mt-0.5">
-                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-black bg-[#1a382b] text-white shadow-xs shrink-0 whitespace-nowrap">
+              <div className="flex items-center gap-1.5 sm:gap-2 mt-0.5 min-w-0">
+                <span className="inline-flex items-center px-2 sm:px-2.5 py-0.5 rounded-full text-[11px] font-black bg-[#1a382b] text-white shadow-xs shrink-0 whitespace-nowrap">
                   {tableTitle(table)}
                 </span>
-                <span className="text-xs text-slate-500 font-medium whitespace-nowrap">
+                <span className="text-[11px] sm:text-xs text-slate-500 font-medium truncate">
                   Dine-In Menu
                 </span>
               </div>
@@ -498,7 +504,7 @@ export default function QrDineInPage() {
           </div>
 
           {/* Right: 4 Pill Action Buttons (Languages, Gamepad, Help, Cart) */}
-          <div className="flex items-center space-x-1.5 sm:space-x-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             {/* 1. Language Toggle Button */}
             <button
               type="button"
@@ -908,7 +914,10 @@ export default function QrDineInPage() {
                     <div className="relative shrink-0" ref={filterPanelRef}>
                       <button
                         type="button"
-                        onClick={() => setIsFilterOpen(o => !o)}
+                        onClick={() => {
+                          setIsFilterOpen(o => !o);
+                          setIsCategoryOpen(false);
+                        }}
                         className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-all shadow-xs ${
                           activeFilterCount > 0
                             ? 'bg-slate-900 text-white border-slate-900'
@@ -1031,42 +1040,82 @@ export default function QrDineInPage() {
                       )}
                     </div>
 
-                    {/* ── Category Tabs (horizontal scroll) ── */}
-                    <div
-                      className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 flex-1"
-                      style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => setActiveCategory('ALL')}
-                        className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all shrink-0 ${
-                          activeCategory === 'ALL'
-                            ? 'bg-[#0f172a] text-white shadow-xs'
-                            : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
-                        }`}
-                      >
-                        All Items
-                      </button>
-                      {categories.map((cat) => {
-                        const icon = cat.icon || getCategoryIcon(cat.name);
-                        const isActive = activeCategory === cat.categoryId;
-                        return (
+                    {/* ── Category Dropdown Trigger ── */}
+                    {(() => {
+                      const activeCatObj = categories.find(c => c.categoryId === activeCategory);
+                      const isCatFiltered = activeCategory !== 'ALL' && Boolean(activeCatObj);
+                      return (
+                        <div className="relative shrink-0" ref={categoryPanelRef}>
                           <button
-                            key={cat.categoryId}
                             type="button"
-                            onClick={() => setActiveCategory(cat.categoryId)}
-                            className={`px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1 shrink-0 ${
-                              isActive
-                                ? 'bg-[#0f172a] text-white shadow-xs'
-                                : 'bg-white border border-slate-200 text-slate-800 hover:bg-slate-50'
+                            onClick={() => {
+                              setIsCategoryOpen(o => !o);
+                              setIsFilterOpen(false);
+                            }}
+                            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-all shadow-xs ${
+                              isCatFiltered
+                                ? 'bg-[#0f172a] text-white border-[#0f172a]'
+                                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                             }`}
                           >
-                            <span>{icon}</span>
-                            <span>{cat.name}</span>
+                            <Utensils className="w-3.5 h-3.5" />
+                            <span>Category</span>
+                            {isCatFiltered && (
+                              <span className="bg-white/20 text-white text-[10px] font-semibold px-1.5 py-0.5 rounded-md max-w-[110px] truncate">
+                                {activeCatObj.icon || getCategoryIcon(activeCatObj.name)} {activeCatObj.name}
+                              </span>
+                            )}
+                            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isCategoryOpen ? 'rotate-180' : ''}`} />
                           </button>
-                        );
-                      })}
-                    </div>
+
+                          {isCategoryOpen && (
+                            <div className="absolute top-full left-0 mt-1.5 z-50 bg-white rounded-2xl border border-slate-200 shadow-xl p-2 w-56 max-h-72 overflow-y-auto">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveCategory('ALL');
+                                  setIsCategoryOpen(false);
+                                }}
+                                className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all ${
+                                  activeCategory === 'ALL'
+                                    ? 'bg-[#0f172a] text-white'
+                                    : 'text-slate-700 hover:bg-slate-50'
+                                }`}
+                              >
+                                <span>All Items</span>
+                                {activeCategory === 'ALL' && <Check className="w-3.5 h-3.5" />}
+                              </button>
+
+                              {categories.map((cat) => {
+                                const icon = cat.icon || getCategoryIcon(cat.name);
+                                const isActive = activeCategory === cat.categoryId;
+                                return (
+                                  <button
+                                    key={cat.categoryId}
+                                    type="button"
+                                    onClick={() => {
+                                      setActiveCategory(cat.categoryId);
+                                      setIsCategoryOpen(false);
+                                    }}
+                                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all mt-0.5 ${
+                                      isActive
+                                        ? 'bg-[#0f172a] text-white'
+                                        : 'text-slate-800 hover:bg-slate-50'
+                                    }`}
+                                  >
+                                    <span className="flex items-center gap-2 truncate">
+                                      <span>{icon}</span>
+                                      <span className="truncate">{cat.name}</span>
+                                    </span>
+                                    {isActive && <Check className="w-3.5 h-3.5 shrink-0" />}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               })()}

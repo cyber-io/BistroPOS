@@ -23,7 +23,7 @@
 }
 
 .website-shell :is(#our-story, #visit) {
-  scroll-margin-top: 30px;
+  scroll-margin-top: 100px;
 }
 
 .website-home {
@@ -121,6 +121,11 @@
 .website-nav-link:hover {
   color: #11164b;
   background: rgba(17, 22, 75, 0.04);
+}
+
+.website-nav-link:active {
+  transform: scale(0.96);
+  border-color: #a61920;
 }
 
 .website-nav-link--active {

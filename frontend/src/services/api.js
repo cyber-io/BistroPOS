@@ -3,12 +3,23 @@ import { tableTitle } from './tablePresentation.js';
 // All business operations go through the .NET API. Failed requests never become
 // local success records: the database remains the authority for orders and bookings.
 const metaEnv = (typeof import.meta !== 'undefined' && import.meta.env) ? import.meta.env : {};
-const API_BASE = (metaEnv.VITE_API_URL || '/api').replace(/\/$/, '');
+const API_BASE = (metaEnv.VITE_API_URL || metaEnv.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
 const DEFAULT_RESTAURANT_ID = metaEnv.VITE_RESTAURANT_ID || 'a0000000-0000-0000-0000-000000000001';
 const TOKEN_KEY = 'rs_api_session';
 const RESOURCE_KEY = 'rs_customer_order_access';
 const HELP_KEY = 'rs_customer_help_access';
+const LEGACY_DUMMY_RESTAURANTS = new Set(['11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222']);
 let restaurantId = DEFAULT_RESTAURANT_ID;
+try {
+  if (typeof localStorage !== 'undefined') {
+    const saved = localStorage.getItem('rs_active_restaurant_id');
+    if (saved && !LEGACY_DUMMY_RESTAURANTS.has(saved)) {
+      restaurantId = saved;
+    } else if (saved) {
+      localStorage.removeItem('rs_active_restaurant_id');
+    }
+  }
+} catch {}
 let restaurantCache = null;
 const listeners = new Set();
 let pollTimer;
@@ -78,7 +89,12 @@ export function setAuthToken(token) {
         restaurantId = claims.restaurant_id;
       } else {
         const saved = localStorage.getItem('rs_active_restaurant_id');
-        if (saved) restaurantId = saved;
+        if (saved && !LEGACY_DUMMY_RESTAURANTS.has(saved)) {
+          restaurantId = saved;
+        } else {
+          restaurantId = DEFAULT_RESTAURANT_ID;
+          if (saved && typeof localStorage !== 'undefined') localStorage.removeItem('rs_active_restaurant_id');
+        }
       }
     } catch { /* the server validates the token before any protected operation */ }
   }
@@ -127,7 +143,13 @@ async function request(path, { method = 'GET', body, accessToken, signal } = {})
     if ([429, 502, 503].includes(response.status)) {
       rateLimitBackoffUntil = Date.now() + 15000;
     }
-    if (response.status === 401 && token) {
+    const isInactiveOrSuspended = response.status === 403 && (
+      data?.title === 'Restaurant Inactive' ||
+      data?.Title === 'Restaurant Inactive' ||
+      data?.title === 'Account Deactivated' ||
+      data?.Title === 'Account Deactivated'
+    );
+    if ((response.status === 401 || isInactiveOrSuspended) && token) {
       setAuthToken(null);
       window.dispatchEvent(new Event('rs_session_expired'));
     }
@@ -141,7 +163,7 @@ async function request(path, { method = 'GET', body, accessToken, signal } = {})
           : response.status === 401
             ? 'Please sign in to continue.'
             : 'The request could not be completed. Please try again.';
-    const error = new Error(data?.detail || data?.Detail || data?.message || data?.Message || data?.title || data?.Title || validation || fallbackMsg);
+    const error = new Error(data?.detail || data?.Detail || data?.message || data?.Message || data?.error || data?.Error || data?.title || data?.Title || validation || fallbackMsg);
     error.status = response.status;
     throw error;
   }
@@ -236,7 +258,8 @@ function diffRecords(key, records, idField, onNew, onChange, generation) {
   }
 }
 async function pollUpdates() {
-  if (pollBusy || !listeners.size || Date.now() < rateLimitBackoffUntil) return;
+  if (pollBusy || !listeners.size || !getAuthToken() || Date.now() < rateLimitBackoffUntil) return;
+  if (typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')) return;
   pollBusy = true;
   pollCycle++;
   const generation = pollingGeneration;
@@ -283,7 +306,7 @@ export function subscribeRealtimeEvents(callback) {
   listeners.add(callback);
   if (!pollTimer) {
     pollUpdates();
-    pollTimer = setInterval(pollUpdates, 4000);
+    pollTimer = setInterval(pollUpdates, 30000);
   }
   return () => {
     listeners.delete(callback);
@@ -294,7 +317,6 @@ export function subscribeRealtimeEvents(callback) {
 export const api = {
   health: () => request('/health'),
   login: body => request('/auth/login', { method: 'POST', body }),
-  demoLogin: (role, restaurantId) => request('/auth/demo-login', { method: 'POST', body: { role, restaurantId } }),
   me: async () => {
     const user = await request('/auth/me');
     if (user.restaurantId) restaurantId = user.restaurantId;
@@ -371,22 +393,19 @@ export const api = {
       return [];
     }
   },
-  closeTableSession: tableId => request(`/tables/${encodeURIComponent(tableId)}/session/close`, { method: 'POST' }),
-  updateTablePosition: (tableId, positionX, positionY, shape = 'SQUARE', diningArea = 'everyday') => request(`/tables/${encodeURIComponent(tableId)}/position`, { method: 'PATCH', body: { positionX, positionY, shape, diningArea } }).then(result => {
-    broadcastEvent('TABLE_POSITION_UPDATED', { tableId, positionX, positionY, shape, diningArea });
-    return result;
-  }),
+  getTableSession: async () => null,
+  closeTableSession: async () => ({ success: true }),
   updateTableStatus: (tableId, status, customerName = null, assignedWaiterId = null) => request(`/tables/${tableId}/status`, { method: 'PUT', body: { status, customerName, assignedWaiterId } }).then(result => {
     broadcastEvent('TABLE_STATUS_UPDATED', { tableId, status, customerName });
     return result;
   }),
   validateQr: qrCode => request(`/qr/validate/${encodeURIComponent(qrCode)}`),
-  getCategories: async () => (await request(`/menu/categories${query({ restaurantId })}`)).map(category => ({ ...category, icon: ({ Pizza: '🍕', Burger: '🍔', Chinese: '🥢', Indian: '🍛', 'South Indian': '🥞', 'North Indian': '🥘', Desserts: '🍨', Beverages: '☕' })[category.name] || '🍽️' })),
+  getCategories: async (overrideResId) => (await request(`/menu/categories${query({ restaurantId: overrideResId || restaurantId })}`)).map(category => ({ ...category, icon: ({ Pizza: '🍕', Burger: '🍔', Chinese: '🥢', Indian: '🍛', 'South Indian': '🥞', 'North Indian': '🥘', Desserts: '🍨', Beverages: '☕' })[category.name] || '🍽️' })),
   createCategory: data => request(`/menu/categories`, { method: 'POST', body: { restaurantId, ...data } }),
   updateCategory: (id, data) => request(`/menu/categories/${id}`, { method: 'PUT', body: data }),
   deleteCategory: id => request(`/menu/categories/${id}`, { method: 'DELETE' }),
 
-  getMenuItems: async () => (await request(`/menu/items${query({ restaurantId })}`)).map(item => ({
+  getMenuItems: async (overrideResId) => (await request(`/menu/items${query({ restaurantId: overrideResId || restaurantId })}`)).map(item => ({
     ...item,
     price: Number(item.price),
     vegNonveg: item.vegNonveg || item.vegNonVeg,
@@ -598,6 +617,8 @@ export const api = {
   updateRestaurantStatus: (id, status) => request(`/restaurants/${id}/status`, { method: 'PUT', body: { status } }),
   createStaffUser: details => request(`/users${query({ restaurantId })}`, { method: 'POST', body: details }),
   deleteStaffUser: userId => request(`/users/${userId}`, { method: 'DELETE' }),
+  changeMyPassword: ({ currentPassword, newPassword }) => request('/users/me/password', { method: 'PUT', body: { currentPassword, newPassword } }),
+  updateUserPassword: (userId, newPassword) => request(`/users/${userId}/password`, { method: 'PUT', body: { newPassword } }),
   updateRestaurantSettings: (restaurantIdToUpdate, payload) => request(`/restaurants/${restaurantIdToUpdate || restaurantId}/settings`, { method: 'PATCH', body: payload }),
   initiatePayment: details => request(`/payments/initiate${query({ accessToken: orderAccess(details.orderId) })}`, { method: 'POST', accessToken: orderAccess(details.orderId), body: { restaurantId: details.restaurantId || restaurantId, method: details.method || 'UPI', ...details, idempotencyKey: details.idempotencyKey || uniqueKey() } }),
   recordPayment: details => request('/payments/record', { method: 'POST', body: { restaurantId: details.restaurantId || restaurantId, method: details.method || 'CASH', ...details, idempotencyKey: details.idempotencyKey || uniqueKey() } }),
@@ -609,6 +630,14 @@ export const api = {
   reportShortage: body => request('/inventory/shortage', { method: 'POST', body: { restaurantId, ...body } }),
   getRestaurantWifi: (customRestId) => request(`/restaurants/${customRestId || restaurantId}/wifi`),
   updateRestaurantWifi: (customRestId, body) => request(`/restaurants/${customRestId || restaurantId}/wifi`, { method: 'PATCH', body }),
+  getSmsConfig: (customRestId) => request(`/restaurants/${customRestId || restaurantId}/sms-config`),
+  updateSmsConfig: (customRestId, body) => request(`/restaurants/${customRestId || restaurantId}/sms-config`, { method: 'PATCH', body }),
+  sendTestSms: (customRestId, body) => request(`/restaurants/${customRestId || restaurantId}/sms-test`, { method: 'POST', body }),
+  getSmsPreferences: (customRestId) => request(`/restaurants/${customRestId || restaurantId}/sms-preferences`),
+  updateSmsPreferences: (customRestId, body) => request(`/restaurants/${customRestId || restaurantId}/sms-preferences`, { method: 'PATCH', body }),
+  getSmsLogs: (customRestId, status, limit = 50) => request(`/restaurants/${customRestId || restaurantId}/sms-logs${query({ status, limit })}`),
+  getSmsDevices: (customRestId) => request(`/restaurants/${customRestId || restaurantId}/sms-devices`),
+  updateSmsConsent: (customRestId, body) => request(`/restaurants/${customRestId || restaurantId}/sms-consent`, { method: 'POST', body }),
   getLoyaltyBalance: phone => request(`/loyalty/balance${query({ restaurantId, phone })}`),
   earnLoyaltyPoints: body => request('/loyalty/earn', { method: 'POST', body: { restaurantId, ...body } }),
   redeemLoyaltyPoints: body => request(`/loyalty/redeem${query({ accessToken: body?.orderId ? orderAccess(body.orderId) : undefined })}`, { method: 'POST', accessToken: body?.orderId ? orderAccess(body.orderId) : undefined, body: { restaurantId, ...body } }),
@@ -619,6 +648,7 @@ export const api = {
   confirmCashPayment: (paymentId, staffUserId) => request(`/payments/${paymentId}/confirm-cash`, { method: 'POST', body: { staffUserId } }),
   updateOrderItemStatus: (orderItemId, status) => request(`/orders/items/${orderItemId}/status`, { method: 'PATCH', body: { status } }),
   emailReceipt: (orderId, email) => request(`/orders/${orderId}/email-receipt${query({ accessToken: orderAccess(orderId) })}`, { method: 'POST', accessToken: orderAccess(orderId), body: { email } }),
+  smsReceipt: (orderId, phone) => request(`/orders/${orderId}/sms-receipt${query({ accessToken: orderAccess(orderId) })}`, { method: 'POST', accessToken: orderAccess(orderId), body: { phone } }),
   getTimeBudgetMenu: (customRestId, minutes = 25) => request(`/menu/time-budget${query({ restaurantId: customRestId || restaurantId, minutes })}`),
   getPortionsRemaining: (customRestId) => request(`/menu/portions-remaining${query({ restaurantId: customRestId || restaurantId })}`),
   planEvent: (reservationId, plan) => request(`/reservations/${reservationId}/event-plan`, { method: 'POST', body: plan }),

@@ -176,7 +176,7 @@ function DieFace3D({ value, isRolling, onClick }) {
       role="button"
       tabIndex={0}
       title="Tap to roll dice"
-      className={`relative w-15 h-15 sm:w-16 sm:h-16 rounded-2xl cursor-pointer select-none transition-all duration-200 transform-gpu ${
+      className={`relative w-14 h-14 sm:w-16 sm:h-16 shrink-0 rounded-2xl cursor-pointer select-none transition-all duration-200 transform-gpu ${
         isRolling 
           ? 'animate-bounce rotate-180 scale-110 shadow-2xl ring-4 ring-amber-400' 
           : 'hover:scale-105 active:scale-95 shadow-lg hover:shadow-xl'
@@ -1052,28 +1052,28 @@ export default function LudoGame({
         isDarkMode ? 'bg-[#181d26] border-white/10' : 'bg-slate-50 border-slate-200'
       }`}>
         {/* Active Player Status Banner with Glow Pill */}
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2.5">
-            <div className={`w-3.5 h-3.5 rounded-full transition-all ${
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className={`w-3.5 h-3.5 rounded-full shrink-0 transition-all ${
               currentTurn === 'RED' 
                 ? 'bg-red-500 ring-4 ring-red-500/35 shadow-sm' 
                 : 'bg-emerald-500 ring-4 ring-emerald-500/35 shadow-sm'
             }`} />
-            <div>
+            <div className="min-w-0">
               <span className={`text-[10px] uppercase font-bold tracking-wider block ${
                 isDarkMode ? 'text-slate-400' : 'text-slate-500'
               }`}>
                 CURRENT TURN
               </span>
               <strong className={`text-sm font-bold flex items-center gap-1.5 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-                <span>
+                <span className="truncate">
                   {currentTurn === 'RED' 
                     ? `Table ${cleanTable} (You - Red)` 
                     : (gameMode === 'AI' ? 'Chef Bot 👨‍🍳 (Green)' : 'Player 2 (Green)')
                   }
                 </span>
                 {currentTurn === 'GREEN' && gameMode === 'AI' && (
-                  <span className="text-[10px] font-normal text-emerald-400 animate-pulse">
+                  <span className="text-[10px] font-normal text-emerald-400 animate-pulse shrink-0">
                     thinking…
                   </span>
                 )}
@@ -1082,7 +1082,7 @@ export default function LudoGame({
           </div>
 
           {/* Tokens Home Count */}
-          <div className="flex items-center gap-3 text-[11px] font-bold">
+          <div className="flex items-center gap-2 text-[11px] font-bold whitespace-nowrap shrink-0">
             <span className="flex items-center gap-1 text-red-600">
               🔴 {tokens.filter(t => t.player === 'RED' && t.step >= 56).length}/{pawnCount} Home
             </span>
@@ -1097,7 +1097,7 @@ export default function LudoGame({
         <div className={`rounded-xl p-3 border flex items-center justify-between gap-3 transition-colors ${
           isDarkMode ? 'bg-[#12151d] border-white/5' : 'bg-white border-slate-200 shadow-sm'
         }`}>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
             <DieFace3D 
               value={diceValue} 
               isRolling={isRolling} 
@@ -1107,11 +1107,11 @@ export default function LudoGame({
                 }
               }} 
             />
-            <div>
+            <div className="min-w-0 flex-1">
               <p className={`text-xs font-black ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                 {isRolling ? 'Rolling dice…' : `Rolled a ${diceValue}`}
               </p>
-              <p className={`text-[11px] mt-0.5 line-clamp-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+              <p className={`text-[11px] mt-0.5 leading-snug ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                 {statusMessage}
               </p>
             </div>
@@ -1122,7 +1122,7 @@ export default function LudoGame({
             type="button"
             onClick={handleRollDice}
             disabled={isRolling || hasRolled || (gameMode === 'AI' && currentTurn === 'GREEN') || Boolean(winner)}
-            className={`px-4 py-2.5 rounded-xl font-black text-xs flex items-center gap-1.5 transition-all shadow-md active:scale-95 ${
+            className={`px-3.5 py-2.5 rounded-xl font-black text-xs flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-all shadow-md active:scale-95 ${
               !hasRolled && !isRolling && (currentTurn === 'RED' || gameMode === 'PASS_AND_PLAY')
                 ? 'bg-gradient-to-r from-red-500 via-amber-500 to-orange-500 hover:opacity-95 text-white shadow-amber-500/25 ring-2 ring-amber-400/40'
                 : (isDarkMode ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-white/5' : 'bg-slate-200 text-slate-400 cursor-not-allowed border border-slate-200')
@@ -1134,7 +1134,7 @@ export default function LudoGame({
         </div>
 
         {/* Quick Tips */}
-        <div className={`flex items-center justify-between text-[10px] px-1 font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+        <div className={`flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[10px] px-1 font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
           <span>💡 Roll a <b>6</b> to open pawn from base</span>
           <span>🎯 Opposing bases: Red vs Green</span>
         </div>
