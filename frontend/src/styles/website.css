@@ -8,12 +8,17 @@
 }
 
 .website-shell {
+  --website-primary: #a61920;
+  --website-primary-dark: #850f15;
+  --website-primary-deep: #5c070c;
+  --website-accent: #ecd3d0;
+  --website-accent-dark: #b3857f;
   --website-navy: #11164b;
-  --website-red: #a61920;
-  --website-pink: #ecd3d0;
+  --website-red: var(--website-primary);
+  --website-pink: var(--website-accent);
   --website-muted: #75666b;
   position: relative;
-  background: #faf1f0;
+  background: var(--website-bg, #faf1f0);
   color: var(--website-navy);
 }
 
@@ -2156,4 +2161,59 @@
     transition: none;
     animation: none;
   }
+}
+
+/* ==========================================================================
+   LEVEL 2: MULTI-THEME ENGINE STYLES
+   ========================================================================== */
+/* 1. Theme: Luxury Fine Dining */
+.website-shell.theme-fine-dine {
+  --website-navy: #f8fafc;
+  --website-bg: #0b0f19;
+  background: #0b0f19 !important;
+  color: #f1f5f9 !important;
+}
+.website-shell.theme-fine-dine .website-home {
+  background: #0b0f19 !important;
+}
+.website-shell.theme-fine-dine .website-header {
+  background: rgba(15, 23, 42, 0.94) !important;
+  border: 1px solid rgba(212, 175, 55, 0.25) !important;
+  color: #f8fafc !important;
+}
+.website-shell.theme-fine-dine .website-brand-name {
+  color: #f8fafc !important;
+  font-family: 'Playfair Display', Georgia, serif;
+  letter-spacing: 0.05em;
+}
+.website-shell.theme-fine-dine .website-nav-link {
+  color: #94a3b8 !important;
+}
+.website-shell.theme-fine-dine .website-nav-link--active,
+.website-shell.theme-fine-dine .website-nav-link:hover {
+  color: #f1f5f9 !important;
+}
+.website-shell.theme-fine-dine .website-footer {
+  background: #05070c !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+/* 2. Theme: Fast Food & QSR */
+.website-shell.theme-fast-food {
+  --website-bg: #fffbf9;
+}
+.website-shell.theme-fast-food .website-hero h1 {
+  font-weight: 900;
+  letter-spacing: -0.04em;
+}
+.website-shell.theme-fast-food .website-order-banner {
+  background: linear-gradient(135deg, var(--website-primary, #ea580c) 0%, #c2410c 100%) !important;
+}
+
+/* 3. Theme: Coffee & Artisan Cafe */
+.website-shell.theme-coffee-cafe {
+  --website-bg: #fcf9f2;
+}
+.website-shell.theme-coffee-cafe .website-brand-name {
+  font-family: Georgia, serif;
 }

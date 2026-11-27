@@ -42,6 +42,50 @@ export default function HomePage() {
   const { addToast } = useNotification();
   const rQuery = location.search.includes('r=') ? location.search : (restaurant?.restaurantCode ? `?r=${encodeURIComponent(restaurant.restaurantCode)}` : (restaurant?.restaurantId ? `?r=${encodeURIComponent(restaurant.restaurantId)}` : ''));
 
+  // Level 1: Dynamic settings & Level 2: Themes
+  const settings = restaurant?.settings || {};
+  const branding = settings.branding || {};
+  const sections = settings.sectionsVisibility || {};
+  const themeId = settings.themeId || 'MODERN_BISTRO';
+
+  const showBookTable = sections.showBookTable !== false;
+  const showOnlineDelivery = sections.showOnlineDelivery !== false;
+  const showTakeaway = sections.showTakeaway !== false;
+  const showOurStory = sections.showOurStory !== false;
+  const showVisit = sections.showVisit !== false;
+
+  // Apply dynamic colors & theme classes
+  useEffect(() => {
+    if (!restaurant) return;
+    const root = document.documentElement;
+    if (branding.primaryColor) {
+      root.style.setProperty('--website-primary', branding.primaryColor);
+      root.style.setProperty('--website-primary-dark', branding.primaryColor);
+      root.style.setProperty('--website-primary-deep', branding.primaryColor);
+    }
+    if (branding.accentColor) {
+      root.style.setProperty('--website-accent', branding.accentColor);
+      root.style.setProperty('--website-accent-dark', branding.accentColor);
+    }
+    const shell = document.querySelector('.website-shell');
+    if (shell) {
+      shell.classList.remove('theme-fine-dine', 'theme-fast-food', 'theme-coffee-cafe');
+      if (themeId === 'FINE_DINE') shell.classList.add('theme-fine-dine');
+      else if (themeId === 'FAST_FOOD') shell.classList.add('theme-fast-food');
+      else if (themeId === 'COFFEE_CAFE') shell.classList.add('theme-coffee-cafe');
+    }
+    return () => {
+      root.style.removeProperty('--website-primary');
+      root.style.removeProperty('--website-primary-dark');
+      root.style.removeProperty('--website-primary-deep');
+      root.style.removeProperty('--website-accent');
+      root.style.removeProperty('--website-accent-dark');
+      if (shell) {
+        shell.classList.remove('theme-fine-dine', 'theme-fast-food', 'theme-coffee-cafe');
+      }
+    };
+  }, [restaurant, branding.primaryColor, branding.accentColor, themeId]);
+
   // Instant section jump handler for in-page navigation (e.g. #our-story, #visit)
   useEffect(() => {
     if (location.hash) {
@@ -174,7 +218,7 @@ export default function HomePage() {
           <span className="website-hero-speck" />
           <img
             className="website-hero-dish"
-            src={HERO_DISH_IMAGE}
+            src={branding.heroImage || HERO_DISH_IMAGE}
             alt={`${restaurant?.name || 'Bistro & Bloom'} Signature Plate`}
             fetchpriority="high"
           />
@@ -183,20 +227,37 @@ export default function HomePage() {
         {/* Right Column: Hero Copy & CTA */}
         <div className="website-hero-copy">
           <p className="website-script">{restaurant?.name || 'Bistro & Bloom'}</p>
-          <p className="website-eyebrow">A fresh take on the everyday</p>
-          <h1 id="website-hero-title">Good food.<br />Beautiful moments.</h1>
+          <p className="website-eyebrow">{branding.heroEyebrow || 'A fresh take on the everyday'}</p>
+          <h1 id="website-hero-title">
+            {branding.heroHeadline ? (
+              branding.heroHeadline.includes('\n') ? (
+                branding.heroHeadline.split('\n').map((line, idx) => (
+                  <React.Fragment key={idx}>{line}{idx === 0 && <br />}</React.Fragment>
+                ))
+              ) : branding.heroHeadline
+            ) : (
+              <>Good food.<br />Beautiful moments.</>
+            )}
+          </h1>
           <p className="website-hero-description">
-            Vibrant plates, comforting flavours, and a little time to savour it all. Come for a meal. Stay for the feeling.
+            {branding.heroDescription || 'Vibrant plates, comforting flavours, and a little time to savour it all. Come for a meal. Stay for the feeling.'}
           </p>
           <div className="website-hero-links">
-            <Link to="/book-table" className="website-button website-button--red">
-              Reserve a table<ArrowUpRight size={17} />
+            {showBookTable && (
+              <Link to={`/book-table${rQuery}`} className="website-button website-button--red">
+                Reserve a table<ArrowUpRight size={17} />
+              </Link>
+            )}
+            <Link to={`/menu${rQuery}`} className={showBookTable ? "website-button website-button--outline" : "website-button website-button--red"}>
+              <UtensilsCrossed size={17} /> See today’s menu
             </Link>
-            <a href="#visit" className="website-location-link">
-              <MapPin size={17} />Find your way here
-            </a>
+            {showVisit && (
+              <a href="#visit" className="website-location-link">
+                <MapPin size={17} />Find your way here
+              </a>
+            )}
           </div>
-          <Link to="/menu" className="website-explore-link">
+          <Link to={`/menu${rQuery}`} className="website-explore-link">
             Explore our menu<ArrowRight size={16} />
           </Link>
         </div>
@@ -206,7 +267,9 @@ export default function HomePage() {
       <section className="website-service-strip" aria-label="Ways to enjoy the bistro">
         <span><Coffee size={19} />A cup worth slowing down for</span>
         <span><UtensilsCrossed size={19} />Good things, freshly made</span>
-        <Link to="/menu?source=DELIVERY"><Truck size={19} />Your favourites, delivered<ArrowUpRight size={14} /></Link>
+        {showOnlineDelivery && (
+          <Link to={`/menu${rQuery ? `${rQuery}&` : '?'}source=DELIVERY`}><Truck size={19} />Your favourites, delivered<ArrowUpRight size={14} /></Link>
+        )}
       </section>
 
       {/* Popular Menu Items */}
@@ -259,76 +322,99 @@ export default function HomePage() {
       </section>
 
       {/* Story Section */}
-      <section className="website-story" id="our-story">
-        <div className="website-story-art">
-          <div className="website-story-circle" />
-          <img src="/images/reference/salad-bowl.webp" alt="A colourful salad with fresh leaves, olives, walnuts, and feta" loading="lazy" />
-          <span className="website-story-note">Made with care.<br />Meant to be shared.</span>
-        </div>
-        <div className="website-story-copy">
-          <p className="website-eyebrow">The heart of the bistro</p>
-          <h2>A seat at the table.<br />A moment of your own.</h2>
-          <p>Some of the best moments happen over a meal. A long overdue catch-up, a quiet lunch, an evening with your favourite people. At {restaurant?.name || 'Bistro & Bloom'}, there’s room for all of them.</p>
-          <p>Choose something you love, settle into your seat, and let the conversation take its time. We’ll take care of the good food.</p>
-          <Link to={`/book-table${rQuery}`} className="website-button website-button--red">Make a little time<ArrowUpRight size={17} /></Link>
-        </div>
-      </section>
+      {showOurStory && (
+        <section className="website-story" id="our-story">
+          <div className="website-story-art">
+            <div className="website-story-circle" />
+            <img src={branding.storyImage || "/images/reference/salad-bowl.webp"} alt="Made with care" loading="lazy" />
+            <span className="website-story-note">Made with care.<br />Meant to be shared.</span>
+          </div>
+          <div className="website-story-copy">
+            <p className="website-eyebrow">{branding.storyEyebrow || 'The heart of the bistro'}</p>
+            <h2>
+              {branding.storyTitle ? (
+                branding.storyTitle.includes('\n') ? (
+                  branding.storyTitle.split('\n').map((line, idx) => (
+                    <React.Fragment key={idx}>{line}{idx === 0 && <br />}</React.Fragment>
+                  ))
+                ) : branding.storyTitle
+              ) : (
+                <>A seat at the table.<br />A moment of your own.</>
+              )}
+            </h2>
+            <p>{branding.storyText || `Some of the best moments happen over a meal. A long overdue catch-up, a quiet lunch, an evening with your favourite people. At ${restaurant?.name || 'Bistro & Bloom'}, there’s room for all of them.`}</p>
+            {showBookTable && (
+              <Link to={`/book-table${rQuery}`} className="website-button website-button--red">Make a little time<ArrowUpRight size={17} /></Link>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* Order Banner */}
-      <section className="website-order-banner">
-        <div>
-          <p className="website-eyebrow">Make yourself at home</p>
-          <h2>The bistro, wherever you are.</h2>
-          <p>Set the table at home, or take something delicious on your way.</p>
-        </div>
-        <div className="website-order-actions">
-          <Link to={`/menu${rQuery ? `${rQuery}&` : '?'}source=DELIVERY`} className="website-button website-button--pink"><Truck size={17} />Order delivery</Link>
-          <Link to={`/menu${rQuery ? `${rQuery}&` : '?'}source=TAKEAWAY`} className="website-button website-button--outline">Choose takeaway<ArrowUpRight size={17} /></Link>
-        </div>
-      </section>
+      {(showOnlineDelivery || showTakeaway) && (
+        <section className="website-order-banner">
+          <div>
+            <p className="website-eyebrow">Make yourself at home</p>
+            <h2>The bistro, wherever you are.</h2>
+            <p>Set the table at home, or take something delicious on your way.</p>
+          </div>
+          <div className="website-order-actions">
+            {showOnlineDelivery && (
+              <Link to={`/menu${rQuery ? `${rQuery}&` : '?'}source=DELIVERY`} className="website-button website-button--pink"><Truck size={17} />Order delivery</Link>
+            )}
+            {showTakeaway && (
+              <Link to={`/menu${rQuery ? `${rQuery}&` : '?'}source=TAKEAWAY`} className="website-button website-button--outline">Choose takeaway<ArrowUpRight size={17} /></Link>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* Visit Section */}
-      <section className="website-section website-visit" id="visit">
-        <div className="website-visit-intro">
-          <p className="website-eyebrow">We’d love to see you</p>
-          <h2>Your next good<br />moment starts here.</h2>
-          <p>Come as you are. Bring someone along. There’s always a reason to gather around a good meal.</p>
-          <Link to={`/book-table${rQuery}`} className="website-button website-button--red">Book your table<ArrowUpRight size={17} /></Link>
-        </div>
-        <div className="website-visit-details">
-          <div>
-            <h3><Clock size={18} />Opening hours</h3>
-            {hours.length ? (
-              <dl>{hours.map(([day, timeDisplay]) => <div key={day}><dt>{day}</dt><dd>{timeDisplay}</dd></div>)}</dl>
-            ) : <p>Contact the restaurant for today’s opening hours.</p>}
+      {showVisit && (
+        <section className="website-section website-visit" id="visit">
+          <div className="website-visit-intro">
+            <p className="website-eyebrow">We’d love to see you</p>
+            <h2>Your next good<br />moment starts here.</h2>
+            <p>Come as you are. Bring someone along. There’s always a reason to gather around a good meal.</p>
+            {showBookTable && (
+              <Link to={`/book-table${rQuery}`} className="website-button website-button--red">Book your table<ArrowUpRight size={17} /></Link>
+            )}
           </div>
-          <div>
-            <h3><MapPin size={18} />Come on over</h3>
-            {address ? (
-              <>
-                <p>{address}</p>
-                <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`} target="_blank" rel="noreferrer" className="website-text-link">Get directions<ArrowUpRight size={14} /></a>
-              </>
-            ) : <p>Get in touch with our team for location details.</p>}
-            {restaurant?.phone && <a className="website-contact-link" href={`tel:${restaurant.phone}`}><Phone size={15} />{restaurant.phone}</a>}
-            {restaurant?.email && <a className="website-contact-link" href={`mailto:${restaurant.email}`}><Mail size={15} />{restaurant.email}</a>}
+          <div className="website-visit-details">
+            <div>
+              <h3><Clock size={18} />Opening hours</h3>
+              {hours.length ? (
+                <dl>{hours.map(([day, timeDisplay]) => <div key={day}><dt>{day}</dt><dd>{timeDisplay}</dd></div>)}</dl>
+              ) : <p>Contact the restaurant for today’s opening hours.</p>}
+            </div>
+            <div>
+              <h3><MapPin size={18} />Come on over</h3>
+              {address ? (
+                <>
+                  <p>{address}</p>
+                  <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`} target="_blank" rel="noreferrer" className="website-text-link">Get directions<ArrowUpRight size={14} /></a>
+                </>
+              ) : <p>Get in touch with our team for location details.</p>}
+              {restaurant?.phone && <a className="website-contact-link" href={`tel:${restaurant.phone}`}><Phone size={15} />{restaurant.phone}</a>}
+              {restaurant?.email && <a className="website-contact-link" href={`mailto:${restaurant.email}`}><Mail size={15} />{restaurant.email}</a>}
+            </div>
           </div>
-        </div>
-        <div className="website-qr-note">
-          <QrCode size={27} />
-          <div>
-            <h3>Already at your table?</h3>
-            <p>Scan your table’s QR code to browse, order, or call your waiter.</p>
+          <div className="website-qr-note">
+            <QrCode size={27} />
+            <div>
+              <h3>Already at your table?</h3>
+              <p>Scan your table’s QR code to browse, order, or call your waiter.</p>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* Footer */}
       <footer className="website-footer">
         <Link to={`/${rQuery}`} className="website-footer-brand">{restaurant?.name || 'Bistro & Bloom'}<span>Good food. Beautiful moments.</span></Link>
         <nav aria-label="Footer navigation">
           <Link to={`/menu${rQuery}`}>Our menu</Link>
-          <Link to={`/book-table${rQuery}`}>Reservations</Link>
+          {showBookTable && <Link to={`/book-table${rQuery}`}>Reservations</Link>}
           <Link to={`/track-order${rQuery}`}>Track your order</Link>
           <Link to="/pos/login" style={{ opacity: 0.7, fontSize: '0.85rem' }}>Staff Portal ↗</Link>
         </nav>

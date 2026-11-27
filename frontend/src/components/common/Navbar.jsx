@@ -111,6 +111,12 @@ export default function Navbar({ onOpenCart }) {
   const rQuery = location.search.includes('r=') ? location.search : (restaurant?.restaurantCode ? `?r=${encodeURIComponent(restaurant.restaurantCode)}` : (restaurant?.restaurantId ? `?r=${encodeURIComponent(restaurant.restaurantId)}` : ''));
   const homePath = rQuery ? `/${rQuery}` : '/';
 
+  const settings = restaurant?.settings || {};
+  const sections = settings.sectionsVisibility || {};
+  const showBookTable = sections.showBookTable !== false;
+  const showOurStory = sections.showOurStory !== false;
+  const showVisit = sections.showVisit !== false;
+
   const navigation = (
     <>
       <Link
@@ -129,22 +135,35 @@ export default function Navbar({ onOpenCart }) {
       >
         Our menu
       </Link>
-      <a
-        href="/#our-story"
-        className={navClass(storyActive)}
-        aria-current={storyActive ? 'location' : undefined}
-        onClick={(e) => handleSectionScroll(e, 'our-story')}
-      >
-        Our story
-      </a>
-      <a
-        href="/#visit"
-        className={navClass(visitActive)}
-        aria-current={visitActive ? 'location' : undefined}
-        onClick={(e) => handleSectionScroll(e, 'visit')}
-      >
-        Visit
-      </a>
+      {showBookTable && (
+        <Link
+          to={`/book-table${rQuery}`}
+          className={navClass(location.pathname === '/book-table')}
+          onClick={closeNavigation}
+        >
+          Reservations
+        </Link>
+      )}
+      {showOurStory && (
+        <a
+          href="/#our-story"
+          className={navClass(storyActive)}
+          aria-current={storyActive ? 'location' : undefined}
+          onClick={(e) => handleSectionScroll(e, 'our-story')}
+        >
+          Our story
+        </a>
+      )}
+      {showVisit && (
+        <a
+          href="/#visit"
+          className={navClass(visitActive)}
+          aria-current={visitActive ? 'location' : undefined}
+          onClick={(e) => handleSectionScroll(e, 'visit')}
+        >
+          Visit
+        </a>
+      )}
     </>
   );
 

@@ -471,7 +471,8 @@ public record UpdateRestaurantSettingsDto(
     string? Email,
     string? Address,
     string? OpeningHours,
-    string? Settings
+    string? Settings,
+    string? Logo = null
 );
 
 public record CreateStaffRequest(

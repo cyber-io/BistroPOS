@@ -334,7 +334,11 @@ public static class UserProvisioning
             string.Equals(r.RestaurantCode, rawId, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(r.Name, rawId, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(r.Name.Replace("&", "and").Replace(" ", ""), normalizedCompact, StringComparison.OrdinalIgnoreCase) ||
-            r.Name.ToLowerInvariant().Contains(normalizedSlug)
+            r.Name.ToLowerInvariant().Contains(normalizedSlug) ||
+            (!string.IsNullOrWhiteSpace(r.Settings) && (
+                r.Settings.Contains($"\"subdomain\":\"{rawId}\"", StringComparison.OrdinalIgnoreCase) ||
+                r.Settings.Contains($"\"customDomain\":\"{rawId}\"", StringComparison.OrdinalIgnoreCase)
+            ))
         );
         if (byName != null) return byName.RestaurantId;
 

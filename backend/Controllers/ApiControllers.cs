@@ -237,7 +237,11 @@ public class RestaurantsController : ControllerBase
             string.Equals(r.RestaurantCode, rawId, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(r.Name, rawId, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(r.Name.Replace("&", "and").Replace(" ", ""), normalizedCompact, StringComparison.OrdinalIgnoreCase) ||
-            r.Name.ToLowerInvariant().Contains(normalizedSlug)
+            r.Name.ToLowerInvariant().Contains(normalizedSlug) ||
+            (!string.IsNullOrWhiteSpace(r.Settings) && (
+                r.Settings.Contains($"\"subdomain\":\"{rawId}\"", StringComparison.OrdinalIgnoreCase) ||
+                r.Settings.Contains($"\"customDomain\":\"{rawId}\"", StringComparison.OrdinalIgnoreCase)
+            ))
         );
         if (byName != null) return Ok(byName);
 
@@ -259,6 +263,7 @@ public class RestaurantsController : ControllerBase
         if (!string.IsNullOrWhiteSpace(dto.Phone)) restaurant.Phone = dto.Phone.Trim();
         if (!string.IsNullOrWhiteSpace(dto.Email)) restaurant.Email = dto.Email.Trim();
         if (!string.IsNullOrWhiteSpace(dto.Address)) restaurant.Address = dto.Address.Trim();
+        if (!string.IsNullOrWhiteSpace(dto.Logo)) restaurant.Logo = dto.Logo.Trim();
 
         restaurant.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
