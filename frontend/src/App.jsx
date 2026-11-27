@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation, Link } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { CartProvider } from './context/CartContext';
@@ -9,7 +9,7 @@ import Navbar from './components/common/Navbar';
 import ToastContainer from './components/common/ToastContainer';
 import CartDrawer from './components/common/CartDrawer';
 
-// Pages
+// Pages: HomePage is loaded eagerly for instant first contentful paint
 import HomePage from './pages/public/HomePage';
 import PublicMenuPage from './pages/public/PublicMenuPage';
 import DeliveryPage from './pages/public/DeliveryPage';
@@ -43,6 +43,28 @@ function RoleRoute({ allowedRoles, children }) {
   if (role === 'SUPER_ADMIN') {
     if (location.pathname.startsWith('/pos')) return <Navigate to="/admin" replace />;
     return children;
+  }
+
+  if (currentUser?.status === 'INACTIVE' || currentUser?.status === 'DISABLED') {
+    return (
+      <div className="min-h-[75vh] flex flex-col items-center justify-center p-6 text-center">
+        <div className="max-w-md w-full bg-white rounded-3xl p-8 shadow-xl border border-red-100 flex flex-col items-center animate-fade-in">
+          <div className="w-16 h-16 rounded-2xl bg-red-50 border border-red-200 text-red-600 flex items-center justify-center font-bold text-3xl mb-4 shadow-sm">
+            🚫
+          </div>
+          <h2 className="text-2xl font-black text-slate-900 mb-2">Access Suspended</h2>
+          <p className="text-sm text-slate-600 mb-6 leading-relaxed">
+            Your restaurant account has been deactivated or suspended by platform administration. Staff access to POS, kitchen, waiter, and receptionist workspaces is currently disabled.
+          </p>
+          <button
+            onClick={logout}
+            className="w-full inline-flex items-center justify-center py-2.5 px-4 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs transition-colors shadow-sm"
+          >
+            Sign Out
+          </button>
+        </div>
+      </div>
+    );
   }
 
   if (!allowedRoles.includes(role)) {
@@ -146,7 +168,8 @@ function MainApp() {
 
       {/* 4. Main Route View */}
       <div className="flex-1">
-        <Routes>
+        <Suspense fallback={<div className="min-h-[50vh] flex items-center justify-center"><Spinner /></div>}>
+          <Routes>
           {/* Customer & Staff Authentication Routes */}
           <Route path="/login" element={<CustomerLoginPage />} />
           <Route path="/pos/login" element={<LoginPage />} />
@@ -222,9 +245,23 @@ function MainApp() {
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </Suspense>
       </div>
     </div>
   );
+}
+
+// Scroll to top on every route change (unless navigating to a hash anchor)
+function ScrollToTop() {
+  const { pathname, hash } = useLocation();
+
+  useEffect(() => {
+    if (!hash) {
+      window.scrollTo(0, 0);
+    }
+  }, [pathname, hash]);
+
+  return null;
 }
 
 export default function App() {
@@ -233,6 +270,7 @@ export default function App() {
       <AuthProvider>
         <CartProvider>
           <NotificationProvider>
+            <ScrollToTop />
             <MainApp />
           </NotificationProvider>
         </CartProvider>

@@ -165,15 +165,14 @@ The system operates against PostgreSQL (Supabase schema: `restaurant_pos`). Migr
 
 ---
 
-## 👥 Demo Accounts (Password: `Password@123`)
+## 👑 Initial Administrator Account
 
-| Email | Role | Module Accessed |
-| :--- | :--- | :--- |
-| `superadmin@sunrisecafe.com` | `SUPER_ADMIN` | Full System Access |
-| `receptionist@sunrisecafe.com` | `RECEPTIONIST` | Receptionist Panel & Live Floor Map (`/receptionist`) |
-| `kitchen@sunrisecafe.com` | `KITCHEN` | Kitchen Display System & Inventory (`/kitchen`) |
-| `waiter.kunal@sunrisecafe.com` | `WAITER` | Waiter Panel & Table Help (`/waiter`) |
-| `customer.rahul@example.com` | `CUSTOMER` | Public Website & QR Dine-In (`/`, `/qr/...`) |
+| Email | Password | Role | Permissions |
+| :--- | :--- | :--- | :--- |
+| `admin@bistropos.com` | `Admin@12345` | `SUPER_ADMIN` | Full System Access (Outlet creation, Staff onboarding, Password management, Menu & Inventory setup) |
+
+> [!NOTE]
+> All dummy demo accounts and fake menu items have been stripped. Log in with this Super Admin account to create your outlets, managers, operational staff, and real-time menu items. Admin and Managers can change passwords directly from the portal.
 
 ---
 

@@ -73,6 +73,8 @@ public class Restaurant
 {
     [Key]
     public Guid RestaurantId { get; set; } = Guid.NewGuid();
+    [MaxLength(50)]
+    public string? RestaurantCode { get; set; }
     [Required, MaxLength(255)]
     public string Name { get; set; } = string.Empty;
     public string? Logo { get; set; }
@@ -220,6 +222,8 @@ public class User
     [MaxLength(50)]
     public string Status { get; set; } = "ACTIVE";
     public bool EmailVerified { get; set; } = false;
+    [MaxLength(50)]
+    public string? EmployeeCode { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

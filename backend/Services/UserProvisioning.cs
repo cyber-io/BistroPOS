@@ -7,14 +7,13 @@ namespace RestaurantSystem.Api.Services;
 public static class UserProvisioning
 {
     public static readonly Guid DefaultRestaurantId = Guid.Parse("a0000000-0000-0000-0000-000000000001");
-    public static readonly Guid RoyalPalaceRestaurantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
-    public static readonly Guid CityRestaurantId = Guid.Parse("22222222-2222-2222-2222-222222222222");
 
     private static readonly SemaphoreSlim _initLock = new(1, 1);
     private static int _initialized;
     public static bool IsInitialized => Volatile.Read(ref _initialized) == 1;
 
-    private const string LegacyPlaceholderHash = "$2a$11$w8/q3m2eA8zJ5m7nB3r9TuG4h.8Z.u2v8kP.vYg/H8K1.p2wEa2XW";
+    public const string DefaultAdminEmail = "admin@bistropos.com";
+    public const string DefaultAdminPassword = "Admin@12345";
 
     public static async Task EnsureDefaultDataAsync(RestaurantDbContext db, bool allowDevSeedCredentials = false)
     {
@@ -25,6 +24,7 @@ public static class UserProvisioning
             if (IsInitialized) return;
             if (db.Database.IsRelational() && !await db.Database.CanConnectAsync())
                 return;
+
             if (db.Database.IsNpgsql())
             {
                 try
@@ -34,6 +34,8 @@ public static class UserProvisioning
                         BEGIN
                             ALTER TABLE restaurant_pos.users DROP CONSTRAINT IF EXISTS users_role_check;
                             ALTER TABLE restaurant_pos.users ADD CONSTRAINT users_role_check CHECK (role IN ('SUPER_ADMIN', 'MANAGER', 'RECEPTIONIST', 'KITCHEN', 'WAITER', 'CUSTOMER'));
+                            ALTER TABLE restaurant_pos.users ADD COLUMN IF NOT EXISTS employee_code VARCHAR(50);
+                            ALTER TABLE restaurant_pos.restaurants ADD COLUMN IF NOT EXISTS restaurant_code VARCHAR(50);
                         EXCEPTION WHEN OTHERS THEN NULL;
                         END $$;
                     ");
@@ -41,9 +43,11 @@ public static class UserProvisioning
                 catch { /* Ignore if offline */ }
             }
 
+            const string standardOpeningHours = "{\"monday\": {\"open\": \"10:00\", \"close\": \"23:00\"}}";
+
             if (!allowDevSeedCredentials)
             {
-                await EnsureRestaurantDataAsync(db);
+                await EnsureRestaurantTablesAsync(db);
                 Volatile.Write(ref _initialized, 1);
                 return;
             }
@@ -51,208 +55,123 @@ public static class UserProvisioning
             var devPasswordHash = BCrypt.Net.BCrypt.HashPassword(
                 Environment.GetEnvironmentVariable("DEV_DEMO_SEED_PASSWORD") ?? "Password@123");
 
-            var restaurantsToSeed = new[]
+            // 1. Ensure primary active restaurant shell exists
+            var primaryRestaurant = await db.Restaurants.FirstOrDefaultAsync(r => r.RestaurantId == DefaultRestaurantId);
+            if (primaryRestaurant == null)
             {
-                new Restaurant
+                primaryRestaurant = new Restaurant
                 {
                     RestaurantId = DefaultRestaurantId,
+                    RestaurantCode = "RST-100",
                     Name = "Bistro & Bloom",
-                    Logo = "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=300&q=80",
+                    Logo = "/favicon.svg",
                     Address = "Plot 42, Gourmet Boulevard, Cyber Hub, Gurugram, HR - 122002",
                     Phone = "+91 98765 43210",
-                    Email = "contact@sunrisecafe.com",
+                    Email = "contact@bistropos.com",
                     Status = "ACTIVE",
-                    OpeningHours = "{\"monday\": {\"open\": \"10:00\", \"close\": \"23:00\"}}",
+                    OpeningHours = standardOpeningHours,
                     Settings = "{\"tax_rate\": 0.05, \"delivery_fee\": 40.00, \"currency\": \"INR\"}"
-                },
-                new Restaurant
-                {
-                    RestaurantId = RoyalPalaceRestaurantId,
-                    Name = "Royal Palace",
-                    Logo = "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=300&q=80",
-                    Address = "Heritage Mile, Civil Lines, Jaipur, RJ - 302006",
-                    Phone = "+91 98000 00001",
-                    Email = "contact@royalpalace.com",
-                    Status = "ACTIVE",
-                    OpeningHours = "{\"monday\": {\"open\": \"11:00\", \"close\": \"23:30\"}}",
-                    Settings = "{\"tax_rate\": 0.05, \"delivery_fee\": 50.00, \"currency\": \"INR\"}"
-                },
-                new Restaurant
-                {
-                    RestaurantId = CityRestaurantId,
-                    Name = "City Restaurant",
-                    Logo = "https://images.unsplash.com/photo-1550966871-3ed3cdb5ed0c?auto=format&fit=crop&w=300&q=80",
-                    Address = "Inner Circle, Connaught Place, New Delhi, DL - 110001",
-                    Phone = "+91 98000 00002",
-                    Email = "contact@cityrestaurant.com",
-                    Status = "ACTIVE",
-                    OpeningHours = "{\"monday\": {\"open\": \"10:00\", \"close\": \"23:00\"}}",
-                    Settings = "{\"tax_rate\": 0.05, \"delivery_fee\": 40.00, \"currency\": \"INR\"}"
-                }
-            };
-
-            foreach (var r in restaurantsToSeed)
+                };
+                db.Restaurants.Add(primaryRestaurant);
+            }
+            else
             {
-                if (!await db.Restaurants.AnyAsync(x => x.RestaurantId == r.RestaurantId))
+                primaryRestaurant.RestaurantCode ??= "RST-100";
+                if (string.IsNullOrWhiteSpace(primaryRestaurant.OpeningHours))
                 {
-                    db.Restaurants.Add(r);
+                    primaryRestaurant.OpeningHours = standardOpeningHours;
                 }
             }
+
+            // 2. Clean up any dummy/demo restaurants from previous seeds (Royal Palace, City Restaurant)
+            var dummyRestaurantIds = new[]
+            {
+                Guid.Parse("11111111-1111-1111-1111-111111111111"),
+                Guid.Parse("22222222-2222-2222-2222-222222222222")
+            };
+            var demoRestaurants = await db.Restaurants.Where(r => dummyRestaurantIds.Contains(r.RestaurantId)).ToListAsync();
+            if (demoRestaurants.Any())
+            {
+                db.Restaurants.RemoveRange(demoRestaurants);
+            }
+
+            // 3. Clean up any old dummy demo accounts (receptionists, waiters, kitchen, demo managers)
+            var dummyEmails = new[]
+            {
+                "superadmin@sunrisecafe.com",
+                "manager@sunrisecafe.com",
+                "manager.rahul@royalpalace.com",
+                "manager.amit@cityrestaurant.com",
+                "receptionist@sunrisecafe.com",
+                "kitchen@sunrisecafe.com",
+                "waiter.kunal@sunrisecafe.com",
+                "waiter@sunrisecafe.com",
+                "waiter.priya@sunrisecafe.com",
+                "customer.rahul@example.com"
+            };
+            var demoUsers = await db.Users.Where(u => dummyEmails.Contains(u.Email.ToLower())).ToListAsync();
+            if (demoUsers.Any())
+            {
+                db.Users.RemoveRange(demoUsers);
+            }
+
             await db.SaveChangesAsync();
 
-            var defaultUsers = new[]
+            // 4. Ensure single, secure Super Admin account exists
+            var targetAdminEmail = (Environment.GetEnvironmentVariable("ADMIN_INITIAL_EMAIL") ?? DefaultAdminEmail).Trim().ToLowerInvariant();
+            var targetAdminPassword = Environment.GetEnvironmentVariable("ADMIN_INITIAL_PASSWORD") ?? DefaultAdminPassword;
+
+            var existingAdmin = await db.Users.FirstOrDefaultAsync(u => u.Role == UserRoles.SuperAdmin || u.Email.ToLower() == targetAdminEmail);
+            if (existingAdmin == null)
             {
-                new User
+                db.Users.Add(new User
                 {
                     UserId = Guid.Parse("b0000000-0000-0000-0000-000000000001"),
-                    RestaurantId = null, // Super Admin is platform-wide
+                    RestaurantId = null, // Platform-wide Super Admin
                     Name = "Super Admin",
-                    Email = "superadmin@sunrisecafe.com",
+                    Email = targetAdminEmail,
                     Phone = "+91 99999 00001",
-                    PasswordHash = devPasswordHash,
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword(targetAdminPassword),
                     Role = UserRoles.SuperAdmin,
+                    EmployeeCode = "ADM-1000",
                     Status = "ACTIVE",
-                    EmailVerified = true
-                },
-                new User
-                {
-                    UserId = Guid.Parse("b0000000-0000-0000-0000-000000000010"),
-                    RestaurantId = DefaultRestaurantId,
-                    Name = "Rohit Mehta (Manager)",
-                    Email = "manager@sunrisecafe.com",
-                    Phone = "+91 99999 00010",
-                    PasswordHash = devPasswordHash,
-                    Role = UserRoles.Manager,
-                    Status = "ACTIVE",
-                    EmailVerified = true
-                },
-                new User
-                {
-                    UserId = Guid.Parse("a1111111-0000-0000-0000-000000000001"),
-                    RestaurantId = RoyalPalaceRestaurantId,
-                    Name = "Rahul Sharma (Manager)",
-                    Email = "manager.rahul@royalpalace.com",
-                    Phone = "+91 98111 00001",
-                    PasswordHash = devPasswordHash,
-                    Role = UserRoles.Manager,
-                    Status = "ACTIVE",
-                    EmailVerified = true
-                },
-                new User
-                {
-                    UserId = Guid.Parse("b2222222-0000-0000-0000-000000000001"),
-                    RestaurantId = CityRestaurantId,
-                    Name = "Amit Patel (Manager)",
-                    Email = "manager.amit@cityrestaurant.com",
-                    Phone = "+91 98222 00001",
-                    PasswordHash = devPasswordHash,
-                    Role = UserRoles.Manager,
-                    Status = "ACTIVE",
-                    EmailVerified = true
-                },
-                new User
-                {
-                    UserId = Guid.Parse("b0000000-0000-0000-0000-000000000002"),
-                    RestaurantId = DefaultRestaurantId,
-                    Name = "Ananya Sharma (Receptionist)",
-                    Email = "receptionist@sunrisecafe.com",
-                    Phone = "+91 99999 00002",
-                    PasswordHash = devPasswordHash,
-                    Role = UserRoles.Receptionist,
-                    Status = "ACTIVE",
-                    EmailVerified = true
-                },
-                new User
-                {
-                    UserId = Guid.Parse("b0000000-0000-0000-0000-000000000003"),
-                    RestaurantId = DefaultRestaurantId,
-                    Name = "Chef Vikram (Kitchen Head)",
-                    Email = "kitchen@sunrisecafe.com",
-                    Phone = "+91 99999 00003",
-                    PasswordHash = devPasswordHash,
-                    Role = UserRoles.Kitchen,
-                    Status = "ACTIVE",
-                    EmailVerified = true
-                },
-                new User
-                {
-                    UserId = Guid.Parse("b0000000-0000-0000-0000-000000000004"),
-                    RestaurantId = DefaultRestaurantId,
-                    Name = "Waiter Kunal",
-                    Email = "waiter.kunal@sunrisecafe.com",
-                    Phone = "+91 99999 00004",
-                    PasswordHash = devPasswordHash,
-                    Role = UserRoles.Waiter,
-                    Status = "ACTIVE",
-                    EmailVerified = true
-                },
-                new User
-                {
-                    UserId = Guid.Parse("b0000000-0000-0000-0000-000000000007"),
-                    RestaurantId = DefaultRestaurantId,
-                    Name = "Waiter",
-                    Email = "waiter@sunrisecafe.com",
-                    Phone = "+91 99999 00004",
-                    PasswordHash = devPasswordHash,
-                    Role = UserRoles.Waiter,
-                    Status = "ACTIVE",
-                    EmailVerified = true
-                },
-                new User
-                {
-                    UserId = Guid.Parse("b0000000-0000-0000-0000-000000000005"),
-                    RestaurantId = DefaultRestaurantId,
-                    Name = "Waiter Priya",
-                    Email = "waiter.priya@sunrisecafe.com",
-                    Phone = "+91 99999 00005",
-                    PasswordHash = devPasswordHash,
-                    Role = UserRoles.Waiter,
-                    Status = "ACTIVE",
-                    EmailVerified = true
-                },
-                new User
-                {
-                    UserId = Guid.Parse("b0000000-0000-0000-0000-000000000006"),
-                    RestaurantId = DefaultRestaurantId,
-                    Name = "Rahul Verma (Customer)",
-                    Email = "customer.rahul@example.com",
-                    Phone = "+91 98888 77777",
-                    PasswordHash = devPasswordHash,
-                    Role = UserRoles.Customer,
-                    Status = "ACTIVE",
-                    EmailVerified = true
-                }
-            };
-
-            foreach (var user in defaultUsers)
+                    EmailVerified = true,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
+            }
+            else
             {
-                var existing = await db.Users.FirstOrDefaultAsync(u => u.Email.ToLower() == user.Email.ToLower());
-                if (existing == null)
-                {
-                    db.Users.Add(user);
-                }
-                else
-                {
-                    if (string.IsNullOrEmpty(existing.PasswordHash) ||
-                        existing.PasswordHash == "SUPABASE_MANAGED" ||
-                        existing.PasswordHash == LegacyPlaceholderHash)
-                    {
-                        existing.PasswordHash = devPasswordHash;
-                    }
-                    existing.Role = user.Role;
-                    existing.RestaurantId = user.RestaurantId;
-                    existing.Status = "ACTIVE";
-                    existing.EmailVerified = true;
-                }
+                // Always sync admin credentials to ensure access
+                existingAdmin.Email = targetAdminEmail;
+                existingAdmin.Role = UserRoles.SuperAdmin;
+                existingAdmin.RestaurantId = null;
+                existingAdmin.Status = "ACTIVE";
+                existingAdmin.EmailVerified = true;
+                existingAdmin.EmployeeCode ??= "ADM-1000";
+                existingAdmin.PasswordHash = BCrypt.Net.BCrypt.HashPassword(targetAdminPassword);
+                existingAdmin.UpdatedAt = DateTime.UtcNow;
             }
 
             await db.SaveChangesAsync();
-            await EnsureRestaurantDataAsync(db);
+
+            // 4.1 Backfill any staff without employee codes sequentially
+            var staffWithoutCodes = await db.Users
+                .Where(u => u.Role != UserRoles.Customer && (u.EmployeeCode == null || u.EmployeeCode == ""))
+                .OrderBy(u => u.CreatedAt)
+                .ToListAsync();
+            foreach (var staffMember in staffWithoutCodes)
+            {
+                staffMember.EmployeeCode = await AuthService.GenerateEmployeeCodeAsync(db, staffMember.Role);
+                await db.SaveChangesAsync();
+            }
+
+            // 5. Ensure table infrastructure for dining operations
+            await EnsureRestaurantTablesAsync(db);
             Volatile.Write(ref _initialized, 1);
         }
         catch (Exception ex)
         {
-            // Fallback for migrations / constrained environments
             Console.WriteLine($"[UserProvisioning] Note: {ex.Message}");
         }
         finally
@@ -261,14 +180,13 @@ public static class UserProvisioning
         }
     }
 
-    private static async Task EnsureRestaurantDataAsync(RestaurantDbContext db)
+    private static async Task EnsureRestaurantTablesAsync(RestaurantDbContext db)
     {
         var activeRestaurants = await db.Restaurants.Where(r => r.Status == "ACTIVE").ToListAsync();
         if (!activeRestaurants.Any()) return;
 
         var defaultCapacities = new[] { 2, 2, 4, 4, 4, 6, 6, 8, 2, 4, 4, 8 };
 
-        // 1. Ensure 12 tables for every active restaurant
         foreach (var r in activeRestaurants)
         {
             var hasTables = await db.Tables.AnyAsync(t => t.RestaurantId == r.RestaurantId);
@@ -293,7 +211,417 @@ public static class UserProvisioning
             }
         }
 
-        // 2. Ensure menu categories & items for every active restaurant
+        // 2. Ensure menu categories & items for default restaurant if missing
+        if (!await db.MenuCategories.AnyAsync(c => c.RestaurantId == DefaultRestaurantId))
+        {
+            var seedCategories = new[]
+            {
+                new MenuCategory { CategoryId = Guid.Parse("d0000000-0000-0000-0000-000000000001"), RestaurantId = DefaultRestaurantId, Name = "Pizza", Description = "Wood-fired gourmet artisan pizzas", SortOrder = 1, Status = "ACTIVE", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+                new MenuCategory { CategoryId = Guid.Parse("d0000000-0000-0000-0000-000000000002"), RestaurantId = DefaultRestaurantId, Name = "Burger", Description = "Juicy handcrafted burgers on brioche buns", SortOrder = 2, Status = "ACTIVE", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+                new MenuCategory { CategoryId = Guid.Parse("d0000000-0000-0000-0000-000000000003"), RestaurantId = DefaultRestaurantId, Name = "Chinese", Description = "Wok-tossed noodles, dim sums & spicy gravies", SortOrder = 3, Status = "ACTIVE", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+                new MenuCategory { CategoryId = Guid.Parse("d0000000-0000-0000-0000-000000000004"), RestaurantId = DefaultRestaurantId, Name = "Indian", Description = "Rich aromatic curries, breads, and tandoori specials", SortOrder = 4, Status = "ACTIVE", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+                new MenuCategory { CategoryId = Guid.Parse("d0000000-0000-0000-0000-000000000005"), RestaurantId = DefaultRestaurantId, Name = "South Indian", Description = "Crisp dosas, fluffy idlis, and traditional chutneys", SortOrder = 5, Status = "ACTIVE", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+                new MenuCategory { CategoryId = Guid.Parse("d0000000-0000-0000-0000-000000000006"), RestaurantId = DefaultRestaurantId, Name = "North Indian", Description = "Dal makhani, paneer tikka, and butter naan", SortOrder = 6, Status = "ACTIVE", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+                new MenuCategory { CategoryId = Guid.Parse("d0000000-0000-0000-0000-000000000007"), RestaurantId = DefaultRestaurantId, Name = "Desserts", Description = "Decadent sweets, gulab jamun, and artisanal cakes", SortOrder = 7, Status = "ACTIVE", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+                new MenuCategory { CategoryId = Guid.Parse("d0000000-0000-0000-0000-000000000008"), RestaurantId = DefaultRestaurantId, Name = "Beverages", Description = "Specialty coffees, fresh mocktails, and shakes", SortOrder = 8, Status = "ACTIVE", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow }
+            };
+            db.MenuCategories.AddRange(seedCategories);
+            await db.SaveChangesAsync();
+        }
+
+        if (!await db.MenuItems.AnyAsync(m => m.RestaurantId == DefaultRestaurantId))
+        {
+            var catPizzaId = Guid.Parse("d0000000-0000-0000-0000-000000000001");
+            var catBurgerId = Guid.Parse("d0000000-0000-0000-0000-000000000002");
+            var catChineseId = Guid.Parse("d0000000-0000-0000-0000-000000000003");
+            var catIndianId = Guid.Parse("d0000000-0000-0000-0000-000000000004");
+            var catSouthIndianId = Guid.Parse("d0000000-0000-0000-0000-000000000005");
+            var catNorthIndianId = Guid.Parse("d0000000-0000-0000-0000-000000000006");
+            var catDessertsId = Guid.Parse("d0000000-0000-0000-0000-000000000007");
+            var catBeveragesId = Guid.Parse("d0000000-0000-0000-0000-000000000008");
+
+            var seedItems = new[]
+            {
+                new MenuItem
+                {
+                    MenuItemId = Guid.Parse("e0000000-0000-0000-0000-000000000001"),
+                    RestaurantId = DefaultRestaurantId,
+                    CategoryId = catPizzaId,
+                    Name = "Margherita Supreme Pizza",
+                    Description = "San Marzano tomato sauce, fresh mozzarella, organic basil, extra virgin olive oil",
+                    Price = 399.00m,
+                    Image = "https://images.unsplash.com/photo-1604382354936-07c5d9983bd3?auto=format&fit=crop&w=400&q=80",
+                    VegNonVeg = "VEG",
+                    Availability = true,
+                    SpiceLevel = "NONE",
+                    IsSweet = false,
+                    CustomizationOptions = "[{\"name\": \"Crust\", \"choices\": [\"Thin Crust\", \"Cheese Burst (+₹60)\", \"Wheat Crust\"]}]",
+                    AddOns = "[{\"name\": \"Extra Mozzarella\", \"price\": 50}, {\"name\": \"Jalapenos\", \"price\": 30}]",
+                    Ingredients = "San Marzano tomatoes, fresh buffalo mozzarella, handpicked basil, cold-pressed olive oil, wheat flour",
+                    Allergens = "[\"Dairy\", \"Gluten\"]",
+                    Portions = "[{\"name\": \"Regular (8 inch)\", \"price\": 399.00}, {\"name\": \"Large (12 inch)\", \"price\": 599.00}]",
+                    DietaryTags = "[\"Vegetarian\", \"Classic\"]",
+                    PrepTimeMinutes = 15,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                },
+                new MenuItem
+                {
+                    MenuItemId = Guid.Parse("e0000000-0000-0000-0000-000000000002"),
+                    RestaurantId = DefaultRestaurantId,
+                    CategoryId = catPizzaId,
+                    Name = "Spicy Paneer Tikka Pizza",
+                    Description = "Tandoori spiced paneer cubes, capsicum, red onions, mozzarella, spicy drizzle",
+                    Price = 469.00m,
+                    Image = "https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?auto=format&fit=crop&w=400&q=80",
+                    VegNonVeg = "VEG",
+                    Availability = true,
+                    SpiceLevel = "SPICY",
+                    IsSweet = false,
+                    CustomizationOptions = "[{\"name\": \"Crust\", \"choices\": [\"Regular\", \"Cheese Burst (+₹60)\"]}]",
+                    AddOns = "[{\"name\": \"Extra Paneer\", \"price\": 60}]",
+                    Ingredients = "Tandoori marinated cottage cheese, bell peppers, red onions, mozzarella, house spicy makhani drizzle",
+                    Allergens = "[\"Dairy\", \"Gluten\"]",
+                    Portions = "[{\"name\": \"Regular (8 inch)\", \"price\": 469.00}, {\"name\": \"Large (12 inch)\", \"price\": 689.00}]",
+                    DietaryTags = "[\"Vegetarian\", \"Spicy\"]",
+                    IsSpecial = true,
+                    PrepTimeMinutes = 18,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                },
+                new MenuItem
+                {
+                    MenuItemId = Guid.Parse("e0000000-0000-0000-0000-000000000003"),
+                    RestaurantId = DefaultRestaurantId,
+                    CategoryId = catPizzaId,
+                    Name = "BBQ Chicken Feast Pizza",
+                    Description = "Smoked BBQ chicken chunks, caramelized onions, smoked gouda & mozzarella",
+                    Price = 529.00m,
+                    Image = "https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=400&q=80",
+                    VegNonVeg = "NON_VEG",
+                    Availability = true,
+                    SpiceLevel = "MEDIUM",
+                    IsSweet = false,
+                    CustomizationOptions = "[{\"name\": \"Crust\", \"choices\": [\"Thin Crust\", \"Cheese Burst (+₹70)\"]}]",
+                    AddOns = "[{\"name\": \"Extra Chicken\", \"price\": 80}]",
+                    Ingredients = "Smoked chicken breast, sweet hickory glaze, caramelized shallots, smoked gouda, mozzarella",
+                    Allergens = "[\"Dairy\", \"Gluten\"]",
+                    Portions = "[{\"name\": \"Regular (8 inch)\", \"price\": 529.00}, {\"name\": \"Large (12 inch)\", \"price\": 769.00}]",
+                    DietaryTags = "[\"Chef Special\", \"High Protein\"]",
+                    IsSpecial = true,
+                    PrepTimeMinutes = 20,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                },
+                new MenuItem
+                {
+                    MenuItemId = Guid.Parse("e0000000-0000-0000-0000-000000000004"),
+                    RestaurantId = DefaultRestaurantId,
+                    CategoryId = catBurgerId,
+                    Name = "Crispy Veggie Crunch Burger",
+                    Description = "Crispy spiced potato-corn patty, lettuce, tomatoes, secret house chipotle sauce",
+                    Price = 219.00m,
+                    Image = "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=400&q=80",
+                    VegNonVeg = "VEG",
+                    Availability = true,
+                    SpiceLevel = "MILD",
+                    IsSweet = false,
+                    CustomizationOptions = "[{\"name\": \"Bun\", \"choices\": [\"Brioche\", \"Gluten Free (+₹40)\"]}]",
+                    AddOns = "[{\"name\": \"Cheddar Cheese Slice\", \"price\": 30}, {\"name\": \"Peri-peri Fries Combo\", \"price\": 99}]",
+                    Ingredients = "Crispy spiced potato-corn patty, garden lettuce, vine tomatoes, chipotle aioli, brioche bun",
+                    Allergens = "[\"Gluten\", \"Dairy\"]",
+                    Portions = "[{\"name\": \"Single Patty\", \"price\": 219.00}, {\"name\": \"Double Patty\", \"price\": 299.00}]",
+                    DietaryTags = "[\"Vegetarian\", \"Crispy\"]",
+                    PrepTimeMinutes = 12,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                },
+                new MenuItem
+                {
+                    MenuItemId = Guid.Parse("e0000000-0000-0000-0000-000000000005"),
+                    RestaurantId = DefaultRestaurantId,
+                    CategoryId = catBurgerId,
+                    Name = "Smokey Grilled Chicken Burger",
+                    Description = "Tender grilled chicken breast, sharp cheddar, gherkins, caramelized onions, garlic aioli",
+                    Price = 319.00m,
+                    Image = "https://images.unsplash.com/photo-1586190848861-99aa4a171e90?auto=format&fit=crop&w=400&q=80",
+                    VegNonVeg = "NON_VEG",
+                    Availability = true,
+                    SpiceLevel = "MEDIUM",
+                    IsSweet = false,
+                    CustomizationOptions = "[{\"name\": \"Bun\", \"choices\": [\"Brioche\", \"Multi-grain\"]}]",
+                    AddOns = "[{\"name\": \"Bacon Rashers (Chicken)\", \"price\": 60}]",
+                    Ingredients = "Chargrilled boneless chicken breast, aged cheddar, gherkins, caramelized onions, roasted garlic aioli",
+                    Allergens = "[\"Gluten\", \"Dairy\"]",
+                    Portions = "[{\"name\": \"Single Patty\", \"price\": 319.00}, {\"name\": \"Double Patty\", \"price\": 429.00}]",
+                    DietaryTags = "[\"High Protein\", \"Bestseller\"]",
+                    IsSpecial = true,
+                    PrepTimeMinutes = 15,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                },
+                new MenuItem
+                {
+                    MenuItemId = Guid.Parse("e0000000-0000-0000-0000-000000000006"),
+                    RestaurantId = DefaultRestaurantId,
+                    CategoryId = catChineseId,
+                    Name = "Chilli Paneer Dry",
+                    Description = "Crispy cottage cheese cubes tossed with bell peppers, spring onions, and spicy soy-chilli glaze",
+                    Price = 299.00m,
+                    Image = "https://images.unsplash.com/photo-1541832676-9b763b0239ab?auto=format&fit=crop&w=400&q=80",
+                    VegNonVeg = "VEG",
+                    Availability = true,
+                    SpiceLevel = "SPICY",
+                    IsSweet = false,
+                    CustomizationOptions = "[{\"name\": \"Style\", \"choices\": [\"Dry\", \"Semi-Gravy\", \"Gravy\"]}]",
+                    AddOns = "[]",
+                    Ingredients = "Crispy cottage cheese cubes, capsicum, scallions, ginger, dark soy sauce, hot chilli reduction",
+                    Allergens = "[\"Soy\", \"Dairy\", \"Gluten\"]",
+                    Portions = "[{\"name\": \"Half Portion\", \"price\": 199.00}, {\"name\": \"Full Portion\", \"price\": 299.00}]",
+                    DietaryTags = "[\"Vegetarian\", \"Spicy Indo-Chinese\"]",
+                    PrepTimeMinutes = 12,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                },
+                new MenuItem
+                {
+                    MenuItemId = Guid.Parse("e0000000-0000-0000-0000-000000000007"),
+                    RestaurantId = DefaultRestaurantId,
+                    CategoryId = catChineseId,
+                    Name = "Hakka Noodles Wok Special",
+                    Description = "Fresh wok-tossed noodles with shredded cabbage, carrots, scallions and aromatic sesame",
+                    Price = 249.00m,
+                    Image = "https://images.unsplash.com/photo-1585032226651-759b368d7246?auto=format&fit=crop&w=400&q=80",
+                    VegNonVeg = "VEG",
+                    Availability = true,
+                    SpiceLevel = "MILD",
+                    IsSweet = false,
+                    CustomizationOptions = "[{\"name\": \"Variation\", \"choices\": [\"Veg\", \"Egg (+₹30)\", \"Chicken (+₹70)\"]}]",
+                    AddOns = "[]",
+                    Ingredients = "Artisan wheat noodles, shredded cabbage, carrots, scallions, toasted sesame oil, light soy",
+                    Allergens = "[\"Gluten\", \"Soy\", \"Sesame\"]",
+                    Portions = "[{\"name\": \"Half Portion\", \"price\": 169.00}, {\"name\": \"Full Portion\", \"price\": 249.00}]",
+                    DietaryTags = "[\"Vegan Option\", \"Wok Tossed\"]",
+                    PrepTimeMinutes = 14,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                },
+                new MenuItem
+                {
+                    MenuItemId = Guid.Parse("e0000000-0000-0000-0000-000000000008"),
+                    RestaurantId = DefaultRestaurantId,
+                    CategoryId = catNorthIndianId,
+                    Name = "Dal Makhani Bukhara",
+                    Description = "Slow-cooked black lentils simmered overnight with butter, cream, and Kashmiri spices",
+                    Price = 349.00m,
+                    Image = "https://images.unsplash.com/photo-1546833999-b9f581a1996d?auto=format&fit=crop&w=400&q=80",
+                    VegNonVeg = "VEG",
+                    Availability = true,
+                    SpiceLevel = "MILD",
+                    IsSweet = false,
+                    CustomizationOptions = "[]",
+                    AddOns = "[{\"name\": \"Garlic Naan\", \"price\": 60}, {\"name\": \"Jeera Rice\", \"price\": 120}]",
+                    Ingredients = "Urad lentils, kidney beans, churned butter, fresh dairy cream, slow-simmered over charcoal embers for 18 hours",
+                    Allergens = "[\"Dairy\"]",
+                    Portions = "[{\"name\": \"Half (350ml)\", \"price\": 229.00}, {\"name\": \"Full (600ml)\", \"price\": 349.00}]",
+                    DietaryTags = "[\"Vegetarian\", \"Gluten-Free\", \"Iconic Recipe\"]",
+                    IsSpecial = true,
+                    PrepTimeMinutes = 10,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                },
+                new MenuItem
+                {
+                    MenuItemId = Guid.Parse("e0000000-0000-0000-0000-000000000009"),
+                    RestaurantId = DefaultRestaurantId,
+                    CategoryId = catNorthIndianId,
+                    Name = "Paneer Butter Masala",
+                    Description = "Fresh malai paneer steeped in a rich, buttery, velvety tomato and cashew gravy",
+                    Price = 379.00m,
+                    Image = "https://images.unsplash.com/photo-1631452180519-c014fe946bc7?auto=format&fit=crop&w=400&q=80",
+                    VegNonVeg = "VEG",
+                    Availability = true,
+                    SpiceLevel = "MEDIUM",
+                    IsSweet = false,
+                    CustomizationOptions = "[]",
+                    AddOns = "[{\"name\": \"Butter Roti (2 pcs)\", \"price\": 50}]",
+                    Ingredients = "Organic cottage cheese, satin-smooth cashew-tomato velouté, kasuri methi, churned white butter",
+                    Allergens = "[\"Dairy\", \"Nuts\"]",
+                    Portions = "[{\"name\": \"Half Portion\", \"price\": 249.00}, {\"name\": \"Full Portion\", \"price\": 379.00}]",
+                    DietaryTags = "[\"Vegetarian\", \"Gluten-Free\", \"Royal North Indian\"]",
+                    PrepTimeMinutes = 15,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                },
+                new MenuItem
+                {
+                    MenuItemId = Guid.Parse("e0000000-0000-0000-0000-000000000010"),
+                    RestaurantId = DefaultRestaurantId,
+                    CategoryId = catIndianId,
+                    Name = "Butter Chicken Delhi Special",
+                    Description = "Chargrilled boneless chicken tikkas simmered in satin smooth butter tomato sauce",
+                    Price = 449.00m,
+                    Image = "https://images.unsplash.com/photo-1603894584373-5ac82b2ae398?auto=format&fit=crop&w=400&q=80",
+                    VegNonVeg = "NON_VEG",
+                    Availability = true,
+                    SpiceLevel = "MEDIUM",
+                    IsSweet = false,
+                    CustomizationOptions = "[]",
+                    AddOns = "[{\"name\": \"Butter Naan (2 pcs)\", \"price\": 80}]",
+                    Ingredients = "Clay-oven roasted chicken morsels, rich aromatic tomato-cashew satin gravy, dried fenugreek, butter",
+                    Allergens = "[\"Dairy\", \"Nuts\"]",
+                    Portions = "[{\"name\": \"Half Portion\", \"price\": 299.00}, {\"name\": \"Full Portion\", \"price\": 449.00}]",
+                    DietaryTags = "[\"Non-Veg\", \"Gluten-Free\", \"House Signature\"]",
+                    IsSpecial = true,
+                    PrepTimeMinutes = 15,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                },
+                new MenuItem
+                {
+                    MenuItemId = Guid.Parse("e0000000-0000-0000-0000-000000000011"),
+                    RestaurantId = DefaultRestaurantId,
+                    CategoryId = catSouthIndianId,
+                    Name = "Mysore Masala Dosa",
+                    Description = "Golden crispy rice crepe smeared with fiery red garlic-lentil chutney, potato mash",
+                    Price = 229.00m,
+                    Image = "https://images.unsplash.com/photo-1589301760014-d929f3979dbc?auto=format&fit=crop&w=400&q=80",
+                    VegNonVeg = "VEG",
+                    Availability = true,
+                    SpiceLevel = "SPICY",
+                    IsSweet = false,
+                    CustomizationOptions = "[{\"name\": \"Roast\", \"choices\": [\"Ghee Roast (+₹30)\", \"Butter Roast (+₹30)\"]}]",
+                    AddOns = "[{\"name\": \"Extra Sambar\", \"price\": 25}]",
+                    Ingredients = "Fermented stone-ground rice & urad batter, fiery Mysore red chilli-garlic paste, spiced potato mash",
+                    Allergens = "[]",
+                    Portions = "[{\"name\": \"Regular\", \"price\": 229.00}]",
+                    DietaryTags = "[\"Vegan\", \"Gluten-Free\", \"South Indian Special\"]",
+                    PrepTimeMinutes = 12,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                },
+                new MenuItem
+                {
+                    MenuItemId = Guid.Parse("e0000000-0000-0000-0000-000000000012"),
+                    RestaurantId = DefaultRestaurantId,
+                    CategoryId = catSouthIndianId,
+                    Name = "Ghee Podi Idli (4 pcs)",
+                    Description = "Steamed button rice cakes drenched in aromatic desi ghee and gun-powder podi spice",
+                    Price = 189.00m,
+                    Image = "https://images.unsplash.com/photo-1589301760014-d929f3979dbc?auto=format&fit=crop&w=400&q=80",
+                    VegNonVeg = "VEG",
+                    Availability = true,
+                    SpiceLevel = "MEDIUM",
+                    IsSweet = false,
+                    CustomizationOptions = "[]",
+                    AddOns = "[]",
+                    Ingredients = "Fermented steamed rice & lentil cakes, A2 desi ghee, roasted spiced chana-urad podi",
+                    Allergens = "[\"Dairy\"]",
+                    Portions = "[{\"name\": \"4 Pieces\", \"price\": 189.00}]",
+                    DietaryTags = "[\"Vegetarian\", \"Gluten-Free\", \"South Indian\"]",
+                    PrepTimeMinutes = 8,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                },
+                new MenuItem
+                {
+                    MenuItemId = Guid.Parse("e0000000-0000-0000-0000-000000000013"),
+                    RestaurantId = DefaultRestaurantId,
+                    CategoryId = catDessertsId,
+                    Name = "Warm Gulab Jamun with Rabri",
+                    Description = "Two soft golden dumplings soaked in rose-cardamom syrup, crowned with chilled rabri",
+                    Price = 179.00m,
+                    Image = "https://images.unsplash.com/photo-1593798603546-b302636a0d0d?auto=format&fit=crop&w=400&q=80",
+                    VegNonVeg = "VEG",
+                    Availability = true,
+                    SpiceLevel = "NONE",
+                    IsSweet = true,
+                    CustomizationOptions = "[]",
+                    AddOns = "[{\"name\": \"Pistachio Topping\", \"price\": 20}]",
+                    Ingredients = "Khoya, reduced milk solids, green cardamom, rose water sugar syrup, artisanal malai rabri",
+                    Allergens = "[\"Dairy\", \"Gluten\", \"Nuts\"]",
+                    Portions = "[{\"name\": \"2 Pieces with Rabri\", \"price\": 179.00}]",
+                    DietaryTags = "[\"Vegetarian\", \"Dessert Signature\"]",
+                    IsSpecial = true,
+                    PrepTimeMinutes = 5,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                },
+                new MenuItem
+                {
+                    MenuItemId = Guid.Parse("e0000000-0000-0000-0000-000000000014"),
+                    RestaurantId = DefaultRestaurantId,
+                    CategoryId = catDessertsId,
+                    Name = "Belgian Chocolate Lava Cake",
+                    Description = "Warm molten chocolate cake with gooey center, served with Madagascan vanilla gelato",
+                    Price = 249.00m,
+                    Image = "https://images.unsplash.com/photo-1606313564200-e75d5e30476c?auto=format&fit=crop&w=400&q=80",
+                    VegNonVeg = "VEG",
+                    Availability = true,
+                    SpiceLevel = "NONE",
+                    IsSweet = true,
+                    CustomizationOptions = "[]",
+                    AddOns = "[{\"name\": \"Extra Scoop Gelato\", \"price\": 60}]",
+                    Ingredients = "70% dark Belgian cocoa, unsalted churned butter, organic eggs/flour, bourbon vanilla gelato",
+                    Allergens = "[\"Dairy\", \"Gluten\"]",
+                    Portions = "[{\"name\": \"Standard Cake + Gelato\", \"price\": 249.00}]",
+                    DietaryTags = "[\"Vegetarian\", \"Decadent\"]",
+                    PrepTimeMinutes = 10,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                },
+                new MenuItem
+                {
+                    MenuItemId = Guid.Parse("e0000000-0000-0000-0000-000000000015"),
+                    RestaurantId = DefaultRestaurantId,
+                    CategoryId = catBeveragesId,
+                    Name = "Fresh Mint Mojito",
+                    Description = "Fresh garden mint, crushed lime, cane sugar, and sparkling soda over ice",
+                    Price = 159.00m,
+                    Image = "https://images.unsplash.com/photo-1551024709-8f23befc6f87?auto=format&fit=crop&w=400&q=80",
+                    VegNonVeg = "VEG",
+                    Availability = true,
+                    SpiceLevel = "NONE",
+                    IsSweet = true,
+                    CustomizationOptions = "[{\"name\": \"Sweetness\", \"choices\": [\"Regular\", \"Low Sugar\", \"No Sugar\"]}]",
+                    AddOns = "[]",
+                    Ingredients = "Fresh Moroccan spearmint, Key lime wedges, raw cane syrup, effervescent sparkling soda, crushed ice",
+                    Allergens = "[]",
+                    Portions = "[{\"name\": \"Glass (350ml)\", \"price\": 159.00}]",
+                    DietaryTags = "[\"Vegan\", \"Gluten-Free\", \"Refreshing\"]",
+                    PrepTimeMinutes = 5,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                },
+                new MenuItem
+                {
+                    MenuItemId = Guid.Parse("e0000000-0000-0000-0000-000000000016"),
+                    RestaurantId = DefaultRestaurantId,
+                    CategoryId = catBeveragesId,
+                    Name = "Sunrise Signature Cold Brew",
+                    Description = "18-hour steeped single-origin Arabica cold brew with vanilla cream froth",
+                    Price = 199.00m,
+                    Image = "https://images.unsplash.com/photo-1517701550927-30cf4ba1dba5?auto=format&fit=crop&w=400&q=80",
+                    VegNonVeg = "VEG",
+                    Availability = true,
+                    SpiceLevel = "NONE",
+                    IsSweet = false,
+                    CustomizationOptions = "[{\"name\": \"Milk\", \"choices\": [\"Whole Milk\", \"Oat Milk (+₹40)\", \"Almond Milk (+₹40)\"]}]",
+                    AddOns = "[]",
+                    Ingredients = "Single-estate Chikmagalur Arabica beans, filtered mountain spring water, Madagascar vanilla bean sweet cream",
+                    Allergens = "[\"Dairy\"]",
+                    Portions = "[{\"name\": \"Cold Glass (300ml)\", \"price\": 199.00}]",
+                    DietaryTags = "[\"Vegetarian\", \"Cold Brew\"]",
+                    PrepTimeMinutes = 3,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                }
+            };
+            db.MenuItems.AddRange(seedItems);
+            await db.SaveChangesAsync();
+        }
+
+        // 3. Ensure menu categories & items for every active restaurant
         var defaultCats = await db.MenuCategories
             .Where(c => c.RestaurantId == DefaultRestaurantId)
             .OrderBy(c => c.SortOrder)
@@ -358,168 +686,64 @@ public static class UserProvisioning
         }
     }
 
-    public static async Task EnsurePhase1MenuDataAsync(RestaurantDbContext db)
+    private static async Task EnsureRestaurantMenuAsync(RestaurantDbContext db)
     {
-        var items = await db.MenuItems.ToListAsync();
-        if (!items.Any()) return;
+        var hasCategories = await db.MenuCategories.AnyAsync(c => c.RestaurantId == DefaultRestaurantId);
+        if (hasCategories) return;
 
-        var changed = false;
-        foreach (var item in items)
+        var catPizza = new MenuCategory { CategoryId = Guid.NewGuid(), RestaurantId = DefaultRestaurantId, Name = "Pizza", Description = "Wood-fired artisan pizzas", SortOrder = 1, Status = "ACTIVE", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow };
+        var catBurger = new MenuCategory { CategoryId = Guid.NewGuid(), RestaurantId = DefaultRestaurantId, Name = "Burger", Description = "Handcrafted burgers on brioche buns", SortOrder = 2, Status = "ACTIVE", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow };
+        var catChinese = new MenuCategory { CategoryId = Guid.NewGuid(), RestaurantId = DefaultRestaurantId, Name = "Chinese", Description = "Wok-tossed noodles and appetizers", SortOrder = 3, Status = "ACTIVE", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow };
+        var catIndian = new MenuCategory { CategoryId = Guid.NewGuid(), RestaurantId = DefaultRestaurantId, Name = "Indian", Description = "Rich curries, dal makhani and tandoori specials", SortOrder = 4, Status = "ACTIVE", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow };
+        var catSouthIndian = new MenuCategory { CategoryId = Guid.NewGuid(), RestaurantId = DefaultRestaurantId, Name = "South Indian", Description = "Crisp dosas and fluffy idlis", SortOrder = 5, Status = "ACTIVE", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow };
+        var catDesserts = new MenuCategory { CategoryId = Guid.NewGuid(), RestaurantId = DefaultRestaurantId, Name = "Desserts", Description = "Artisanal desserts and warm sweets", SortOrder = 6, Status = "ACTIVE", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow };
+        var catBeverages = new MenuCategory { CategoryId = Guid.NewGuid(), RestaurantId = DefaultRestaurantId, Name = "Beverages", Description = "Signature cold brews, mocktails and teas", SortOrder = 7, Status = "ACTIVE", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow };
+
+        db.MenuCategories.AddRange(catPizza, catBurger, catChinese, catIndian, catSouthIndian, catDesserts, catBeverages);
+        await db.SaveChangesAsync();
+
+        var items = new List<MenuItem>
         {
-            var name = item.Name.ToLowerInvariant();
-            if (string.IsNullOrEmpty(item.Ingredients) || item.Allergens == "[]" || string.IsNullOrEmpty(item.Portions) || item.Portions == "[]")
+            new() { MenuItemId = Guid.NewGuid(), RestaurantId = DefaultRestaurantId, CategoryId = catPizza.CategoryId, Name = "Margherita Supreme Pizza", Description = "San Marzano tomato sauce, fresh buffalo mozzarella, organic basil, extra virgin olive oil", Price = 399.00m, Image = "https://images.unsplash.com/photo-1604382354936-07c5d9983bd3?auto=format&fit=crop&w=400&q=80", VegNonVeg = "VEG", Availability = true, SpiceLevel = "NONE", IsSweet = false, CustomizationOptions = "[{\"name\": \"Crust\", \"choices\": [\"Thin Crust\", \"Cheese Burst (+₹60)\"]}]", AddOns = "[{\"name\": \"Extra Mozzarella\", \"price\": 50}]", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new() { MenuItemId = Guid.NewGuid(), RestaurantId = DefaultRestaurantId, CategoryId = catPizza.CategoryId, Name = "Spicy Paneer Tikka Pizza", Description = "Tandoori spiced paneer cubes, capsicum, red onions, mozzarella, spicy drizzle", Price = 469.00m, Image = "https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?auto=format&fit=crop&w=400&q=80", VegNonVeg = "VEG", Availability = true, SpiceLevel = "SPICY", IsSweet = false, CustomizationOptions = "[{\"name\": \"Crust\", \"choices\": [\"Regular\", \"Cheese Burst (+₹60)\"]}]", AddOns = "[{\"name\": \"Extra Paneer\", \"price\": 60}]", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new() { MenuItemId = Guid.NewGuid(), RestaurantId = DefaultRestaurantId, CategoryId = catPizza.CategoryId, Name = "BBQ Chicken Feast Pizza", Description = "Smoked BBQ chicken chunks, caramelized onions, smoked gouda & mozzarella", Price = 529.00m, Image = "https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=400&q=80", VegNonVeg = "NON_VEG", Availability = true, SpiceLevel = "MEDIUM", IsSweet = false, CustomizationOptions = "[{\"name\": \"Crust\", \"choices\": [\"Thin Crust\", \"Cheese Burst (+₹70)\"]}]", AddOns = "[{\"name\": \"Extra Chicken\", \"price\": 80}]", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new() { MenuItemId = Guid.NewGuid(), RestaurantId = DefaultRestaurantId, CategoryId = catBurger.CategoryId, Name = "Crispy Veggie Crunch Burger", Description = "Crispy spiced potato-corn patty, lettuce, tomatoes, secret house chipotle sauce", Price = 219.00m, Image = "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=400&q=80", VegNonVeg = "VEG", Availability = true, SpiceLevel = "MILD", IsSweet = false, CustomizationOptions = "[{\"name\": \"Bun\", \"choices\": [\"Brioche\", \"Gluten Free (+₹40)\"]}]", AddOns = "[{\"name\": \"Cheddar Cheese Slice\", \"price\": 30}]", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new() { MenuItemId = Guid.NewGuid(), RestaurantId = DefaultRestaurantId, CategoryId = catBurger.CategoryId, Name = "Smokey Grilled Chicken Burger", Description = "Tender grilled chicken breast, sharp cheddar, gherkins, caramelized onions, garlic aioli", Price = 319.00m, Image = "https://images.unsplash.com/photo-1586190848861-99aa4a171e90?auto=format&fit=crop&w=400&q=80", VegNonVeg = "NON_VEG", Availability = true, SpiceLevel = "MEDIUM", IsSweet = false, CustomizationOptions = "[{\"name\": \"Bun\", \"choices\": [\"Brioche\", \"Multi-grain\"]}]", AddOns = "[{\"name\": \"Bacon Rashers (Chicken)\", \"price\": 60}]", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new() { MenuItemId = Guid.NewGuid(), RestaurantId = DefaultRestaurantId, CategoryId = catChinese.CategoryId, Name = "Chilli Paneer Dry", Description = "Crispy cottage cheese cubes tossed with bell peppers, spring onions, and spicy soy-chilli glaze", Price = 299.00m, Image = "https://images.unsplash.com/photo-1541832676-9b763b0239ab?auto=format&fit=crop&w=400&q=80", VegNonVeg = "VEG", Availability = true, SpiceLevel = "SPICY", IsSweet = false, CustomizationOptions = "[]", AddOns = "[]", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new() { MenuItemId = Guid.NewGuid(), RestaurantId = DefaultRestaurantId, CategoryId = catChinese.CategoryId, Name = "Hakka Noodles Wok Special", Description = "Fresh wok-tossed noodles with shredded cabbage, carrots, scallions and aromatic sesame", Price = 249.00m, Image = "https://images.unsplash.com/photo-1585032226651-759b368d7246?auto=format&fit=crop&w=400&q=80", VegNonVeg = "VEG", Availability = true, SpiceLevel = "MILD", IsSweet = false, CustomizationOptions = "[{\"name\": \"Variation\", \"choices\": [\"Veg\", \"Egg (+₹30)\", \"Chicken (+₹70)\"]}]", AddOns = "[]", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new() { MenuItemId = Guid.NewGuid(), RestaurantId = DefaultRestaurantId, CategoryId = catIndian.CategoryId, Name = "Dal Makhani Bukhara", Description = "Slow-cooked black lentils simmered overnight with butter, cream, and Kashmiri spices", Price = 349.00m, Image = "https://images.unsplash.com/photo-1546833999-b9f581a1996d?auto=format&fit=crop&w=400&q=80", VegNonVeg = "VEG", Availability = true, SpiceLevel = "MILD", IsSweet = false, CustomizationOptions = "[]", AddOns = "[{\"name\": \"Garlic Naan\", \"price\": 60}]", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new() { MenuItemId = Guid.NewGuid(), RestaurantId = DefaultRestaurantId, CategoryId = catIndian.CategoryId, Name = "Paneer Butter Masala", Description = "Fresh malai paneer steeped in a rich, buttery, velvety tomato and cashew gravy", Price = 379.00m, Image = "https://images.unsplash.com/photo-1631452180519-c014fe946bc7?auto=format&fit=crop&w=400&q=80", VegNonVeg = "VEG", Availability = true, SpiceLevel = "MEDIUM", IsSweet = false, CustomizationOptions = "[]", AddOns = "[{\"name\": \"Butter Roti (2 pcs)\", \"price\": 50}]", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new() { MenuItemId = Guid.NewGuid(), RestaurantId = DefaultRestaurantId, CategoryId = catIndian.CategoryId, Name = "Butter Chicken Delhi Special", Description = "Chargrilled boneless chicken tikkas simmered in satin smooth butter tomato sauce", Price = 449.00m, Image = "https://images.unsplash.com/photo-1603894584373-5ac82b2ae398?auto=format&fit=crop&w=400&q=80", VegNonVeg = "NON_VEG", Availability = true, SpiceLevel = "MEDIUM", IsSweet = false, CustomizationOptions = "[]", AddOns = "[{\"name\": \"Butter Naan (2 pcs)\", \"price\": 80}]", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new() { MenuItemId = Guid.NewGuid(), RestaurantId = DefaultRestaurantId, CategoryId = catSouthIndian.CategoryId, Name = "Mysore Masala Dosa", Description = "Golden crispy rice crepe smeared with fiery red garlic-lentil chutney, stuffed with spiced potato mash", Price = 229.00m, Image = "https://images.unsplash.com/photo-1589301760014-d929f3979dbc?auto=format&fit=crop&w=400&q=80", VegNonVeg = "VEG", Availability = true, SpiceLevel = "SPICY", IsSweet = false, CustomizationOptions = "[]", AddOns = "[{\"name\": \"Extra Sambar\", \"price\": 25}]", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new() { MenuItemId = Guid.NewGuid(), RestaurantId = DefaultRestaurantId, CategoryId = catDesserts.CategoryId, Name = "Warm Gulab Jamun with Rabri", Description = "Two soft golden dumplings soaked in rose-cardamom syrup, crowned with chilled rabri", Price = 179.00m, Image = "https://images.unsplash.com/photo-1593798603546-b302636a0d0d?auto=format&fit=crop&w=400&q=80", VegNonVeg = "VEG", Availability = true, SpiceLevel = "NONE", IsSweet = true, CustomizationOptions = "[]", AddOns = "[{\"name\": \"Pistachio Topping\", \"price\": 20}]", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new() { MenuItemId = Guid.NewGuid(), RestaurantId = DefaultRestaurantId, CategoryId = catDesserts.CategoryId, Name = "Belgian Chocolate Lava Cake", Description = "Warm molten chocolate cake with gooey center, served with vanilla gelato", Price = 249.00m, Image = "https://images.unsplash.com/photo-1606313564200-e75d5e30476c?auto=format&fit=crop&w=400&q=80", VegNonVeg = "VEG", Availability = true, SpiceLevel = "NONE", IsSweet = true, CustomizationOptions = "[]", AddOns = "[{\"name\": \"Extra Scoop Gelato\", \"price\": 60}]", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new() { MenuItemId = Guid.NewGuid(), RestaurantId = DefaultRestaurantId, CategoryId = catBeverages.CategoryId, Name = "Fresh Mint Mojito", Description = "Fresh garden mint, crushed lime, cane sugar, and sparkling soda over ice", Price = 159.00m, Image = "https://images.unsplash.com/photo-1551024709-8f23befc6f87?auto=format&fit=crop&w=400&q=80", VegNonVeg = "VEG", Availability = true, SpiceLevel = "NONE", IsSweet = true, CustomizationOptions = "[]", AddOns = "[]", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new() { MenuItemId = Guid.NewGuid(), RestaurantId = DefaultRestaurantId, CategoryId = catBeverages.CategoryId, Name = "Cold Brew Coffee", Description = "18-hour steeped single-origin Arabica cold brew with vanilla cream froth", Price = 199.00m, Image = "https://images.unsplash.com/photo-1517701550927-30cf4ba1dba5?auto=format&fit=crop&w=400&q=80", VegNonVeg = "VEG", Availability = true, SpiceLevel = "NONE", IsSweet = false, CustomizationOptions = "[{\"name\": \"Milk\", \"choices\": [\"Whole Milk\", \"Oat Milk (+₹40)\"]}]", AddOns = "[]", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow }
+        };
+
+        db.MenuItems.AddRange(items);
+        await db.SaveChangesAsync();
+    }
+
+    public static async Task<string> GenerateRestaurantCodeAsync(RestaurantDbContext db)
+    {
+        const string prefix = "RST";
+        const string prefixWithDash = "RST-";
+        var existingCodes = await db.Restaurants
+            .Where(r => r.RestaurantCode != null && r.RestaurantCode.StartsWith(prefixWithDash))
+            .Select(r => r.RestaurantCode!)
+            .ToListAsync();
+
+        int maxNumber = 99; // Sequence starts from 100 (99 + 1)
+        foreach (var code in existingCodes)
+        {
+            var numPart = code.Substring(prefixWithDash.Length);
+            if (int.TryParse(numPart, out var n) && n > maxNumber)
             {
-                changed = true;
-                if (name.Contains("margherita"))
-                {
-                    item.Allergens = "[\"Dairy\", \"Gluten\"]";
-                    item.Ingredients = "San Marzano tomatoes, fresh buffalo mozzarella, handpicked basil, cold-pressed olive oil, wheat flour";
-                    item.Portions = "[{\"name\": \"Regular (8 inch)\", \"price\": 399.00}, {\"name\": \"Large (12 inch)\", \"price\": 599.00}]";
-                    item.DietaryTags = "[\"Vegetarian\", \"Classic\"]";
-                    item.IsSpecial = false;
-                    item.PrepTimeMinutes = 15;
-                }
-                else if (name.Contains("paneer tikka pizza"))
-                {
-                    item.Allergens = "[\"Dairy\", \"Gluten\"]";
-                    item.Ingredients = "Tandoori marinated cottage cheese, bell peppers, red onions, mozzarella, house spicy makhani drizzle";
-                    item.Portions = "[{\"name\": \"Regular (8 inch)\", \"price\": 469.00}, {\"name\": \"Large (12 inch)\", \"price\": 689.00}]";
-                    item.DietaryTags = "[\"Vegetarian\", \"Spicy\"]";
-                    item.IsSpecial = true;
-                    item.PrepTimeMinutes = 18;
-                }
-                else if (name.Contains("bbq chicken"))
-                {
-                    item.Allergens = "[\"Dairy\", \"Gluten\"]";
-                    item.Ingredients = "Smoked chicken breast, sweet hickory glaze, caramelized shallots, smoked gouda, mozzarella";
-                    item.Portions = "[{\"name\": \"Regular (8 inch)\", \"price\": 529.00}, {\"name\": \"Large (12 inch)\", \"price\": 769.00}]";
-                    item.DietaryTags = "[\"Chef Special\", \"High Protein\"]";
-                    item.IsSpecial = true;
-                    item.PrepTimeMinutes = 20;
-                }
-                else if (name.Contains("veggie crunch burger"))
-                {
-                    item.Allergens = "[\"Gluten\", \"Dairy\"]";
-                    item.Ingredients = "Crispy spiced potato-corn patty, garden lettuce, vine tomatoes, chipotle aioli, brioche bun";
-                    item.Portions = "[{\"name\": \"Single Patty\", \"price\": 219.00}, {\"name\": \"Double Patty\", \"price\": 299.00}]";
-                    item.DietaryTags = "[\"Vegetarian\", \"Crispy\"]";
-                    item.IsSpecial = false;
-                    item.PrepTimeMinutes = 12;
-                }
-                else if (name.Contains("grilled chicken burger"))
-                {
-                    item.Allergens = "[\"Gluten\", \"Dairy\"]";
-                    item.Ingredients = "Chargrilled boneless chicken breast, aged cheddar, gherkins, caramelized onions, roasted garlic aioli";
-                    item.Portions = "[{\"name\": \"Single Patty\", \"price\": 319.00}, {\"name\": \"Double Patty\", \"price\": 429.00}]";
-                    item.DietaryTags = "[\"High Protein\", \"Bestseller\"]";
-                    item.IsSpecial = true;
-                    item.PrepTimeMinutes = 15;
-                }
-                else if (name.Contains("chilli paneer"))
-                {
-                    item.Allergens = "[\"Soy\", \"Dairy\", \"Gluten\"]";
-                    item.Ingredients = "Crispy cottage cheese cubes, capsicum, scallions, ginger, dark soy sauce, hot chilli reduction";
-                    item.Portions = "[{\"name\": \"Half Portion\", \"price\": 199.00}, {\"name\": \"Full Portion\", \"price\": 299.00}]";
-                    item.DietaryTags = "[\"Vegetarian\", \"Spicy Indo-Chinese\"]";
-                    item.IsSpecial = false;
-                    item.PrepTimeMinutes = 12;
-                }
-                else if (name.Contains("noodles"))
-                {
-                    item.Allergens = "[\"Gluten\", \"Soy\", \"Sesame\"]";
-                    item.Ingredients = "Artisan wheat noodles, shredded cabbage, carrots, scallions, toasted sesame oil, light soy";
-                    item.Portions = "[{\"name\": \"Half Portion\", \"price\": 169.00}, {\"name\": \"Full Portion\", \"price\": 249.00}]";
-                    item.DietaryTags = "[\"Vegan Option\", \"Wok Tossed\"]";
-                    item.IsSpecial = false;
-                    item.PrepTimeMinutes = 14;
-                }
-                else if (name.Contains("dal makhani"))
-                {
-                    item.Allergens = "[\"Dairy\"]";
-                    item.Ingredients = "Urad lentils, kidney beans, churned butter, fresh dairy cream, slow-simmered over charcoal embers for 18 hours";
-                    item.Portions = "[{\"name\": \"Half (350ml)\", \"price\": 229.00}, {\"name\": \"Full (600ml)\", \"price\": 349.00}]";
-                    item.DietaryTags = "[\"Vegetarian\", \"Gluten-Free\", \"Iconic Recipe\"]";
-                    item.IsSpecial = true;
-                    item.PrepTimeMinutes = 10;
-                }
-                else if (name.Contains("paneer butter"))
-                {
-                    item.Allergens = "[\"Dairy\", \"Nuts\"]";
-                    item.Ingredients = "Organic cottage cheese, satin-smooth cashew-tomato velouté, kasuri methi, churned white butter";
-                    item.Portions = "[{\"name\": \"Half Portion\", \"price\": 249.00}, {\"name\": \"Full Portion\", \"price\": 379.00}]";
-                    item.DietaryTags = "[\"Vegetarian\", \"Gluten-Free\", \"Royal North Indian\"]";
-                    item.IsSpecial = false;
-                    item.PrepTimeMinutes = 15;
-                }
-                else if (name.Contains("butter chicken"))
-                {
-                    item.Allergens = "[\"Dairy\", \"Nuts\"]";
-                    item.Ingredients = "Clay-oven roasted chicken morsels, rich aromatic tomato-cashew satin gravy, dried fenugreek, butter";
-                    item.Portions = "[{\"name\": \"Half Portion\", \"price\": 299.00}, {\"name\": \"Full Portion\", \"price\": 449.00}]";
-                    item.DietaryTags = "[\"Non-Veg\", \"Gluten-Free\", \"House Signature\"]";
-                    item.IsSpecial = true;
-                    item.PrepTimeMinutes = 15;
-                }
-                else if (name.Contains("dosa"))
-                {
-                    item.Allergens = "[]";
-                    item.Ingredients = "Fermented stone-ground rice & urad batter, fiery Mysore red chilli-garlic paste, spiced potato mash";
-                    item.Portions = "[{\"name\": \"Regular\", \"price\": 229.00}]";
-                    item.DietaryTags = "[\"Vegan\", \"Gluten-Free\", \"South Indian Special\"]";
-                    item.IsSpecial = false;
-                    item.PrepTimeMinutes = 12;
-                }
-                else if (name.Contains("idli"))
-                {
-                    item.Allergens = "[\"Dairy\"]";
-                    item.Ingredients = "Steamed rice button idlis, pure A2 desi ghee, roasted spiced lentil podi gunpowder";
-                    item.Portions = "[{\"name\": \"Small (4 pcs)\", \"price\": 129.00}, {\"name\": \"Full (8 pcs)\", \"price\": 189.00}]";
-                    item.DietaryTags = "[\"Vegetarian\", \"Gluten-Free\"]";
-                    item.IsSpecial = false;
-                    item.PrepTimeMinutes = 10;
-                }
-                else if (name.Contains("gulab jamun"))
-                {
-                    item.Allergens = "[\"Dairy\", \"Nuts\", \"Gluten\"]";
-                    item.Ingredients = "Khoya dumplings, green cardamom, rose petal syrup, slow-reduced malai rabri, roasted pistachios";
-                    item.Portions = "[{\"name\": \"2 Pieces with Rabri\", \"price\": 179.00}]";
-                    item.DietaryTags = "[\"Vegetarian\", \"Traditional Sweet\"]";
-                    item.IsSpecial = false;
-                    item.PrepTimeMinutes = 5;
-                }
-                else if (name.Contains("lava cake"))
-                {
-                    item.Allergens = "[\"Dairy\", \"Gluten\", \"Eggs\"]";
-                    item.Ingredients = "Callebaut Belgian dark chocolate, sweet butter, Madagascan vanilla beans, freshly churned gelato";
-                    item.Portions = "[{\"name\": \"Single Cake + Gelato\", \"price\": 249.00}]";
-                    item.DietaryTags = "[\"Decadent Dessert\", \"Freshly Baked\"]";
-                    item.IsSpecial = true;
-                    item.PrepTimeMinutes = 15;
-                }
-                else if (name.Contains("mojito"))
-                {
-                    item.Allergens = "[]";
-                    item.Ingredients = "Fresh organic spearmint, Key limes, unrefined cane sugar syrup, sparkling mineral water, crushed ice";
-                    item.Portions = "[{\"name\": \"Glass (350ml)\", \"price\": 159.00}, {\"name\": \"Pitcher (1 Litre)\", \"price\": 389.00}]";
-                    item.DietaryTags = "[\"Vegan\", \"Gluten-Free\", \"Refreshing Mocktail\"]";
-                    item.IsSpecial = false;
-                    item.PrepTimeMinutes = 5;
-                }
-                else
-                {
-                    item.Allergens = "[]";
-                    item.Ingredients = "Fresh locally sourced ingredients, aromatic spices and house chef seasoning";
-                    item.Portions = $"[{{\"name\": \"Half\", \"price\": {item.Price * 0.65m:0.00}}}, {{\"name\": \"Full\", \"price\": {item.Price:0.00}}}]";
-                    item.DietaryTags = item.VegNonVeg == "VEG" ? "[\"Vegetarian\"]" : "[\"Non-Veg\"]";
-                    item.IsSpecial = false;
-                    item.PrepTimeMinutes = 15;
-                }
+                maxNumber = n;
             }
         }
 
-        if (changed)
-        {
-            await db.SaveChangesAsync();
-        }
+        return $"{prefix}-{maxNumber + 1}";
     }
 }

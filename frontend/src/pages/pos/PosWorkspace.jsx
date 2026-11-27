@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Plus, Search, RefreshCw, ArrowUpRight, CreditCard, Banknote, Timer, Check, ClipboardCheck, ClipboardList, Package, Armchair, CalendarDays, History, LayoutGrid, Info, AlertCircle, Bell, SlidersHorizontal, UtensilsCrossed, ShoppingBag, Truck, Minus, Trash2, Printer, QrCode, ArrowLeft, CheckCircle2, X, Users, HandPlatter, Coffee, MapPin, Download, Upload, Sparkles, ChevronLeft, ChevronRight, Calendar, ChevronDown, ChevronUp, Clock, Phone, User, UserPlus, ShieldCheck, FolderPlus, Pencil, Building2, Lock, Mail, Eye, EyeOff, ChefHat, UserCheck, Flame, MessageSquare, Send, Copy } from 'lucide-react';
+import { Plus, Search, RefreshCw, ArrowUpRight, CreditCard, Banknote, Timer, Check, ClipboardCheck, ClipboardList, Package, Armchair, CalendarDays, History, LayoutGrid, Info, AlertCircle, Bell, SlidersHorizontal, UtensilsCrossed, ShoppingBag, Truck, Minus, Trash2, Printer, QrCode, ArrowLeft, CheckCircle2, X, Users, HandPlatter, Coffee, MapPin, Download, Upload, Sparkles, ChevronLeft, ChevronRight, Calendar, ChevronDown, ChevronUp, Clock, Phone, User, UserPlus, ShieldCheck, FolderPlus, Pencil, Building2, Lock, KeyRound, Mail, Eye, EyeOff, ChefHat, UserCheck, Flame } from 'lucide-react';
 import QRCode from 'qrcode';
 import { api, subscribeRealtimeEvents, uniqueKey, getActiveRestaurantId, setActiveRestaurantId } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
@@ -772,6 +772,7 @@ export default function PosWorkspace() {
   const [editingItem, setEditingItem] = useState(null);
   const [reservationEdit, setReservationEdit] = useState(null);
   const [staffRoleFilter, setStaffRoleFilter] = useState('ALL');
+  const [passwordTargetUser, setPasswordTargetUser] = useState(null);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -1121,6 +1122,7 @@ export default function PosWorkspace() {
       list = list.filter(s =>
         (s.name || '').toLowerCase().includes(q) ||
         (s.email || '').toLowerCase().includes(q) ||
+        (s.employeeCode || '').toLowerCase().includes(q) ||
         (s.phone || '').toLowerCase().includes(q) ||
         (s.role || '').toLowerCase().includes(q)
       );
@@ -1356,6 +1358,14 @@ export default function PosWorkspace() {
                 )}
                 {section === 'staff' && (
                   <>
+                    <button
+                      className="pos-button"
+                      onClick={() => setPasswordTargetUser(currentUser)}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                      title="Change my account password"
+                    >
+                      <KeyRound size={14} /> My Password
+                    </button>
                     {currentUser?.role === 'SUPER_ADMIN' && (
                       <button
                         className="pos-button primary"
@@ -1930,6 +1940,20 @@ export default function PosWorkspace() {
                                 </div>
 
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '12px 0', flexWrap: 'wrap' }}>
+                                  {member.employeeCode && (
+                                    <span style={{
+                                      fontSize: 11,
+                                      fontWeight: 800,
+                                      padding: '3px 8px',
+                                      borderRadius: 6,
+                                      background: '#0f172a',
+                                      color: '#38bdf8',
+                                      fontFamily: 'monospace',
+                                      letterSpacing: '0.5px'
+                                    }}>
+                                      {member.employeeCode}
+                                    </span>
+                                  )}
                                   <span style={{
                                     fontSize: 11,
                                     fontWeight: 700,
@@ -1963,17 +1987,30 @@ export default function PosWorkspace() {
                                   Joined {member.createdAt ? new Date(member.createdAt).toLocaleDateString() : 'N/A'}
                                 </span>
 
-                                {!isSelf && (currentUser?.role === 'SUPER_ADMIN' || (currentUser?.role === 'MANAGER' && !['SUPER_ADMIN', 'MANAGER'].includes(member.role))) && (
-                                  <button
-                                    type="button"
-                                    className={`pos-button small ${isActive ? 'danger' : 'primary'}`}
-                                    disabled={busy}
-                                    onClick={() => handleToggleStaffStatus(member)}
-                                    style={{ height: 26, fontSize: 10, padding: '0 10px' }}
-                                  >
-                                    {isActive ? 'Deactivate' : 'Activate'}
-                                  </button>
-                                )}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  {(isSelf || currentUser?.role === 'SUPER_ADMIN' || (currentUser?.role === 'MANAGER' && !['SUPER_ADMIN', 'MANAGER'].includes(member.role))) && (
+                                    <button
+                                      type="button"
+                                      className="pos-button small"
+                                      onClick={() => setPasswordTargetUser(member)}
+                                      title={`Change password for ${member.name}`}
+                                      style={{ height: 26, fontSize: 10, padding: '0 8px', gap: 4 }}
+                                    >
+                                      <KeyRound size={11} /> Password
+                                    </button>
+                                  )}
+                                  {!isSelf && (currentUser?.role === 'SUPER_ADMIN' || (currentUser?.role === 'MANAGER' && !['SUPER_ADMIN', 'MANAGER'].includes(member.role))) && (
+                                    <button
+                                      type="button"
+                                      className={`pos-button small ${isActive ? 'danger' : 'primary'}`}
+                                      disabled={busy}
+                                      onClick={() => handleToggleStaffStatus(member)}
+                                      style={{ height: 26, fontSize: 10, padding: '0 10px' }}
+                                    >
+                                      {isActive ? 'Deactivate' : 'Activate'}
+                                    </button>
+                                  )}
+                                </div>
                               </div>
                             </div>
                           );
@@ -2156,6 +2193,19 @@ export default function PosWorkspace() {
             />
           </ErrorBoundary>
         )}
+
+        {passwordTargetUser && (
+          <StaffPasswordModal
+            user={passwordTargetUser}
+            isSelf={passwordTargetUser.userId === currentUser?.userId}
+            currentUser={currentUser}
+            onClose={() => setPasswordTargetUser(null)}
+            onSuccess={(msg) => {
+              setPasswordTargetUser(null);
+              addToast(msg, 'success');
+            }}
+          />
+        )}
       </>}
     </PosShell>
   );
@@ -2243,7 +2293,7 @@ function AddManagerModal({ restaurants = [], defaultRestaurantId, onClose, onSuc
               <option value="">Select Hotel Outlet...</option>
               {restaurants.map(r => (
                 <option key={r.restaurantId} value={r.restaurantId}>
-                  🏨 {r.name} {r.address ? `— ${r.address.split(',')[0]}` : ''}
+                  🏨 {r.name} [{r.restaurantCode || 'RST-100'}] {r.address ? `— ${r.address.split(',')[0]}` : ''}
                 </option>
               ))}
             </select>
@@ -2625,7 +2675,7 @@ function AddStaffModal({ currentRestaurant, currentUserRole, restaurants = [], o
               >
                 {restaurants.map(r => (
                   <option key={r.restaurantId} value={r.restaurantId}>
-                    🏨 {r.name} {r.address ? `— ${r.address.split(',')[0]}` : ''}
+                    🏨 {r.name} [{r.restaurantCode || 'RST-100'}] {r.address ? `— ${r.address.split(',')[0]}` : ''}
                   </option>
                 ))}
               </select>
@@ -5437,6 +5487,160 @@ function ReportStockShortageModal({ menu, onClose, onSuccess }) {
           >
             <Package size={14} />
             {submitting ? 'Reporting…' : 'Report shortage'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function StaffPasswordModal({ user, isSelf, currentUser, onClose, onSuccess }) {
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
+
+  const generateRandomPassword = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%';
+    let res = '';
+    for (let i = 0; i < 12; i++) {
+      res += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    setNewPassword(res);
+    setConfirmPassword(res);
+    setShowPassword(true);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+
+    if (newPassword.length < 8) {
+      setError('Password must be at least 8 characters long.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError('New password and confirmation do not match.');
+      return;
+    }
+
+    try {
+      setBusy(true);
+      if (isSelf && !isSuperAdmin) {
+        if (!currentPassword) {
+          setError('Please provide your current password.');
+          setBusy(false);
+          return;
+        }
+        await api.changeMyPassword({ currentPassword, newPassword });
+        onSuccess('Your password has been changed successfully.');
+      } else {
+        await api.updateUserPassword(user.userId, newPassword);
+        onSuccess(`Password for ${user.name} (${user.role}) updated successfully.`);
+      }
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Failed to update password.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal onClose={onClose} title={isSelf ? 'Change My Password' : `Change Password: ${user.name}`}>
+      <form onSubmit={handleSubmit} style={{ padding: '0 4px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: 'var(--p-surface-subtle, #f8fafc)', borderRadius: 10, marginBottom: 16, border: '1px solid var(--p-border)' }}>
+          <div style={{ width: 32, height: 32, borderRadius: 8, background: '#e0e7ff', color: '#4338ca', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <KeyRound size={16} />
+          </div>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>{user.name}</div>
+            <div style={{ fontSize: 11, color: 'var(--p-muted)' }}>{user.role} · {user.email}</div>
+          </div>
+        </div>
+
+        {error && (
+          <div style={{ padding: '10px 14px', borderRadius: 8, background: '#fee2e2', border: '1px solid #fecaca', color: '#b91c1c', fontSize: 12, marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <AlertCircle size={15} style={{ flexShrink: 0 }} />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {isSelf && !isSuperAdmin && (
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Current Password</label>
+            <input
+              type={showPassword ? 'text' : 'password'}
+              required
+              className="pos-input"
+              style={{ width: '100%' }}
+              value={currentPassword}
+              onChange={e => setCurrentPassword(e.target.value)}
+              placeholder="Enter your current password"
+            />
+          </div>
+        )}
+
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+            <label style={{ fontSize: 12, fontWeight: 600 }}>New Password</label>
+            <button
+              type="button"
+              onClick={generateRandomPassword}
+              style={{ background: 'transparent', border: 'none', color: '#4f46e5', fontSize: 11, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+            >
+              <Sparkles size={11} /> Generate
+            </button>
+          </div>
+          <div style={{ position: 'relative' }}>
+            <input
+              type={showPassword ? 'text' : 'password'}
+              required
+              className="pos-input"
+              style={{ width: '100%', paddingRight: 40 }}
+              value={newPassword}
+              onChange={e => setNewPassword(e.target.value)}
+              placeholder="Min 8 characters with letters & numbers"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword(s => !s)}
+              style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: 'var(--p-muted)', cursor: 'pointer' }}
+            >
+              {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+            </button>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Confirm New Password</label>
+          <input
+            type={showPassword ? 'text' : 'password'}
+            required
+            className="pos-input"
+            style={{ width: '100%' }}
+            value={confirmPassword}
+            onChange={e => setConfirmPassword(e.target.value)}
+            placeholder="Re-enter new password"
+          />
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 10, borderTop: '1px solid var(--p-border)' }}>
+          <button type="button" onClick={onClose} className="pos-button" disabled={busy}>
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="pos-button primary"
+            disabled={busy}
+            style={{ background: 'linear-gradient(135deg, #4f46e5, #3b82f6)', borderColor: '#4f46e5', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            {busy ? <RefreshCw size={14} className="pos-spin" /> : <KeyRound size={14} />}
+            <span>Save Password</span>
           </button>
         </div>
       </form>

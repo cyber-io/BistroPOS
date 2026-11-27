@@ -6,22 +6,41 @@ Never commit secrets to source control. Configure the following environment vari
 
 ### Backend (.NET 8 Web API)
 ```env
-# Database (Connected to Local Supabase PostgreSQL)
-ConnectionStrings__DefaultConnection="Host=localhost;Port=5432;Database=postgres;Username=postgres;Password=your-super-secret-and-long-postgres-password;SSL Mode=Prefer;"
+ASPNETCORE_ENVIRONMENT=Production
 
-# Supabase Local Stack
-Supabase__Url="http://localhost:8000"
-Supabase__AnonKey="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJhbm9uIiwKICAgICJpc3MiOiAic3VwYWJhc2UtZGVtbyIsCiAgICAiaWF0IjogMTY0MTc2OTIwMCwKICAgICJleHAiOiAxNzk5NTM1NjAwCn0.dc_X5iR_VP_qT0zsiyj_I_OZ2T9FtRU2BBNWN8Bu4GE"
-Supabase__ServiceRoleKey="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJzZXJ2aWNlX3JvbGUiLAogICAgImlzcyI6ICJzdXBhYmFzZS1kZW1vIiwKICAgICJpYXQiOiAxNjQxNzY5MjAwLAogICAgImV4cCI6IDE3OTk1MzU2MDAKfQ.DaYlNEoUrrEn2Ig7tqibS-PHK5vgusbcbo7X36XVt4Q"
+# Database (PostgreSQL / Supabase / Neon / AWS RDS)
+ConnectionStrings__DefaultConnection="Host=your-db-host.com;Port=5432;Database=postgres;Username=postgres;Password=your-strong-password;SSL Mode=Require;"
+
+# Security & Token Signing (Minimum 32 characters)
+Jwt__SecretKey="BistroPOS_Production_Jwt_Secret_Key_2026_AtLeast32Chars!"
+Security__ResourceTokenKey="BistroPOS_Production_Resource_Token_Key_2026_Secure32!"
+
+# CORS: Add your frontend deployed domain(s)
+Security__CorsAllowedOrigins__0="https://bistropos.vercel.app"
+Security__CorsAllowedOrigins__1="https://yourrestaurant.com"
+
+# Optional: Initial Super Admin Setup (Auto-seeds if database is empty)
+ADMIN_INITIAL_EMAIL="superadmin@bistropos.com"
+ADMIN_INITIAL_PASSWORD="Admin@Bistro2026!"
+
+# Payment Gateway (Optional - for live Razorpay payments)
+PaymentGateway__Provider="Razorpay"
+PaymentGateway__ApiKey="rzp_live_your_api_key"
+PaymentGateway__SecretKey="your_razorpay_secret"
+PaymentGateway__WebhookSecret="your_razorpay_webhook_secret"
 ```
 
 ### Frontend (React.js)
 ```env
-# Connected to Local Supabase API Gateway & Realtime
-VITE_SUPABASE_URL="http://localhost:8000"
-VITE_SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJhbm9uIiwKICAgICJpc3MiOiAic3VwYWJhc2UtZGVtbyIsCiAgICAiaWF0IjogMTY0MTc2OTIwMCwKICAgICJleHAiOiAxNzk5NTM1NjAwCn0.dc_X5iR_VP_qT0zsiyj_I_OZ2T9FtRU2BBNWN8Bu4GE"
-VITE_API_BASE_URL="http://localhost:5000"
-VITE_SIGNALR_HUB_URL="http://localhost:5000/hubs/notifications"
+# Deployed Backend API base URL
+VITE_API_URL="https://api.yourrestaurant.com/api"
+# (VITE_API_BASE_URL is also supported as a fallback)
+
+# Default Multi-tenant Restaurant ID
+VITE_RESTAURANT_ID="a0000000-0000-0000-0000-000000000001"
+
+# Public website origin for Table QR code generation
+VITE_PUBLIC_SITE_URL="https://yourrestaurant.com"
 ```
 
 ---

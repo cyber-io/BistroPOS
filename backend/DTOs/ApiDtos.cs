@@ -32,7 +32,8 @@ public record UserDto(
     string Email,
     string? Phone,
     string Role,
-    string Status
+    string Status,
+    string? EmployeeCode = null
 );
 
 public record UpdateProfileRequest(
@@ -500,6 +501,15 @@ public record UpdateStaffDto(
     string? Password = null
 );
 
+public record ResetStaffPasswordDto(
+    [Required, MinLength(8)] string NewPassword
+);
+
+public record ChangeOwnPasswordRequest(
+    string? CurrentPassword,
+    [Required, MinLength(8)] string NewPassword
+);
+
 public record CreateManagerRequest(
     [Required] Guid RestaurantId,
     [Required, MaxLength(150)] string Name,
@@ -517,7 +527,8 @@ public record StaffDto(
     string? Phone,
     string Role,
     string Status,
-    DateTime CreatedAt
+    DateTime CreatedAt,
+    string? EmployeeCode = null
 );
 
 public record UpdateStaffStatusRequest(
@@ -532,7 +543,8 @@ public record CurrentUserContextDto(
     string Role,
     string Status,
     bool IsSuperAdmin,
-    bool IsManager
+    bool IsManager,
+    string? EmployeeCode = null
 );
 
 // --- LOYALTY, FEEDBACK & SAAS DTOS ---
