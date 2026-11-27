@@ -54,7 +54,6 @@ public interface ITableService
     Task<bool> UpdateTablePositionAsync(Guid tableId, UpdateTablePositionDto request);
     Task<DiningSessionDto?> GetOrCreateActiveSessionAsync(Guid tableId);
     Task<bool> CloseSessionAsync(Guid tableId);
-    Task<bool> UpdateTablePositionAsync(Guid tableId, UpdateTablePositionDto request);
 }
 
 public interface IHelpRequestService

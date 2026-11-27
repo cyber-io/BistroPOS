@@ -4,9 +4,8 @@ import { ArrowRight, Cloud, Eye, EyeOff, LockKeyhole, ShieldCheck, UtensilsCross
 import { useAuth } from '../../context/AuthContext';
 
 export default function LoginPage() {
-  const { login, register, demoLogin, resetPassword, currentUser, logout } = useAuth();
-  const [mode, setMode] = useState('login');
-  const [form, setForm] = useState({ name: '', email: '', password: '', phone: '' });
+  const { login, currentUser, logout } = useAuth();
+  const [form, setForm] = useState({ email: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(null);
@@ -15,13 +14,13 @@ export default function LoginPage() {
   const redirect = new URLSearchParams(location.search).get('redirect');
 
   const nextPath = userRole => {
-    const defaultPath = userRole === 'SUPER_ADMIN' ? '/admin' : userRole === 'KITCHEN' ? '/kitchen' : userRole === 'WAITER' ? '/waiter' : ['RECEPTIONIST', 'MANAGER'].includes(userRole) ? '/pos' : '/menu';
+    if (userRole === 'SUPER_ADMIN') return '/admin';
+    const defaultPath = userRole === 'KITCHEN' ? '/kitchen' : userRole === 'WAITER' ? '/waiter' : ['RECEPTIONIST', 'MANAGER'].includes(userRole) ? '/pos' : '/menu';
     if (!redirect || !redirect.startsWith('/') || redirect.startsWith('//')) return defaultPath;
     const staffPath = redirect.startsWith('/pos') || redirect.startsWith('/receptionist');
-    if (staffPath && !['RECEPTIONIST', 'MANAGER', 'SUPER_ADMIN'].includes(userRole)) return defaultPath;
-    if (redirect.startsWith('/kitchen') && !['KITCHEN', 'SUPER_ADMIN'].includes(userRole)) return defaultPath;
-    if (redirect.startsWith('/waiter') && !['WAITER', 'SUPER_ADMIN'].includes(userRole)) return defaultPath;
-    if (redirect.startsWith('/admin') && userRole !== 'SUPER_ADMIN') return defaultPath;
+    if (staffPath && !['RECEPTIONIST', 'MANAGER'].includes(userRole)) return defaultPath;
+    if (redirect.startsWith('/kitchen') && userRole !== 'KITCHEN') return defaultPath;
+    if (redirect.startsWith('/waiter') && userRole !== 'WAITER') return defaultPath;
     return redirect;
   };
 
@@ -30,40 +29,25 @@ export default function LoginPage() {
     setBusy(true);
     setMessage(null);
     try {
-      if (mode === 'reset') {
-        const result = await resetPassword(form.email);
-        setMessage({ text: result.message, error: !result.success });
-      } else {
-        const result = mode === 'register' ? await register(form) : await login(form.email, form.password);
-        if (result.success) navigate(nextPath(result.user.role), { replace: true });
-        else setMessage({ text: result.message, error: true });
-      }
-    } finally { setBusy(false); }
-  };
-  const openDemo = async role => {
-    setBusy(true); setMessage(null);
-    try {
-      const result = await demoLogin(role);
+      const result = await login(form.email, form.password);
       if (result.success) navigate(nextPath(result.user.role), { replace: true });
       else setMessage({ text: result.message, error: true });
     } finally { setBusy(false); }
   };
 
   const change = event => setForm({ ...form, [event.target.name]: event.target.value });
-  const switchMode = value => { setMode(value); setMessage(null); };
   return (
     <div className="min-h-screen bg-[#f5f7fb] text-[#172033] flex flex-col lg:flex-row" style={{ fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif' }}>
       <section className="w-full lg:w-[48%] min-h-screen flex flex-col bg-white relative">
         <header className="px-7 sm:px-12 py-8 flex items-center justify-between">
-          <div className="flex items-center gap-2.5 font-bold text-lg tracking-tight"><Cloud className="w-8 h-8 text-[#4778f5]" strokeWidth={1.8} />Bistro &amp; Bloom<span className="ml-1 text-[10px] font-medium text-slate-400 border border-slate-200 rounded px-1.5 py-0.5 uppercase tracking-wider">POS</span></div>
+          <div className="flex items-center gap-2.5 font-bold text-lg tracking-tight"><Cloud className="w-8 h-8 text-[#4778f5]" strokeWidth={1.8} /><span>Bistro<span className="text-[#4778f5]">POS</span></span></div>
         </header>
 
         <div className="flex-1 flex items-center justify-center px-6 py-10 sm:px-12">
           <div className="w-full max-w-[370px]">
             <span className="w-12 h-12 rounded-2xl border border-[#e4eaf6] bg-[#f4f7ff] text-[#4778f5] inline-flex items-center justify-center mb-7"><LockKeyhole className="w-6 h-6" /></span>
             <p className="text-[11px] font-semibold tracking-[0.18em] uppercase text-[#4778f5] mb-3">Restaurant Staff Workspace</p>
-            <h1 className="text-[30px] font-semibold tracking-[-0.04em] leading-tight mb-2">Staff sign in</h1>
-            <p className="text-[13px] leading-relaxed text-[#8690a2] mb-8">Sign in to start your shift. Manage customer orders, kitchen tickets, and live table reservations.</p>
+            <h1 className="text-[30px] font-semibold tracking-[-0.04em] leading-tight mb-8">Staff sign in</h1>
             {currentUser && <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 mb-5 text-xs flex items-center justify-between gap-3"><span>Signed in as <b>{currentUser.name}</b> ({currentUser.role})</span><button className="font-semibold text-[#4778f5]" onClick={logout}>Sign out</button></div>}
             {message && <div role={message.error ? 'alert' : 'status'} className={`text-xs leading-relaxed rounded-lg border p-3 mb-5 ${message.error ? 'bg-red-50 border-red-100 text-red-700' : 'bg-emerald-50 border-emerald-100 text-emerald-700'}`}>{message.text}</div>}
             <form onSubmit={submit} className="space-y-4">
@@ -121,7 +105,7 @@ export default function LoginPage() {
             </form>
           </div>
         </div>
-        <footer className="px-7 sm:px-12 py-6 flex items-center justify-between text-[10px] text-[#9ca5b5]"><span>Bistro &amp; Bloom Staff Portal</span><span className="flex items-center gap-1.5"><ShieldCheck size={12} /> Secure staff access</span></footer>
+        <footer className="px-7 sm:px-12 py-6 flex items-center justify-end text-[10px] text-[#9ca5b5]"><span className="flex items-center gap-1.5"><ShieldCheck size={12} /> Secure staff access</span></footer>
       </section>
 
       <aside className="hidden lg:flex flex-1 items-center justify-center px-14 py-16 overflow-hidden relative bg-[#f4f7fd]">
@@ -138,7 +122,7 @@ export default function LoginPage() {
           <div className="bg-white rounded-xl shadow-[0_20px_70px_-25px_#9fafd3] border border-[#e7ecf6] p-5 rotate-[-2deg]">
             <div className="flex justify-between items-center border-b border-[#edf1f7] pb-4">
               <span className="font-semibold text-sm flex items-center gap-2">
-                <Cloud className="w-5 h-5 text-[#4778f5]" />Bistro &amp; Bloom
+                <Cloud className="w-5 h-5 text-[#4778f5]" />BistroPOS
               </span>
               <span className="text-[9px] rounded-full bg-[#edf9f2] text-[#43a878] px-2 py-1">All systems connected</span>
             </div>

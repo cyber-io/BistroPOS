@@ -42,10 +42,11 @@ public static class UserProvisioning
                 catch { /* Ignore if offline */ }
             }
 
+            const string standardOpeningHours = "{\"monday\": {\"open\": \"10:00\", \"close\": \"23:00\"}}";
+
             if (!allowDevSeedCredentials)
             {
-                await EnsureRestaurantDataAsync(db);
-                await EnsurePhase1MenuDataAsync(db);
+                await EnsureRestaurantTablesAsync(db);
                 Volatile.Write(ref _initialized, 1);
                 return;
             }
@@ -150,8 +151,7 @@ public static class UserProvisioning
             }
 
             await db.SaveChangesAsync();
-            await EnsureRestaurantDataAsync(db);
-            await EnsurePhase1MenuDataAsync(db);
+            await EnsureRestaurantTablesAsync(db);
             Volatile.Write(ref _initialized, 1);
         }
         catch (Exception ex)
