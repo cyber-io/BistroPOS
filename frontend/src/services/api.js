@@ -1,4 +1,5 @@
 import { tableTitle } from './tablePresentation.js';
+import { getPortalContext } from './portalResolver.js';
 
 // All business operations go through the .NET API. Failed requests never become
 // local success records: the database remains the authority for orders and bookings.
@@ -12,10 +13,9 @@ const LEGACY_DUMMY_RESTAURANTS = new Set(['11111111-1111-1111-1111-111111111111'
 let restaurantId = DEFAULT_RESTAURANT_ID;
 try {
   if (typeof window !== 'undefined' && window.location) {
-    const searchParams = new URLSearchParams(window.location.search);
-    const rParam = searchParams.get('r') || searchParams.get('restaurant') || searchParams.get('rst') || searchParams.get('code');
-    if (rParam && !LEGACY_DUMMY_RESTAURANTS.has(rParam)) {
-      restaurantId = rParam.trim();
+    const portalCtx = getPortalContext();
+    if (portalCtx.restaurantParam && !LEGACY_DUMMY_RESTAURANTS.has(portalCtx.restaurantParam)) {
+      restaurantId = portalCtx.restaurantParam.trim();
     } else {
       const pathMatch = window.location.pathname.match(/^\/r\/([^\/]+)/);
       if (pathMatch && pathMatch[1] && !LEGACY_DUMMY_RESTAURANTS.has(pathMatch[1])) {

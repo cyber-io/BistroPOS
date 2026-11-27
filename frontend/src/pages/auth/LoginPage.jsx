@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ArrowRight, Cloud, Eye, EyeOff, LockKeyhole, ShieldCheck, UtensilsCrossed, CalendarDays, Grid2X2, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -57,6 +57,13 @@ export default function LoginPage() {
             Bistro &amp; Bloom
             <span className="ml-1 text-[10px] font-medium text-slate-400 border border-slate-200 rounded px-1.5 py-0.5 uppercase tracking-wider">POS</span>
           </div>
+          <Link
+            to="/login"
+            className="text-xs text-slate-500 hover:text-[#4778f5] font-medium transition-colors flex items-center gap-1"
+          >
+            <span>Customer Login</span>
+            <span>&rarr;</span>
+          </Link>
         </header>
 
         <div className="flex-1 flex items-center justify-center px-6 py-10 sm:px-12">
@@ -134,6 +141,12 @@ export default function LoginPage() {
                 {!busy && <ArrowRight size={15} />}
               </button>
             </form>
+
+            <div className="mt-4 text-center">
+              <Link to="/" className="text-xs text-slate-400 hover:text-slate-700 transition-colors">
+                &larr; Return to Restaurant Website
+              </Link>
+            </div>
           </div>
         </div>
 

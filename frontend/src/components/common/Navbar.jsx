@@ -109,7 +109,7 @@ export default function Navbar({ onOpenCart }) {
   const storyActive = isHome && location.hash === '#our-story';
   const visitActive = isHome && location.hash === '#visit';
   const rQuery = location.search.includes('r=') ? location.search : (restaurant?.restaurantCode ? `?r=${encodeURIComponent(restaurant.restaurantCode)}` : (restaurant?.restaurantId ? `?r=${encodeURIComponent(restaurant.restaurantId)}` : ''));
-  const homePath = rQuery ? `/${rQuery}` : '/home';
+  const homePath = rQuery ? `/${rQuery}` : '/';
 
   const navigation = (
     <>

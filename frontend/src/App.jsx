@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { CartProvider } from './context/CartContext';
 import { NotificationProvider } from './context/NotificationContext';
 import { api, setActiveRestaurantId } from './services/api';
+import { getPortalContext, isCustomerWebsiteView, PORTAL_MODES } from './services/portalResolver';
 
 // Common Components
 import Navbar from './components/common/Navbar';
@@ -186,8 +187,8 @@ function RestaurantRouteHandler() {
 function RestaurantUrlSync() {
   const location = useLocation();
   useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const r = params.get('r') || params.get('restaurant') || params.get('rst') || params.get('code');
+    const portalCtx = getPortalContext();
+    const r = portalCtx.restaurantParam;
     if (r) {
       api.getRestaurant(r).then(rest => {
         if (rest?.restaurantId) {
@@ -195,41 +196,24 @@ function RestaurantUrlSync() {
         }
       }).catch(() => {});
     }
-  }, [location.search]);
+  }, [location.search, location.pathname]);
   return null;
 }
 
 function RootRouteHandler({ onOpenCart }) {
-  const location = useLocation();
-  const searchParams = new URLSearchParams(location.search);
-  const hasRestaurant = Boolean(
-    searchParams.get('r') ||
-    searchParams.get('restaurant') ||
-    searchParams.get('rst') ||
-    searchParams.get('code')
-  );
+  const portalCtx = getPortalContext();
 
-  if (hasRestaurant) {
-    return <HomePage onOpenCart={onOpenCart} />;
+  if (portalCtx.mode === PORTAL_MODES.STAFF_POS) {
+    return <Navigate to="/admin" replace />;
   }
 
-  return <Navigate to="/admin" replace />;
+  return <HomePage onOpenCart={onOpenCart} />;
 }
 
 function MainApp() {
   const [isCartOpen, setIsCartOpen] = useState(false);
   const location = useLocation();
-  const isStaffLogin = location.pathname === '/pos/login' || location.pathname === '/staff/login';
-  const isWorkspace = /^\/(pos|kitchen|waiter|receptionist|admin)(\/|$)/.test(location.pathname);
-  const isQrMenu = location.pathname.startsWith('/qr/');
-  const searchParams = new URLSearchParams(location.search);
-  const hasRestaurantParam = Boolean(
-    searchParams.get('r') ||
-    searchParams.get('restaurant') ||
-    searchParams.get('rst') ||
-    searchParams.get('code')
-  );
-  const isPublicWebsite = !isStaffLogin && !isWorkspace && !isQrMenu && (location.pathname !== '/' || hasRestaurantParam);
+  const isPublicWebsite = isCustomerWebsiteView(location.pathname, location.search);
 
   return (
     <div className={`min-h-screen flex flex-col font-sans ${isPublicWebsite ? 'bg-slate-50 website-shell' : 'bg-[#f4f7fb] pos-portal-shell'}`}>
@@ -253,6 +237,7 @@ function MainApp() {
           <Route path="/login" element={<CustomerLoginPage />} />
           <Route path="/pos/login" element={<LoginPage />} />
           <Route path="/staff/login" element={<Navigate to="/pos/login" replace />} />
+          <Route path="/staff" element={<Navigate to="/pos/login" replace />} />
 
           {/* Restaurant-specific Direct Website Routes */}
           <Route path="/r/:code/*" element={<RestaurantRouteHandler />} />

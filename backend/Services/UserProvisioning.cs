@@ -324,6 +324,20 @@ public static class UserProvisioning
         var rest = await db.Restaurants.FirstOrDefaultAsync(r => r.RestaurantCode == clean);
         if (rest != null) return rest.RestaurantId;
 
+        // Support lookup by restaurant name or slug: e.g. "nacl" or "bistro-bloom"
+        var rawId = idOrCode.Trim();
+        var normalizedSlug = rawId.ToLowerInvariant().Replace("-", " ");
+        var normalizedCompact = rawId.ToLowerInvariant().Replace("-", "").Replace(" ", "").Replace("&", "and");
+
+        var allRestaurants = await db.Restaurants.Where(r => r.Status == "ACTIVE").ToListAsync();
+        var byName = allRestaurants.FirstOrDefault(r =>
+            string.Equals(r.RestaurantCode, rawId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(r.Name, rawId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(r.Name.Replace("&", "and").Replace(" ", ""), normalizedCompact, StringComparison.OrdinalIgnoreCase) ||
+            r.Name.ToLowerInvariant().Contains(normalizedSlug)
+        );
+        if (byName != null) return byName.RestaurantId;
+
         var activeFallback = await db.Restaurants.Where(r => r.Status == "ACTIVE").Select(r => (Guid?)r.RestaurantId).FirstOrDefaultAsync();
         return activeFallback ?? DefaultRestaurantId;
     }

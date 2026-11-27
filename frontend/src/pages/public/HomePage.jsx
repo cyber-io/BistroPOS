@@ -40,6 +40,7 @@ export default function HomePage() {
 
   const { addItem, setOrderSource } = useCart();
   const { addToast } = useNotification();
+  const rQuery = location.search.includes('r=') ? location.search : (restaurant?.restaurantCode ? `?r=${encodeURIComponent(restaurant.restaurantCode)}` : (restaurant?.restaurantId ? `?r=${encodeURIComponent(restaurant.restaurantId)}` : ''));
 
   // Instant section jump handler for in-page navigation (e.g. #our-story, #visit)
   useEffect(() => {
@@ -267,9 +268,9 @@ export default function HomePage() {
         <div className="website-story-copy">
           <p className="website-eyebrow">The heart of the bistro</p>
           <h2>A seat at the table.<br />A moment of your own.</h2>
-          <p>Some of the best moments happen over a meal. A long overdue catch-up, a quiet lunch, an evening with your favourite people. At Bistro &amp; Bloom, there’s room for all of them.</p>
+          <p>Some of the best moments happen over a meal. A long overdue catch-up, a quiet lunch, an evening with your favourite people. At {restaurant?.name || 'Bistro & Bloom'}, there’s room for all of them.</p>
           <p>Choose something you love, settle into your seat, and let the conversation take its time. We’ll take care of the good food.</p>
-          <Link to="/book-table" className="website-button website-button--red">Make a little time<ArrowUpRight size={17} /></Link>
+          <Link to={`/book-table${rQuery}`} className="website-button website-button--red">Make a little time<ArrowUpRight size={17} /></Link>
         </div>
       </section>
 
@@ -281,8 +282,8 @@ export default function HomePage() {
           <p>Set the table at home, or take something delicious on your way.</p>
         </div>
         <div className="website-order-actions">
-          <Link to="/menu?source=DELIVERY" className="website-button website-button--pink"><Truck size={17} />Order delivery</Link>
-          <Link to="/menu?source=TAKEAWAY" className="website-button website-button--outline">Choose takeaway<ArrowUpRight size={17} /></Link>
+          <Link to={`/menu${rQuery ? `${rQuery}&` : '?'}source=DELIVERY`} className="website-button website-button--pink"><Truck size={17} />Order delivery</Link>
+          <Link to={`/menu${rQuery ? `${rQuery}&` : '?'}source=TAKEAWAY`} className="website-button website-button--outline">Choose takeaway<ArrowUpRight size={17} /></Link>
         </div>
       </section>
 
@@ -292,7 +293,7 @@ export default function HomePage() {
           <p className="website-eyebrow">We’d love to see you</p>
           <h2>Your next good<br />moment starts here.</h2>
           <p>Come as you are. Bring someone along. There’s always a reason to gather around a good meal.</p>
-          <Link to="/book-table" className="website-button website-button--red">Book your table<ArrowUpRight size={17} /></Link>
+          <Link to={`/book-table${rQuery}`} className="website-button website-button--red">Book your table<ArrowUpRight size={17} /></Link>
         </div>
         <div className="website-visit-details">
           <div>
@@ -324,13 +325,14 @@ export default function HomePage() {
 
       {/* Footer */}
       <footer className="website-footer">
-        <Link to="/" className="website-footer-brand">Bistro &amp; Bloom<span>Good food. Beautiful moments.</span></Link>
+        <Link to={`/${rQuery}`} className="website-footer-brand">{restaurant?.name || 'Bistro & Bloom'}<span>Good food. Beautiful moments.</span></Link>
         <nav aria-label="Footer navigation">
-          <Link to="/menu">Our menu</Link>
-          <Link to="/book-table">Reservations</Link>
-          <Link to="/track-order">Track your order</Link>
+          <Link to={`/menu${rQuery}`}>Our menu</Link>
+          <Link to={`/book-table${rQuery}`}>Reservations</Link>
+          <Link to={`/track-order${rQuery}`}>Track your order</Link>
+          <Link to="/pos/login" style={{ opacity: 0.7, fontSize: '0.85rem' }}>Staff Portal ↗</Link>
         </nav>
-        <p>© {new Date().getFullYear()} Bistro &amp; Bloom</p>
+        <p>© {new Date().getFullYear()} {restaurant?.name || 'Bistro & Bloom'}</p>
       </footer>
 
       {/* Customization Modal */}

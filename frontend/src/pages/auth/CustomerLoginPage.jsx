@@ -221,6 +221,13 @@ export default function CustomerLoginPage() {
               Track &rarr;
             </Link>
           </div>
+
+          <div className="mt-6 pt-4 text-center">
+            <Link to="/pos/login" className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-900 transition-colors">
+              <span>Restaurant staff or admin?</span>
+              <span className="font-semibold underline">Staff POS Login &rarr;</span>
+            </Link>
+          </div>
         </div>
       </div>
     </div>

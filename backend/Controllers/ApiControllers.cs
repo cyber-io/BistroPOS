@@ -227,6 +227,20 @@ public class RestaurantsController : ControllerBase
         var byCode = await _db.Restaurants.FirstOrDefaultAsync(r => r.RestaurantCode == cleanCode);
         if (byCode != null) return Ok(byCode);
 
+        // Support lookup by restaurant name or slug: e.g. "nacl" or "bistro-bloom"
+        var rawId = id.Trim();
+        var normalizedSlug = rawId.ToLowerInvariant().Replace("-", " ");
+        var normalizedCompact = rawId.ToLowerInvariant().Replace("-", "").Replace(" ", "").Replace("&", "and");
+
+        var allRestaurants = await _db.Restaurants.Where(r => r.Status == "ACTIVE").ToListAsync();
+        var byName = allRestaurants.FirstOrDefault(r =>
+            string.Equals(r.RestaurantCode, rawId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(r.Name, rawId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(r.Name.Replace("&", "and").Replace(" ", ""), normalizedCompact, StringComparison.OrdinalIgnoreCase) ||
+            r.Name.ToLowerInvariant().Contains(normalizedSlug)
+        );
+        if (byName != null) return Ok(byName);
+
         var fallback = await _db.Restaurants.FirstOrDefaultAsync(r => r.Status == "ACTIVE");
         if (fallback != null) return Ok(fallback);
         return NotFound();
