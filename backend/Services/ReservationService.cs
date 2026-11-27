@@ -9,7 +9,7 @@ using RestaurantSystem.Api.Repositories;
 namespace RestaurantSystem.Api.Services;
 
 public class ReservationService(RestaurantDbContext db, IOptions<BusinessRulesOptions> rules,
-    INotificationService notifications, IAuditLogService audit) : IReservationService
+    INotificationService notifications, IAuditLogService audit, ITextBeeSmsService sms) : IReservationService
 {
     private static readonly string[] ActiveStatuses = [ReservationStatuses.Confirmed,ReservationStatuses.Arrived,ReservationStatuses.Seated,ReservationStatuses.Rescheduled];
     private static DateTime LocalNow
@@ -76,6 +76,15 @@ public class ReservationService(RestaurantDbContext db, IOptions<BusinessRulesOp
         }
         db.Reservations.Add(reservation);await db.SaveChangesAsync();await transaction.CommitAsync();
         await notifications.NotifyRoleAsync(request.RestaurantId,UserRoles.Receptionist,"NEW_TABLE_RESERVATION","New reservation",$"{reservation.CustomerName}, {reservation.GuestCount} guests, table {table.TableNumber}",new {reservation.ReservationId});
+        if (!string.IsNullOrWhiteSpace(reservation.CustomerPhone))
+        {
+            try
+            {
+                var msg = $"Reservation Confirmed ({reservation.BookingId}): {reservation.GuestCount} guests on {reservation.ReservationDate:dd MMM} at {reservation.ReservationTime:hh\\:mm}. Table A{table.TableNumber}.";
+                await sms.SendSmsAsync(request.RestaurantId, reservation.CustomerPhone, msg, "RESERVATION_CONFIRMED");
+            }
+            catch { }
+        }
         return(true,Map(reservation,table.TableNumber),"Your table is reserved.");
     }
     public async Task<List<ReservationDto>> GetReservationsAsync(Guid restaurantId,DateOnly? date,string? status)

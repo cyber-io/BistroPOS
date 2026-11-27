@@ -148,7 +148,7 @@
 }
 
 .pos-dining-plan-floor {
-  padding: 8px 8px 12px;
+  padding: 18px 20px;
   border: 1px solid var(--plan-border);
   border-radius: 10px;
   background: var(--plan-floor);
@@ -158,37 +158,63 @@
   display: flex;
   flex-direction: column;
   justify-content: center;
+  padding: 20px 24px 22px;
 }
 
 .pos-plan-table-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px 8px;
+  gap: 16px 18px;
 }
 
 .pos-dining-plan-family .pos-plan-table-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px 24px;
+}
+
+.pos-dining-plan-family .pos-plan-table {
+  padding: 14px 16px 12px;
+  border: 1px solid var(--plan-border);
+  border-radius: 14px;
+  background: var(--p-card);
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+.pos-dining-plan-family .pos-plan-table:hover {
+  border-color: #9fb6ed;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+}
+
+.pos-dining-plan-family .pos-plan-table-stage {
+  max-width: 330px;
 }
 
 .pos-plan-table {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   width: 100%;
   min-width: 0;
-  padding: 0 0 6px;
-  border: 0;
-  border-radius: 12px;
-  background: transparent;
+  padding: 12px 10px;
+  border: 1px solid var(--plan-border);
+  border-radius: 14px;
+  background: var(--p-card);
   color: var(--plan-ink);
   -webkit-tap-highlight-color: transparent;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+.pos-plan-table:hover {
+  border-color: #9fb6ed;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
 }
 
 .pos-plan-table-stage {
   position: relative;
   display: block;
   width: 100%;
-  max-width: 190px;
+  max-width: 230px;
   aspect-ratio: 280 / 230;
   transition: transform .18s ease;
 }
@@ -330,9 +356,10 @@
   .pos-dining-plan-header > span { padding: 0; font-size: 10px; }
   .pos-dining-plan-floor { padding: 6px 4px 10px; }
   .pos-plan-table-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 4px; }
-  .pos-dining-plan-family .pos-plan-table-grid { grid-template-columns: 1fr; }
+  .pos-dining-plan-family .pos-dining-plan-floor { padding: 12px 10px 14px; }
+  .pos-dining-plan-family .pos-plan-table-grid { grid-template-columns: 1fr; gap: 14px; }
   .pos-plan-table-stage { max-width: 160px; }
-  .pos-dining-plan-family .pos-plan-table-stage { max-width: 190px; }
+  .pos-dining-plan-family .pos-plan-table-stage { max-width: 260px; }
   .pos-plan-table-details { gap: 1px; }
   .pos-plan-table-details strong { font-size: 13px; }
   .pos-plan-capacity { font-size: 8.5px; }

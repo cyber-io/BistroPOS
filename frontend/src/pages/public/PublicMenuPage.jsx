@@ -58,7 +58,7 @@ export default function PublicMenuPage({ onOpenCart }) {
     };
     load();
     const unsubscribe = subscribeRealtimeEvents(type => { if (type === 'FOOD_AVAILABILITY_CHANGED') load(true); });
-    const timer = setInterval(() => load(true), 15000);
+    const timer = setInterval(() => load(true), 30000);
     return () => { active = false; unsubscribe(); clearInterval(timer); };
   }, [retry]);
 
@@ -347,7 +347,7 @@ export default function PublicMenuPage({ onOpenCart }) {
               {item.availability ? (
                 <button
                   onClick={() => setSelectedItemForModal(item)}
-                  className="btn-3d-menu-add px-4 py-2 rounded-lg text-[#FAF1F0] text-xs font-medium inline-flex items-center gap-1.5 transition-all"
+                  className="btn-3d-crimson px-4 py-2 rounded-lg text-white text-xs font-medium inline-flex items-center gap-1.5 transition-all"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>Add to Order</span>

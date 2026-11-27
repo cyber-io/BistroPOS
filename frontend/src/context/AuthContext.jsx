@@ -49,10 +49,6 @@ export function AuthProvider({ children }) {
       return acceptSession(await api.login({ email: email.trim().toLowerCase(), password }));
     } catch (error) { return { success: false, message: error.message }; }
   };
-  const demoLogin = async role => {
-    try { return acceptSession(await api.demoLogin(role)); }
-    catch (error) { return { success: false, message: error.message }; }
-  };
   const register = async ({ name, email, password, phone = '' }) => {
     try {
       // The server assigns CUSTOMER. Staff permissions cannot be self-selected.
@@ -79,7 +75,7 @@ export function AuthProvider({ children }) {
     }
   };
 
-  return <AuthContext.Provider value={{ currentUser, isLoading, isAuthenticated: Boolean(currentUser), role: currentUser?.role || 'GUEST', login, demoLogin, register, resetPassword, logout, updateProfile }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ currentUser, isLoading, isAuthenticated: Boolean(currentUser), role: currentUser?.role || 'GUEST', login, register, resetPassword, logout, updateProfile }}>{children}</AuthContext.Provider>;
 }
 export function useAuth() {
   const context = useContext(AuthContext);

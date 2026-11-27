@@ -112,9 +112,6 @@ export default function HomePage() {
               <MapPin size={17} />Find your way here
             </a>
           </div>
-          <Link to="/menu" className="website-explore-link">
-            Explore our menu<ArrowRight size={16} />
-          </Link>
         </div>
       </section>
 

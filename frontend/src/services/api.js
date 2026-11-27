@@ -236,7 +236,8 @@ function diffRecords(key, records, idField, onNew, onChange, generation) {
   }
 }
 async function pollUpdates() {
-  if (pollBusy || !listeners.size || Date.now() < rateLimitBackoffUntil) return;
+  if (pollBusy || !listeners.size || !getAuthToken() || Date.now() < rateLimitBackoffUntil) return;
+  if (typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')) return;
   pollBusy = true;
   pollCycle++;
   const generation = pollingGeneration;
@@ -283,7 +284,7 @@ export function subscribeRealtimeEvents(callback) {
   listeners.add(callback);
   if (!pollTimer) {
     pollUpdates();
-    pollTimer = setInterval(pollUpdates, 4000);
+    pollTimer = setInterval(pollUpdates, 30000);
   }
   return () => {
     listeners.delete(callback);
@@ -294,7 +295,6 @@ export function subscribeRealtimeEvents(callback) {
 export const api = {
   health: () => request('/health'),
   login: body => request('/auth/login', { method: 'POST', body }),
-  demoLogin: (role, restaurantId) => request('/auth/demo-login', { method: 'POST', body: { role, restaurantId } }),
   me: async () => {
     const user = await request('/auth/me');
     if (user.restaurantId) restaurantId = user.restaurantId;
@@ -310,6 +310,7 @@ export const api = {
 
   getRestaurants: () => request('/restaurants'),
   createRestaurant: details => request('/restaurants', { method: 'POST', body: details }),
+  deleteRestaurant: id => request(`/restaurants/${id}`, { method: 'DELETE' }),
   getRestaurant: async () => {
     const data = await request(`/restaurants/${restaurantId}`);
     restaurantId = data.restaurantId;
@@ -548,7 +549,8 @@ export const api = {
   getAllManagers: () => request('/users/managers'),
   getPlatformSummary: () => request('/restaurants/summary'),
   updateRestaurantStatus: (id, status) => request(`/restaurants/${id}/status`, { method: 'PUT', body: { status } }),
-  createStaffUser: details => request(`/users${query({ restaurantId })}`, { method: 'POST', body: details }),
+  createStaffUser: details => request(`/users${query({ restaurantId: details?.restaurantId || restaurantId })}`, { method: 'POST', body: details }),
+  updateStaffUser: (userId, details) => request(`/users/${userId}`, { method: 'PUT', body: details }),
   deleteStaffUser: userId => request(`/users/${userId}`, { method: 'DELETE' }),
   updateRestaurantSettings: (restaurantIdToUpdate, payload) => request(`/restaurants/${restaurantIdToUpdate || restaurantId}/settings`, { method: 'PATCH', body: payload }),
   initiatePayment: details => request(`/payments/initiate${query({ accessToken: orderAccess(details.orderId) })}`, { method: 'POST', accessToken: orderAccess(details.orderId), body: { restaurantId: details.restaurantId || restaurantId, method: details.method || 'UPI', ...details, idempotencyKey: details.idempotencyKey || uniqueKey() } }),
@@ -561,6 +563,14 @@ export const api = {
   reportShortage: body => request('/inventory/shortage', { method: 'POST', body: { restaurantId, ...body } }),
   getRestaurantWifi: (customRestId) => request(`/restaurants/${customRestId || restaurantId}/wifi`),
   updateRestaurantWifi: (customRestId, body) => request(`/restaurants/${customRestId || restaurantId}/wifi`, { method: 'PATCH', body }),
+  getSmsConfig: (customRestId) => request(`/restaurants/${customRestId || restaurantId}/sms-config`),
+  updateSmsConfig: (customRestId, body) => request(`/restaurants/${customRestId || restaurantId}/sms-config`, { method: 'PATCH', body }),
+  sendTestSms: (customRestId, body) => request(`/restaurants/${customRestId || restaurantId}/sms-test`, { method: 'POST', body }),
+  getSmsPreferences: (customRestId) => request(`/restaurants/${customRestId || restaurantId}/sms-preferences`),
+  updateSmsPreferences: (customRestId, body) => request(`/restaurants/${customRestId || restaurantId}/sms-preferences`, { method: 'PATCH', body }),
+  getSmsLogs: (customRestId, status, limit = 50) => request(`/restaurants/${customRestId || restaurantId}/sms-logs${query({ status, limit })}`),
+  getSmsDevices: (customRestId) => request(`/restaurants/${customRestId || restaurantId}/sms-devices`),
+  updateSmsConsent: (customRestId, body) => request(`/restaurants/${customRestId || restaurantId}/sms-consent`, { method: 'POST', body }),
   getLoyaltyBalance: phone => request(`/loyalty/balance${query({ restaurantId, phone })}`),
   earnLoyaltyPoints: body => request('/loyalty/earn', { method: 'POST', body: { restaurantId, ...body } }),
   redeemLoyaltyPoints: body => request(`/loyalty/redeem${query({ accessToken: body?.orderId ? orderAccess(body.orderId) : undefined })}`, { method: 'POST', accessToken: body?.orderId ? orderAccess(body.orderId) : undefined, body: { restaurantId, ...body } }),
@@ -571,6 +581,7 @@ export const api = {
   confirmCashPayment: (paymentId, staffUserId) => request(`/payments/${paymentId}/confirm-cash`, { method: 'POST', body: { staffUserId } }),
   updateOrderItemStatus: (orderItemId, status) => request(`/orders/items/${orderItemId}/status`, { method: 'PATCH', body: { status } }),
   emailReceipt: (orderId, email) => request(`/orders/${orderId}/email-receipt${query({ accessToken: orderAccess(orderId) })}`, { method: 'POST', accessToken: orderAccess(orderId), body: { email } }),
+  smsReceipt: (orderId, phone) => request(`/orders/${orderId}/sms-receipt${query({ accessToken: orderAccess(orderId) })}`, { method: 'POST', accessToken: orderAccess(orderId), body: { phone } }),
   getTimeBudgetMenu: (customRestId, minutes = 25) => request(`/menu/time-budget${query({ restaurantId: customRestId || restaurantId, minutes })}`),
   getPortionsRemaining: (customRestId) => request(`/menu/portions-remaining${query({ restaurantId: customRestId || restaurantId })}`),
   planEvent: (reservationId, plan) => request(`/reservations/${reservationId}/event-plan`, { method: 'POST', body: plan }),

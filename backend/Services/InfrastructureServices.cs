@@ -97,6 +97,7 @@ public class PaymentService(
     INotificationService notifications,
     IOptions<PaymentGatewayOptions> gatewayOptions,
     IHostEnvironment env,
+    ISmsService sms,
     ILogger<PaymentService> logger) : IPaymentService
 {
     public async Task<PaymentDto> InitiatePaymentAsync(InitiatePaymentRequest request)
@@ -174,6 +175,8 @@ public class PaymentService(
             await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtext({request.OrderId.ToString()}))");
         }
         var order = await db.Orders.FindAsync(request.OrderId.Value) ?? throw new ArgumentException("Order not found.");
+        if (!string.IsNullOrWhiteSpace(request.CustomerName)) order.CustomerName = request.CustomerName.Trim();
+        if (!string.IsNullOrWhiteSpace(request.CustomerPhone)) order.CustomerPhone = request.CustomerPhone.Trim();
         
         // Ensure tenant ID matches order
         var restaurantId = order.RestaurantId;
@@ -344,6 +347,12 @@ public class PaymentService(
         }
 
         await audit.LogAsync(payment.RestaurantId, null, collected ? UserRoles.Receptionist : UserRoles.Customer, collected ? "PAYMENT_COLLECTED" : "PAYMENT_PENDING", "payments", new { payment.PaymentId, payment.OrderId, payment.Amount, payment.Method });
+
+        if (collected && !string.IsNullOrWhiteSpace(order.CustomerPhone))
+        {
+            try { await sms.SendOrderReceiptSmsAsync(order.OrderId, order.CustomerPhone); } catch { }
+        }
+
         return Map(payment);
     }
 
@@ -388,6 +397,11 @@ public class PaymentService(
         if (payment.OrderId.HasValue)
         {
             await CompleteTableIfOrderPaidAsync(payment.OrderId.Value, payment.RestaurantId);
+            var paidOrder = await db.Orders.FindAsync(payment.OrderId.Value);
+            if (!string.IsNullOrWhiteSpace(paidOrder?.CustomerPhone))
+            {
+                try { await sms.SendOrderReceiptSmsAsync(paidOrder.OrderId, paidOrder.CustomerPhone); } catch { }
+            }
         }
 
         await audit.LogAsync(payment.RestaurantId, null, UserRoles.Customer, "PAYMENT_VERIFIED", "payments", new { payment.PaymentId, payment.OrderId, payment.Amount, payment.Method, payment.TransactionId });
@@ -488,6 +502,11 @@ public class PaymentService(
         if (payment.OrderId.HasValue)
         {
             await CompleteTableIfOrderPaidAsync(payment.OrderId.Value, payment.RestaurantId);
+            var paidOrder = await db.Orders.FindAsync(payment.OrderId.Value);
+            if (!string.IsNullOrWhiteSpace(paidOrder?.CustomerPhone))
+            {
+                try { await sms.SendOrderReceiptSmsAsync(paidOrder.OrderId, paidOrder.CustomerPhone); } catch { }
+            }
         }
 
         await audit.LogAsync(payment.RestaurantId, staffUserId, UserRoles.Waiter, "CASH_PAYMENT_CONFIRMED", "payments", new { payment.PaymentId, payment.OrderId, payment.Amount });

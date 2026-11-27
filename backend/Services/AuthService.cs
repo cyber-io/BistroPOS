@@ -18,8 +18,6 @@ public class AuthService(
     RestaurantDbContext db,
     IOptions<JwtOptions> jwt,
     IOptions<SupabaseOptions> supabase,
-    IOptions<FeaturesOptions> features,
-    IHostEnvironment env,
     IHttpClientFactory clients,
     IAuditLogService audit,
     ITenantContext tenant) : IAuthService
@@ -142,81 +140,6 @@ public class AuthService(
         }
 
         return new(false, "", null, "Invalid email or password.");
-    }
-
-    public async Task<AuthResponse> DemoLoginAsync(string role, Guid? restaurantId = null)
-    {
-        if (!env.IsDevelopment() || !features.Value.EnableDemoLogin)
-        {
-            return new(false, "", null, "Demonstration login is disabled in this environment.");
-        }
-
-        var targetRole = role.Trim().ToUpperInvariant();
-        if (targetRole is not (UserRoles.SuperAdmin or UserRoles.Manager or UserRoles.Receptionist or UserRoles.Kitchen or UserRoles.Waiter or UserRoles.Customer))
-            return new(false, "", null, "Unknown demo role.");
-
-        if (!UserProvisioning.IsInitialized)
-        {
-            await UserProvisioning.EnsureDefaultDataAsync(db, allowDevSeedCredentials: true);
-        }
-
-        User? user = null;
-        if (restaurantId.HasValue && targetRole != UserRoles.SuperAdmin)
-        {
-            user = await db.Users.FirstOrDefaultAsync(u => u.Role == targetRole && u.RestaurantId == restaurantId.Value);
-        }
-
-        if (user == null)
-        {
-            if (targetRole == UserRoles.Manager)
-            {
-                // Prefer the default restaurant manager (Rohit Mehta at Bistro & Bloom) matching Receptionist demo experience
-                user = await db.Users.FirstOrDefaultAsync(u => u.Role == targetRole && u.RestaurantId == UserProvisioning.DefaultRestaurantId)
-                    ?? await db.Users.FirstOrDefaultAsync(u => u.Role == targetRole);
-            }
-            else
-            {
-                user = await db.Users.FirstOrDefaultAsync(u => u.Role == targetRole);
-            }
-        }
-
-        var devSecret = Environment.GetEnvironmentVariable("DEV_DEMO_SEED_PASSWORD") ?? "Password@123";
-        if (user == null && targetRole == UserRoles.Manager)
-        {
-            var firstRestaurant = restaurantId.HasValue
-                ? await db.Restaurants.FindAsync(restaurantId.Value)
-                : await db.Restaurants.FirstOrDefaultAsync();
-
-            var existingByEmail = await db.Users.FirstOrDefaultAsync(u => u.Email.ToLower() == "manager.rahul@royalpalace.com" || u.Email.ToLower() == "manager@sunrisecafe.com");
-            if (existingByEmail != null)
-            {
-                existingByEmail.Role = UserRoles.Manager;
-                existingByEmail.Status = "ACTIVE";
-                user = existingByEmail;
-            }
-            else
-            {
-                user = new User
-                {
-                    UserId = Guid.NewGuid(),
-                    RestaurantId = firstRestaurant?.RestaurantId,
-                    Name = "Rahul Sharma (Manager)",
-                    Email = "manager.rahul@royalpalace.com",
-                    Phone = "+91 98000 00010",
-                    Role = UserRoles.Manager,
-                    Status = "ACTIVE",
-                    PasswordHash = BCrypt.Net.BCrypt.HashPassword(devSecret),
-                    EmailVerified = true
-                };
-                db.Users.Add(user);
-            }
-
-            await db.SaveChangesAsync();
-        }
-
-        return user == null
-            ? new(false, "", null, "User account not found for this role.")
-            : await SignedIn(user, "Local demonstration account.");
     }
 
     public async Task<UserDto?> GetUserByIdAsync(Guid userId)

@@ -1,15 +1,16 @@
 .pos-party-hall-plan {
   display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.85fr) minmax(240px, 1fr);
   gap: 24px;
   width: 100%;
-  max-width: 840px;
+  max-width: 960px;
   margin: 0 auto;
-  padding: 12px 8px 8px;
+  padding: 10px 14px;
   color: var(--plan-ink);
+  align-items: center;
 }
 
-.pos-party-map-panel { width: 100%; max-width: 640px; min-width: 0; justify-self: center; }
+.pos-party-map-panel { width: 100%; min-width: 0; }
 .pos-party-seating-map {
   --hall-seat: var(--plan-chair);
   --hall-seat-back: var(--plan-chair-back);
@@ -46,7 +47,7 @@
 .pos-party-map-bill strong { color: var(--plan-ink); font-size: 11px; font-weight: 650; overflow-wrap: anywhere; }
 .pos-party-map-action { display: inline-flex; align-items: center; gap: 5px; color: var(--p-blue); font-size: 11px; font-weight: 650; }
 .pos-party-map-hint { margin: 9px 0 0; color: var(--plan-muted); font-size: 10px; line-height: 1.5; text-align: center; }
-.pos-party-seating-map > svg { display: block; width: 100%; height: auto; overflow: visible; }
+.pos-party-seating-map > svg { display: block; width: 100%; max-height: 360px; height: auto; margin: 0 auto; overflow: visible; }
 .pos-party-stage { fill: var(--hall-stage); }
 .pos-party-console { fill: var(--plan-chair); }
 .pos-party-stage-step, .pos-party-chair-back { fill: var(--hall-seat-back); }
@@ -91,10 +92,10 @@
 .pos-party-food-stalls {
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  gap: 18px;
+  justify-content: center;
+  gap: 16px;
   min-width: 0;
-  padding: 6px 0 24px 24px;
+  padding: 12px 0 12px 24px;
   border-left: 1px solid var(--plan-border);
   text-align: center;
 }

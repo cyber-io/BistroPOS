@@ -103,7 +103,6 @@ export function FloorPlanTable({ table, layout, children, onClick, ...props }) {
           {children}
         </span>
       </span>
-      <span className="pos-plan-caption">{layout.caption}</span>
     </button>
   );
 }
@@ -187,10 +186,6 @@ export default function TableFloorPlan({ tables, allTables = tables, selectedAre
             </Empty>
           )}
         </div>
-        {areaTables.length > 0 && <footer className="pos-dining-plan-footer">
-          <span>Top view</span>
-          <div>{partyHall ? <span>7 rows × 10 chairs · {partyHall.capacity} seats</span> : <><span>Chairs · cool gray</span>{sofaCount > 0 && <span>Sofas · sage</span>}</>}</div>
-        </footer>}
       </section>
     </div>
   );

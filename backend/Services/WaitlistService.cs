@@ -11,17 +11,20 @@ public class WaitlistService : IWaitlistService
     private readonly INotificationService _notifications;
     private readonly IAuditLogService _audit;
     private readonly ILogger<WaitlistService> _logger;
+    private readonly ITextBeeSmsService _sms;
 
     public WaitlistService(
         RestaurantDbContext db,
         INotificationService notifications,
         IAuditLogService audit,
-        ILogger<WaitlistService> logger)
+        ILogger<WaitlistService> logger,
+        ITextBeeSmsService sms)
     {
         _db = db;
         _notifications = notifications;
         _audit = audit;
         _logger = logger;
+        _sms = sms;
     }
 
     public async Task<List<WalkInWaitlistDto>> GetWaitlistAsync(Guid restaurantId)
@@ -182,6 +185,16 @@ public class WaitlistService : IWaitlistService
 
         _logger.LogInformation("Guest notification dispatched for WaitlistId {WaitlistId}, party size {Size}.",
             entry.WaitlistId, entry.PartySize);
+
+        if (!string.IsNullOrWhiteSpace(entry.CustomerPhone))
+        {
+            try
+            {
+                var msg = $"Hi {entry.CustomerName}, your table for {entry.PartySize} is ready! Please check in at the host desk.";
+                await _sms.SendSmsAsync(entry.RestaurantId, entry.CustomerPhone, msg, "WAITLIST_TABLE_READY");
+            }
+            catch { }
+        }
 
         return true;
     }

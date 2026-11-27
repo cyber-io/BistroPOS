@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Printer, Download, Mail, Star, Heart, Check, X, ExternalLink, Sparkles, ReceiptText } from 'lucide-react';
+import { Printer, Download, Mail, MessageSquare, Star, Heart, Check, X, ExternalLink, Sparkles, ReceiptText } from 'lucide-react';
 import { api } from '../../services/api';
 import { useNotification } from '../../context/NotificationContext';
 
@@ -15,6 +15,9 @@ export default function DigitalReceiptAndFeedbackModal({
   const [email, setEmail] = useState('');
   const [emailStatus, setEmailStatus] = useState('IDLE'); // 'IDLE', 'SENDING', 'SENT', 'FAILED'
   const [emailError, setEmailError] = useState('');
+  const [phone, setPhone] = useState(order?.customerPhone || '');
+  const [smsStatus, setSmsStatus] = useState('IDLE');
+  const [smsError, setSmsError] = useState('');
 
   // 5-Star Feedback State (Feature 8)
   const [rating, setRating] = useState(5);
@@ -90,6 +93,32 @@ Thank you for dining with us!
       setEmailStatus('FAILED');
       setEmailError(err.message || 'Network error sending receipt.');
       addToast(err.message || 'Could not deliver email receipt. Tap Retry.', 'error');
+    }
+  };
+
+  const handleSendSms = async (e) => {
+    if (e) e.preventDefault();
+    const cleanPhone = phone.trim();
+    if (!cleanPhone || cleanPhone.replace(/\D/g, '').length < 8) {
+      addToast('Please enter a valid mobile number.', 'warning');
+      return;
+    }
+    setSmsStatus('SENDING');
+    setSmsError('');
+    try {
+      const res = await api.smsReceipt(order.orderId, cleanPhone);
+      if (res?.success) {
+        setSmsStatus('SENT');
+        addToast(res.message || `Receipt SMS sent to ${cleanPhone}.`, 'success');
+      } else {
+        setSmsStatus('FAILED');
+        setSmsError(res?.message || 'SMS delivery failed.');
+        addToast(res?.message || 'SMS delivery failed.', 'error');
+      }
+    } catch (err) {
+      setSmsStatus('FAILED');
+      setSmsError(err.message || 'Network error sending SMS.');
+      addToast(err.message || 'Could not send receipt SMS.', 'error');
     }
   };
 
@@ -293,6 +322,50 @@ Thank you for dining with us!
                 )}
                 {emailStatus === 'SENT' && (
                   <p className="text-[10px] text-emerald-600 font-medium px-2">Digital receipt delivered to your inbox.</p>
+                )}
+              </div>
+
+              {/* SMS Delivery (TextBee) */}
+              <div className="space-y-1.5">
+                <form onSubmit={handleSendSms} className="flex items-center gap-2 bg-slate-50 p-2 rounded-2xl border border-slate-200">
+                  <MessageSquare size={15} className="text-slate-400 ml-2 shrink-0" />
+                  <input
+                    type="tel"
+                    placeholder="Enter phone for SMS receipt (+91...)"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    disabled={smsStatus === 'SENDING'}
+                    className="flex-1 bg-transparent border-none text-xs focus:outline-none text-slate-800 placeholder-slate-400 min-w-0"
+                  />
+                  {smsStatus === 'FAILED' ? (
+                    <button
+                      type="button"
+                      onClick={() => handleSendSms()}
+                      className="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 active:scale-95 text-white font-bold text-xs transition-colors shrink-0 shadow-xs"
+                    >
+                      Retry ↻
+                    </button>
+                  ) : (
+                    <button
+                      type="submit"
+                      disabled={smsStatus === 'SENDING' || smsStatus === 'SENT'}
+                      className={`px-3.5 py-1.5 rounded-xl font-bold text-xs transition-colors shrink-0 shadow-xs ${
+                        smsStatus === 'SENT'
+                          ? 'bg-emerald-600 text-white cursor-default'
+                          : smsStatus === 'SENDING'
+                          ? 'bg-purple-400 text-white cursor-wait'
+                          : 'bg-slate-800 hover:bg-slate-900 active:scale-95 text-white'
+                      }`}
+                    >
+                      {smsStatus === 'SENT' ? 'Sent ✓' : smsStatus === 'SENDING' ? 'Sending...' : 'SMS'}
+                    </button>
+                  )}
+                </form>
+                {smsStatus === 'FAILED' && (
+                  <p className="text-[10px] text-rose-600 font-medium px-2">SMS failed: {smsError}</p>
+                )}
+                {smsStatus === 'SENT' && (
+                  <p className="text-[10px] text-emerald-600 font-medium px-2">Digital receipt sent via TextBee SMS.</p>
                 )}
               </div>
             </div>

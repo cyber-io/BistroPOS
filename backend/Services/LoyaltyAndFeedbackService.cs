@@ -9,11 +9,13 @@ public class LoyaltyService : ILoyaltyService
 {
     private readonly RestaurantDbContext _db;
     private readonly IAuditLogService _audit;
+    private readonly ISmsService _sms;
 
-    public LoyaltyService(RestaurantDbContext db, IAuditLogService audit)
+    public LoyaltyService(RestaurantDbContext db, IAuditLogService audit, ISmsService sms)
     {
         _db = db;
         _audit = audit;
+        _sms = sms;
     }
 
     public async Task<CustomerLoyaltyDto?> GetLoyaltyByPhoneAsync(Guid restaurantId, string phone)
@@ -71,6 +73,13 @@ public class LoyaltyService : ILoyaltyService
         await _db.SaveChangesAsync();
         await _audit.LogAsync(request.RestaurantId, null, "CUSTOMER", "LOYALTY_EARN", "customer_loyalty", new { PointsEarned = pointsEarned, Total = record.PointsBalance });
 
+        await _sms.EnqueueEventSmsAsync(request.RestaurantId, "LOYALTY_EARN", cleanPhone, new Dictionary<string, string>
+        {
+            ["points"] = pointsEarned.ToString(),
+            ["balance"] = record.PointsBalance.ToString(),
+            ["tier"] = record.Tier
+        }, $"{record.LoyaltyId}:{record.PointsBalance}");
+
         return new CustomerLoyaltyDto(
             record.LoyaltyId,
             record.RestaurantId,
@@ -126,6 +135,13 @@ public class LoyaltyService : ILoyaltyService
         await _db.SaveChangesAsync();
         if (transaction != null) await transaction.CommitAsync();
         await _audit.LogAsync(request.RestaurantId, null, "CUSTOMER", "LOYALTY_REDEEM", "customer_loyalty", new { Redeemed = request.PointsToRedeem, Discount = discountAmount });
+
+        await _sms.EnqueueEventSmsAsync(request.RestaurantId, "LOYALTY_REDEEM", cleanPhone, new Dictionary<string, string>
+        {
+            ["points"] = request.PointsToRedeem.ToString(),
+            ["discount"] = discountAmount.ToString("F2"),
+            ["balance"] = record.PointsBalance.ToString()
+        }, $"{record.LoyaltyId}:redeem:{record.PointsBalance}");
 
         var dto = new CustomerLoyaltyDto(
             record.LoyaltyId,

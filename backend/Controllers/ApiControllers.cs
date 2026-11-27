@@ -17,14 +17,10 @@ namespace RestaurantSystem.Api.Controllers;
 public class AuthController : ControllerBase
 {
     private readonly IAuthService _auth;
-    private readonly IHostEnvironment _env;
-    private readonly FeaturesOptions _features;
 
-    public AuthController(IAuthService auth, IHostEnvironment env, IOptions<FeaturesOptions> features)
+    public AuthController(IAuthService auth)
     {
         _auth = auth;
-        _env = env;
-        _features = features.Value;
     }
 
     [HttpPost("register")]
@@ -33,18 +29,6 @@ public class AuthController : ControllerBase
         var result = await _auth.RegisterAsync(request);
         if (!result.Success) return BadRequest(result);
         return Ok(result);
-    }
-
-    [HttpPost("demo-login")]
-    public async Task<IActionResult> DemoLogin([FromBody] DemoLoginRequest request)
-    {
-        if (!_env.IsDevelopment() || !_features.EnableDemoLogin)
-        {
-            return NotFound(new { message = "Demonstration login is disabled." });
-        }
-
-        var result = await _auth.DemoLoginAsync(request.Role, request.RestaurantId);
-        return result.Success ? Ok(result) : BadRequest(result);
     }
 
     [HttpPost("login")]
@@ -134,10 +118,12 @@ public class AuthController : ControllerBase
 public class RestaurantsController : ControllerBase
 {
     private readonly RestaurantDbContext _db;
+    private readonly ITextBeeSmsService _sms;
 
-    public RestaurantsController(RestaurantDbContext db)
+    public RestaurantsController(RestaurantDbContext db, ITextBeeSmsService sms)
     {
         _db = db;
+        _sms = sms;
     }
 
     [HttpGet]
@@ -147,6 +133,59 @@ public class RestaurantsController : ControllerBase
         var query = isSuperAdmin ? _db.Restaurants.AsQueryable() : _db.Restaurants.Where(r => r.Status == "ACTIVE");
         var restaurants = await query.OrderByDescending(r => r.CreatedAt).ToListAsync();
         return Ok(restaurants);
+    }
+
+    [Authorize(Roles = UserRoles.SuperAdmin)]
+    [HttpPost]
+    public async Task<IActionResult> CreateRestaurant([FromBody] CreateRestaurantDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Name) || string.IsNullOrWhiteSpace(dto.Address) ||
+            string.IsNullOrWhiteSpace(dto.Phone) || string.IsNullOrWhiteSpace(dto.Email))
+        {
+            return BadRequest(new { message = "Name, address, phone, and email are required." });
+        }
+
+        var restaurant = new Restaurant
+        {
+            RestaurantId = Guid.NewGuid(),
+            Name = dto.Name.Trim(),
+            Address = dto.Address.Trim(),
+            Phone = dto.Phone.Trim(),
+            Email = dto.Email.Trim().ToLowerInvariant(),
+            Logo = string.IsNullOrWhiteSpace(dto.Logo) ? null : dto.Logo.Trim(),
+            OpeningHours = string.IsNullOrWhiteSpace(dto.OpeningHours) ? "{}" : dto.OpeningHours,
+            Settings = System.Text.Json.JsonSerializer.Serialize(new { taxRate = dto.TaxRate ?? 0.05m }),
+            Status = "ACTIVE",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        _db.Restaurants.Add(restaurant);
+        await _db.SaveChangesAsync();
+
+        if (!string.IsNullOrWhiteSpace(restaurant.Phone))
+        {
+            await _sms.EnqueueEventSmsAsync(null, "SOFTWARE_PURCHASE_WELCOME", restaurant.Phone, new Dictionary<string, string>
+            {
+                ["restaurant"] = restaurant.Name
+            }, restaurant.RestaurantId.ToString());
+        }
+
+        return Created($"/api/restaurants/{restaurant.RestaurantId}", restaurant);
+    }
+
+    [Authorize(Roles = UserRoles.SuperAdmin)]
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> DeleteRestaurant(Guid id)
+    {
+        var restaurant = await _db.Restaurants.FindAsync(id);
+        if (restaurant == null) return NotFound(new { message = "Restaurant not found." });
+
+        await _db.Users.Where(u => u.RestaurantId == id)
+            .ExecuteUpdateAsync(s => s.SetProperty(u => u.RestaurantId, (Guid?)null));
+        _db.Restaurants.Remove(restaurant);
+        await _db.SaveChangesAsync();
+        return Ok(new { success = true, message = $"{restaurant.Name} deleted." });
     }
 
     [Authorize(Roles = UserRoles.SuperAdmin)]
@@ -264,6 +303,94 @@ public class RestaurantsController : ControllerBase
             wifiPassword = restaurant.WifiPassword,
             wifiEnabled = restaurant.WifiEnabled
         });
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
+    [HttpGet("{id:guid}/sms-config")]
+    public async Task<IActionResult> GetSmsConfig(Guid id)
+    {
+        return Ok(await _sms.GetConfigAsync(id));
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
+    [HttpPatch("{id:guid}/sms-config")]
+    public async Task<IActionResult> UpdateSmsConfig(Guid id, [FromBody] UpdateTextBeeConfigDto dto)
+    {
+        try
+        {
+            return Ok(await _sms.UpdateConfigAsync(id, dto));
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
+    [HttpPost("{id:guid}/sms-test")]
+    public async Task<IActionResult> SendTestSms(Guid id, [FromBody] SendTestSmsDto dto)
+    {
+        var text = string.IsNullOrWhiteSpace(dto.Message)
+            ? "BistroPOS TextBee SMS gateway test successful!"
+            : dto.Message.Trim();
+        var (success, message) = await _sms.SendSmsAsync(id, dto.Phone, text, "TEST_SMS");
+        return success ? Ok(new { success = true, message }) : BadRequest(new { success = false, message });
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
+    [HttpGet("{id:guid}/sms-preferences")]
+    public async Task<IActionResult> GetSmsPreferences(Guid id) => Ok(await _sms.GetPreferencesAsync(id));
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
+    [HttpPatch("{id:guid}/sms-preferences")]
+    public async Task<IActionResult> UpdateSmsPreferences(Guid id, [FromBody] UpdateSmsPreferenceDto dto) =>
+        Ok(await _sms.UpdatePreferencesAsync(id, dto));
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
+    [HttpGet("{id:guid}/sms-logs")]
+    public async Task<IActionResult> GetSmsLogs(Guid id, [FromQuery] string? status = null, [FromQuery] int limit = 50) =>
+        Ok(await _sms.GetLogsAsync(id, status, limit));
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
+    [HttpGet("{id:guid}/sms-devices")]
+    public async Task<IActionResult> GetSmsDevices(Guid id) => Ok(await _sms.CheckConnectivityAsync(id));
+
+    [HttpPost("{id:guid}/sms-consent")]
+    public async Task<IActionResult> UpdateSmsConsent(Guid id, [FromBody] SmsConsentDto dto)
+    {
+        await _sms.SetConsentAsync(id, dto.Phone, dto.PromotionalOptIn, dto.OptedOut);
+        return Ok(new { success = true });
+    }
+}
+
+[ApiController]
+[Route("api/webhooks")]
+public class WebhooksController(ISmsService sms) : ControllerBase
+{
+    [AllowAnonymous]
+    [HttpPost("textbee")]
+    public async Task<IActionResult> TextBeeWebhook()
+    {
+        Request.EnableBuffering();
+        using var reader = new StreamReader(Request.Body, leaveOpen: true);
+        var rawBody = await reader.ReadToEndAsync();
+        Request.Body.Position = 0;
+
+        TextBeeWebhookDto? payload = null;
+        try
+        {
+            payload = System.Text.Json.JsonSerializer.Deserialize<TextBeeWebhookDto>(rawBody,
+                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        }
+        catch { }
+
+        if (payload == null) return BadRequest(new { message = "Invalid webhook payload." });
+
+        var sig = Request.Headers["x-textbee-signature"].FirstOrDefault()
+            ?? Request.Headers["x-webhook-signature"].FirstOrDefault();
+
+        var ok = await sms.ProcessWebhookAsync(payload, sig, rawBody);
+        return ok ? Ok(new { received = true }) : Unauthorized(new { message = "Invalid webhook signature." });
     }
 }
 
@@ -488,6 +615,95 @@ public class MenuController : ControllerBase
 
         return Ok(new { success = true, availability = request.Availability });
     }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
+    [HttpPost("items")]
+    public async Task<IActionResult> CreateMenuItem([FromBody] CreateMenuItemRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name))
+            return BadRequest(new { message = "Dish name is required." });
+
+        var targetRestaurantId = _tenant.IsManager
+            ? _tenant.GetRequiredRestaurantId()
+            : (request.RestaurantId ?? _tenant.RestaurantId ?? UserProvisioning.DefaultRestaurantId);
+
+        var item = new MenuItem
+        {
+            MenuItemId = Guid.NewGuid(),
+            RestaurantId = targetRestaurantId,
+            CategoryId = request.CategoryId,
+            Name = request.Name.Trim(),
+            Description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim(),
+            Price = request.Price,
+            Image = string.IsNullOrWhiteSpace(request.Image) ? null : request.Image.Trim(),
+            VegNonVeg = string.IsNullOrWhiteSpace(request.VegNonVeg) ? "VEG" : request.VegNonVeg.Trim().ToUpperInvariant(),
+            Availability = request.Availability ?? true,
+            SpiceLevel = string.IsNullOrWhiteSpace(request.SpiceLevel) ? "MEDIUM" : request.SpiceLevel.Trim().ToUpperInvariant(),
+            IsSweet = request.IsSweet ?? false,
+            CustomizationOptions = string.IsNullOrWhiteSpace(request.CustomizationOptions) ? "[]" : request.CustomizationOptions,
+            AddOns = string.IsNullOrWhiteSpace(request.AddOns) ? "[]" : request.AddOns,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        _db.MenuItems.Add(item);
+        await _db.SaveChangesAsync();
+
+        return Created($"/api/menu/items/{item.MenuItemId}", item);
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
+    [HttpPut("items/{id:guid}")]
+    public async Task<IActionResult> UpdateMenuItem(Guid id, [FromBody] UpdateMenuItemRequest request)
+    {
+        var item = await _db.MenuItems.FindAsync(id);
+        if (item == null) return NotFound();
+
+        if (_tenant.IsManager && item.RestaurantId != _tenant.GetRequiredRestaurantId())
+            return Forbid();
+
+        if (request.CategoryId.HasValue && request.CategoryId.Value != Guid.Empty)
+            item.CategoryId = request.CategoryId.Value;
+
+        item.Name = request.Name.Trim();
+        item.Description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim();
+        item.Price = request.Price;
+        item.Image = string.IsNullOrWhiteSpace(request.Image) ? null : request.Image.Trim();
+
+        if (!string.IsNullOrWhiteSpace(request.VegNonVeg))
+            item.VegNonVeg = request.VegNonVeg.Trim().ToUpperInvariant();
+        if (request.Availability.HasValue)
+            item.Availability = request.Availability.Value;
+        if (!string.IsNullOrWhiteSpace(request.SpiceLevel))
+            item.SpiceLevel = request.SpiceLevel.Trim().ToUpperInvariant();
+        if (request.IsSweet.HasValue)
+            item.IsSweet = request.IsSweet.Value;
+        if (request.CustomizationOptions != null)
+            item.CustomizationOptions = request.CustomizationOptions;
+        if (request.AddOns != null)
+            item.AddOns = request.AddOns;
+
+        item.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        return Ok(item);
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
+    [HttpDelete("items/{id:guid}")]
+    public async Task<IActionResult> DeleteMenuItem(Guid id)
+    {
+        var item = await _db.MenuItems.FindAsync(id);
+        if (item == null) return NotFound();
+
+        if (_tenant.IsManager && item.RestaurantId != _tenant.GetRequiredRestaurantId())
+            return Forbid();
+
+        _db.MenuItems.Remove(item);
+        await _db.SaveChangesAsync();
+
+        return Ok(new { success = true, message = "Menu item deleted successfully." });
+    }
 }
 
 [ApiController]
@@ -497,17 +713,23 @@ public class OrdersController : ControllerBase
     private readonly IOrderService _orders;
     private readonly IAuthService _auth;
     private readonly IEmailReceiptService _emailReceipts;
+    private readonly ITextBeeSmsService _sms;
 
-    public OrdersController(IOrderService orders, IAuthService auth, IEmailReceiptService emailReceipts)
+    public OrdersController(IOrderService orders, IAuthService auth, IEmailReceiptService emailReceipts, ITextBeeSmsService sms)
     {
         _orders = orders;
         _auth = auth;
         _emailReceipts = emailReceipts;
+        _sms = sms;
     }
 
     [HttpPost]
     public async Task<IActionResult> CreateOrder([FromBody] CreateOrderRequest request)
     {
+        if (request.Source != OrderSources.DineInQr && User.Identity?.IsAuthenticated != true)
+        {
+            return Unauthorized(new { message = "Please sign in or sign up before placing a website order." });
+        }
         Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var customerId);
         request = request with { CustomerId = customerId == Guid.Empty ? null : customerId };
         var order = await _orders.CreateOrderAsync(request);
@@ -606,6 +828,14 @@ public class OrdersController : ControllerBase
         if (!success) return BadRequest(new { success = false, message });
         return Ok(new { success = true, message });
     }
+
+    [HttpPost("{orderId:guid}/sms-receipt")]
+    public async Task<IActionResult> SmsReceipt(Guid orderId, [FromBody] SmsReceiptRequest request)
+    {
+        var (success, message) = await _sms.SendOrderReceiptSmsAsync(orderId, request.Phone);
+        if (!success) return BadRequest(new { success = false, message });
+        return Ok(new { success = true, message });
+    }
 }
 
 [ApiController]
@@ -668,6 +898,10 @@ public class ReservationsController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> CreateReservation([FromBody] CreateReservationRequest request)
     {
+        if (User.Identity?.IsAuthenticated != true)
+        {
+            return Unauthorized(new { message = "Please sign in or sign up before reserving a table." });
+        }
         Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var customerId);
         request = request with { CustomerId = customerId == Guid.Empty ? null : customerId };
         var (success, reservation, message) = await _reservations.CreateReservationAsync(request);
@@ -1046,7 +1280,9 @@ public class UsersController : ControllerBase
         Guid targetRestaurantId;
         if (isSuperAdmin)
         {
-            targetRestaurantId = restaurantId ?? _tenant.RestaurantId ?? Guid.Empty;
+            targetRestaurantId = (dto.RestaurantId.HasValue && dto.RestaurantId.Value != Guid.Empty
+                ? dto.RestaurantId.Value
+                : restaurantId) ?? _tenant.RestaurantId ?? Guid.Empty;
             if (targetRestaurantId == Guid.Empty) return BadRequest(new { message = "Target restaurant ID is required." });
         }
         else
@@ -1089,6 +1325,57 @@ public class UsersController : ControllerBase
         _db.Users.Add(user);
         await _db.SaveChangesAsync();
         await _audit.LogAsync(targetRestaurantId, _tenant.CurrentUserId, _tenant.CurrentRole, "STAFF_CREATED", "users", new { user.UserId, user.Role });
+
+        return Ok(new UserDto(user.UserId, user.RestaurantId, user.Name, user.Email, user.Phone, user.Role, user.Status));
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
+    [HttpPut("{id:guid}")]
+    public async Task<IActionResult> UpdateStaff(Guid id, [FromBody] UpdateStaffDto dto)
+    {
+        var user = await _db.Users.FindAsync(id);
+        if (user == null || user.Role == UserRoles.Customer)
+            return NotFound(new { message = "Staff member not found." });
+
+        _tenant.EnforceTenantAccess(user.RestaurantId);
+
+        if (!User.IsInRole(UserRoles.SuperAdmin) && user.Role is UserRoles.SuperAdmin or UserRoles.Manager)
+            return Forbid();
+
+        if (string.IsNullOrWhiteSpace(dto.Name) || string.IsNullOrWhiteSpace(dto.Email))
+            return BadRequest(new { message = "Name and email are required." });
+
+        var normalizedEmail = dto.Email.Trim().ToLowerInvariant();
+        if (!string.Equals(user.Email, normalizedEmail, StringComparison.OrdinalIgnoreCase))
+        {
+            var emailTaken = await _db.Users.AnyAsync(u => u.UserId != id && u.Email.ToLower() == normalizedEmail);
+            if (emailTaken)
+                return BadRequest(new { message = "A user with this email address already exists." });
+        }
+
+        if (!string.IsNullOrWhiteSpace(dto.Password))
+        {
+            if (dto.Password.Length < 8 || !dto.Password.Any(char.IsLetter) || !dto.Password.Any(char.IsDigit))
+                return BadRequest(new { message = "Password must be at least 8 characters and include letters and numbers." });
+            user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password);
+        }
+
+        user.Name = dto.Name.Trim();
+        user.Email = normalizedEmail;
+        user.Phone = string.IsNullOrWhiteSpace(dto.Phone) ? null : dto.Phone.Trim();
+        if (!string.IsNullOrWhiteSpace(dto.Status))
+        {
+            var nextStatus = dto.Status.Trim().ToUpperInvariant();
+            if (nextStatus is "ACTIVE" or "INACTIVE") user.Status = nextStatus;
+        }
+        if (User.IsInRole(UserRoles.SuperAdmin) && dto.RestaurantId.HasValue && dto.RestaurantId.Value != Guid.Empty)
+        {
+            user.RestaurantId = dto.RestaurantId.Value;
+        }
+        user.UpdatedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync(user.RestaurantId, _tenant.CurrentUserId, _tenant.CurrentRole, "STAFF_UPDATED", "users", new { user.UserId, user.Role });
 
         return Ok(new UserDto(user.UserId, user.RestaurantId, user.Name, user.Email, user.Phone, user.Role, user.Status));
     }
@@ -1228,5 +1515,59 @@ public class FeedbackController : ControllerBase
             : _tenant.GetRequiredRestaurantId();
         var list = await _feedback.GetFeedbacksAsync(targetId);
         return Ok(list);
+    }
+}
+
+[ApiController]
+[Route("api/[controller]")]
+[Authorize(Policy = "OperationalStaff")]
+public class InventoryController : ControllerBase
+{
+    private readonly IInventoryService _inventory;
+    private readonly ITenantContext _tenant;
+
+    public InventoryController(IInventoryService inventory, ITenantContext tenant)
+    {
+        _inventory = inventory;
+        _tenant = tenant;
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> GetInventory([FromQuery] Guid? restaurantId)
+    {
+        var targetId = _tenant.IsSuperAdmin
+            ? (restaurantId ?? _tenant.RestaurantId ?? UserProvisioning.DefaultRestaurantId)
+            : _tenant.GetRequiredRestaurantId();
+        var items = await _inventory.GetInventoryAsync(targetId);
+        return Ok(items);
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
+    [HttpPost]
+    public async Task<IActionResult> CreateItem([FromBody] CreateInventoryItemDto request)
+    {
+        var targetId = _tenant.IsSuperAdmin
+            ? (request.RestaurantId != Guid.Empty ? request.RestaurantId : _tenant.RestaurantId ?? UserProvisioning.DefaultRestaurantId)
+            : _tenant.GetRequiredRestaurantId();
+        var created = await _inventory.CreateItemAsync(request with { RestaurantId = targetId });
+        return Created($"/api/inventory/{created.ItemId}", created);
+    }
+
+    [HttpPatch("{id:guid}/stock")]
+    public async Task<IActionResult> UpdateStock(Guid id, [FromBody] UpdateStockDto request)
+    {
+        var updated = await _inventory.UpdateStockAsync(id, request.QuantityChange, request.Reason);
+        if (!updated) return NotFound();
+        return Ok(new { success = true });
+    }
+
+    [HttpPost("shortage")]
+    public async Task<IActionResult> ReportShortage([FromBody] ReportShortageDto request)
+    {
+        var targetId = _tenant.IsSuperAdmin
+            ? (request.RestaurantId != Guid.Empty ? request.RestaurantId : _tenant.RestaurantId ?? UserProvisioning.DefaultRestaurantId)
+            : _tenant.GetRequiredRestaurantId();
+        await _inventory.ReportShortageAsync(request with { RestaurantId = targetId });
+        return Ok(new { success = true, message = "Shortage reported successfully." });
     }
 }
