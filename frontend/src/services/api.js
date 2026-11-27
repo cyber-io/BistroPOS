@@ -11,12 +11,23 @@ const HELP_KEY = 'rs_customer_help_access';
 const LEGACY_DUMMY_RESTAURANTS = new Set(['11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222']);
 let restaurantId = DEFAULT_RESTAURANT_ID;
 try {
-  if (typeof localStorage !== 'undefined') {
-    const saved = localStorage.getItem('rs_active_restaurant_id');
-    if (saved && !LEGACY_DUMMY_RESTAURANTS.has(saved)) {
-      restaurantId = saved;
-    } else if (saved) {
-      localStorage.removeItem('rs_active_restaurant_id');
+  if (typeof window !== 'undefined' && window.location) {
+    const searchParams = new URLSearchParams(window.location.search);
+    const rParam = searchParams.get('r') || searchParams.get('restaurant') || searchParams.get('rst') || searchParams.get('code');
+    if (rParam && !LEGACY_DUMMY_RESTAURANTS.has(rParam)) {
+      restaurantId = rParam.trim();
+    } else {
+      const pathMatch = window.location.pathname.match(/^\/r\/([^\/]+)/);
+      if (pathMatch && pathMatch[1] && !LEGACY_DUMMY_RESTAURANTS.has(pathMatch[1])) {
+        restaurantId = pathMatch[1].trim();
+      } else {
+        const saved = localStorage.getItem('rs_active_restaurant_id');
+        if (saved && !LEGACY_DUMMY_RESTAURANTS.has(saved)) {
+          restaurantId = saved;
+        } else if (saved) {
+          localStorage.removeItem('rs_active_restaurant_id');
+        }
+      }
     }
   }
 } catch {}
@@ -332,9 +343,17 @@ export const api = {
 
   getRestaurants: () => request('/restaurants'),
   createRestaurant: details => request('/restaurants', { method: 'POST', body: details }),
-  getRestaurant: async () => {
-    const data = await request(`/restaurants/${restaurantId}`);
-    restaurantId = data.restaurantId;
+  getRestaurant: async (overrideId) => {
+    const target = overrideId || restaurantId;
+    const data = await request(`/restaurants/${encodeURIComponent(target)}`);
+    if (data?.restaurantId) {
+      restaurantId = data.restaurantId;
+      try {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem('rs_active_restaurant_id', data.restaurantId);
+        }
+      } catch {}
+    }
     restaurantCache = {
       ...data,
       logo: data.logo || '/favicon.svg',

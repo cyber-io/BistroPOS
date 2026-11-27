@@ -4,7 +4,7 @@ import {
   Building2, Users, Plus, CheckCircle2, AlertCircle, RefreshCw,
   Search, ExternalLink, Shield, LogOut, Sun, Moon, ArrowRight, Store,
   Sparkles, Check, Phone, Mail, MapPin, Server, UserCheck, KeyRound,
-  Eye, EyeOff, Copy
+  Eye, EyeOff, Copy, Globe
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { api, setActiveRestaurantId } from '../../services/api';
@@ -641,55 +641,114 @@ export default function SuperAdminDashboard() {
                   </div>
 
                   {/* Actions */}
-                  <div style={{ display: 'flex', gap: 8, paddingTop: 12, borderTop: '1px solid var(--p-border)' }}>
-                    <button
-                      type="button"
-                      style={{
-                        flex: 1,
-                        padding: '9px 14px',
-                        fontSize: 12,
-                        fontWeight: 700,
-                        justifyContent: 'center',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 8,
-                        borderRadius: 10,
-                        background: '#1e40af',
-                        color: '#ffffff',
-                        border: '2px solid #3b82f6',
-                        boxShadow: '0 2px 8px rgba(30, 64, 175, 0.35)',
-                        cursor: 'pointer',
-                        letterSpacing: '0.01em',
-                        transition: 'all 0.15s ease'
-                      }}
-                      onClick={() => handleOpenRestaurantPortal(r)}
-                    >
-                      <Store size={15} style={{ color: '#ffffff', flexShrink: 0 }} />
-                      <span style={{ color: '#ffffff', fontWeight: 700 }}>Open Restaurant Workspace</span>
-                    </button>
-                    <button
-                      type="button"
-                      style={{
-                        padding: '9px 14px',
-                        fontSize: 12,
-                        fontWeight: 650,
-                        borderRadius: 10,
-                        border: '1.5px solid var(--p-border, #cbd5e1)',
-                        background: 'var(--p-surface, #ffffff)',
-                        color: 'var(--p-text, #0f172a)',
-                        cursor: 'pointer',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 6
-                      }}
-                      title="Assign Hotel Manager"
-                      onClick={() => {
-                        setSelectedRestaurantForManager(r);
-                        setShowAddManager(true);
-                      }}
-                    >
-                      <Plus size={14} /> GM
-                    </button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 12, borderTop: '1px solid var(--p-border)' }}>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        type="button"
+                        style={{
+                          flex: 1.2,
+                          padding: '9px 12px',
+                          fontSize: 12,
+                          fontWeight: 700,
+                          justifyContent: 'center',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          borderRadius: 10,
+                          background: '#1e40af',
+                          color: '#ffffff',
+                          border: '2px solid #3b82f6',
+                          boxShadow: '0 2px 8px rgba(30, 64, 175, 0.35)',
+                          cursor: 'pointer',
+                          letterSpacing: '0.01em',
+                          transition: 'all 0.15s ease'
+                        }}
+                        onClick={() => handleOpenRestaurantPortal(r)}
+                      >
+                        <Store size={15} style={{ color: '#ffffff', flexShrink: 0 }} />
+                        <span style={{ color: '#ffffff', fontWeight: 700 }}>POS Portal</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        style={{
+                          flex: 1,
+                          padding: '9px 12px',
+                          fontSize: 12,
+                          fontWeight: 650,
+                          borderRadius: 10,
+                          border: '1.5px solid #10b981',
+                          background: 'rgba(16, 185, 129, 0.08)',
+                          color: '#065f46',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 5
+                        }}
+                        title="Open Customer Website"
+                        onClick={() => {
+                          const targetParam = r.restaurantCode || r.restaurantId;
+                          window.open(`/?r=${encodeURIComponent(targetParam)}`, '_blank');
+                        }}
+                      >
+                        <Globe size={14} style={{ color: '#10b981' }} />
+                        <span>Website ↗</span>
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        type="button"
+                        style={{
+                          flex: 1,
+                          padding: '7px 10px',
+                          fontSize: 11,
+                          fontWeight: 600,
+                          borderRadius: 8,
+                          border: '1px solid var(--p-border, #cbd5e1)',
+                          background: 'var(--p-surface, #ffffff)',
+                          color: 'var(--p-muted, #64748b)',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 5
+                        }}
+                        onClick={() => {
+                          const targetParam = r.restaurantCode || r.restaurantId;
+                          const url = `${window.location.origin}/?r=${encodeURIComponent(targetParam)}`;
+                          navigator.clipboard.writeText(url);
+                          showToast(`Website link for "${r.name}" copied to clipboard!`, 'info');
+                        }}
+                      >
+                        <Copy size={12} /> Copy Website URL
+                      </button>
+
+                      <button
+                        type="button"
+                        style={{
+                          padding: '7px 12px',
+                          fontSize: 11,
+                          fontWeight: 650,
+                          borderRadius: 8,
+                          border: '1px solid var(--p-border, #cbd5e1)',
+                          background: 'var(--p-surface, #ffffff)',
+                          color: 'var(--p-text, #0f172a)',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4
+                        }}
+                        title="Assign Hotel Manager"
+                        onClick={() => {
+                          setSelectedRestaurantForManager(r);
+                          setShowAddManager(true);
+                        }}
+                      >
+                        <Plus size={13} /> GM
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -1229,8 +1288,9 @@ function AddManagerModal({ restaurants, preSelectedRestaurant, onClose, onCreate
   };
 
   const handoverMessage = `Welcome to BistroPOS!
-Aapke restaurant "${targetRest?.name || 'Hotel'}" ka POS Portal ready hai.
-🔗 Portal URL: ${window.location.origin}/pos/login
+Aapke restaurant "${targetRest?.name || 'Hotel'}" ka POS Portal & Website ready hai.
+🌐 Customer Website: ${window.location.origin}/?r=${encodeURIComponent(targetRest?.restaurantCode || targetRest?.restaurantId || '')}
+🔗 Staff POS Portal: ${window.location.origin}/pos/login
 📧 Login Email: ${email || 'owner@hotel.com'}
 🔑 Password: ${password}
 

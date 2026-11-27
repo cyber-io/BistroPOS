@@ -58,8 +58,10 @@ export default function PublicMenuPage({ onOpenCart }) {
     };
     load();
     const unsubscribe = subscribeRealtimeEvents(type => { if (type === 'FOOD_AVAILABILITY_CHANGED') load(true); });
+    const onOutletChanged = () => { load(true); };
+    window.addEventListener('rs_outlet_changed', onOutletChanged);
     const timer = setInterval(() => load(true), 15000);
-    return () => { active = false; unsubscribe(); clearInterval(timer); };
+    return () => { active = false; unsubscribe(); clearInterval(timer); window.removeEventListener('rs_outlet_changed', onOutletChanged); };
   }, [retry]);
 
   useEffect(() => { setActiveCategory(searchParams.get('category') || 'ALL'); }, [searchParams]);

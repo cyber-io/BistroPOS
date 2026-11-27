@@ -69,14 +69,27 @@ export default function HomePage() {
       if (!silent) { setLoading(true); setError(''); }
       try {
         const [rest, items, cats] = await Promise.all([api.getRestaurant(), api.getMenuItems(), api.getCategories()]);
-        if (active) { setRestaurant(rest); setPopularItems(items.slice(0, 6)); setCategories(cats); }
+        if (active) {
+          setRestaurant(rest);
+          setPopularItems(items.slice(0, 6));
+          setCategories(cats);
+          if (rest?.name) {
+            document.title = `${rest.name} — Gourmet Dining & Online Ordering`;
+          }
+        }
       } catch (err) {
         if (active && !silent) setError(err.message || 'Our menu is temporarily unavailable. Please try again.');
       } finally { if (active && !silent) setLoading(false); }
     }
     loadData();
     const unsubscribe = subscribeRealtimeEvents(type => { if (type === 'FOOD_AVAILABILITY_CHANGED') loadData(true); });
-    return () => { active = false; unsubscribe(); };
+    const onOutletChanged = () => { loadData(true); };
+    window.addEventListener('rs_outlet_changed', onOutletChanged);
+    return () => {
+      active = false;
+      unsubscribe();
+      window.removeEventListener('rs_outlet_changed', onOutletChanged);
+    };
   }, [retry]);
 
   const rawHours = (restaurant?.openingHours && typeof restaurant.openingHours === 'object')
@@ -152,14 +165,14 @@ export default function HomePage() {
           <img
             className="website-hero-dish"
             src={HERO_DISH_IMAGE}
-            alt="Bistro & Bloom Signature Salad"
+            alt={`${restaurant?.name || 'Bistro & Bloom'} Signature Plate`}
             fetchpriority="high"
           />
         </div>
 
         {/* Right Column: Hero Copy & CTA */}
         <div className="website-hero-copy">
-          <p className="website-script">Bistro &amp; Bloom</p>
+          <p className="website-script">{restaurant?.name || 'Bistro & Bloom'}</p>
           <p className="website-eyebrow">A fresh take on the everyday</p>
           <h1 id="website-hero-title">Good food.<br />Beautiful moments.</h1>
           <p className="website-hero-description">

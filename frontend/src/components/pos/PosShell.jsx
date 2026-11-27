@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { NavLink, Link, useNavigate } from 'react-router-dom';
-import { Cloud, LayoutDashboard, ClipboardList, Armchair, CalendarDays, History, Package, ChefHat, HandPlatter, Sun, Moon, Bell, ChevronDown, LogOut, Building2, Check, Store, Users, UserPlus, Plus, Shield } from 'lucide-react';
+import { Cloud, LayoutDashboard, ClipboardList, Armchair, CalendarDays, History, Package, ChefHat, HandPlatter, Sun, Moon, Bell, ChevronDown, LogOut, Building2, Check, Store, Users, UserPlus, Plus, Shield, Globe, ArrowUpRight } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { api, getActiveRestaurantId, setActiveRestaurantId } from '../../services/api';
 import '../../styles/pos.css';
@@ -259,6 +259,19 @@ export default function PosShell({ children, alertCount = 0, onAlerts, menuDots 
         </nav>
 
         <div className="pos-top-actions">
+          <a
+            href={`/?r=${encodeURIComponent(currentRestaurant?.restaurantCode || currentRestaurant?.restaurantId || '')}`}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 text-xs font-bold transition-all shadow-xs"
+            title="Open Customer Website for this restaurant in a new tab"
+            style={{ textDecoration: 'none' }}
+          >
+            <Globe size={14} className="text-emerald-600" />
+            <span className="hidden md:inline">Website</span>
+            <ArrowUpRight size={12} className="opacity-60" />
+          </a>
+
           <button
             type="button"
             className="pos-icon-button"
