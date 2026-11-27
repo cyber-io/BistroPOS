@@ -167,22 +167,7 @@ export default function Navbar({ onOpenCart }) {
               <circle cx="22" cy="22" r="2.2" fill="#AF905C" />
             </svg>
           )}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span className="website-brand-name">{restaurant?.name || 'Bistro & Bloom'}</span>
-            {restaurant?.restaurantCode && (
-              <span style={{
-                fontSize: 10,
-                fontWeight: 700,
-                padding: '2px 7px',
-                borderRadius: 6,
-                background: 'rgba(175, 144, 92, 0.15)',
-                color: '#AF905C',
-                letterSpacing: '0.5px'
-              }}>
-                {restaurant.restaurantCode}
-              </span>
-            )}
-          </div>
+          <span className="website-brand-name">{restaurant?.name || 'Bistro & Bloom'}</span>
         </Link>
 
         <nav aria-label="Main navigation" className="website-nav">{navigation}</nav>
