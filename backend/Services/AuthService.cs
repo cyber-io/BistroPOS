@@ -237,6 +237,12 @@ public class AuthService(
             return (false, null, "An account already exists with this email address.");
         }
 
+        if (string.IsNullOrWhiteSpace(request.Password) || request.Password.Length < 8 ||
+            !request.Password.Any(char.IsLetter) || !request.Password.Any(char.IsDigit))
+        {
+            return (false, null, "Password restriction failed: Password must be at least 8 characters long and contain both letters and digits.");
+        }
+
         var newUserId = Guid.NewGuid();
         var empCode = await GenerateEmployeeCodeAsync(db, normalizedRole);
         var user = new User
@@ -282,6 +288,12 @@ public class AuthService(
         if (await db.Users.AnyAsync(u => u.Email.ToLower() == email))
         {
             return (false, null, "An account already exists with this email address.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Password) || request.Password.Length < 8 ||
+            !request.Password.Any(char.IsLetter) || !request.Password.Any(char.IsDigit))
+        {
+            return (false, null, "Password restriction failed: Password must be at least 8 characters long and contain both letters and digits.");
         }
 
         var managerId = Guid.NewGuid();

@@ -2224,6 +2224,20 @@ function AddManagerModal({ restaurants = [], defaultRestaurantId, onClose, onSuc
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
+  const hasMinLength = form.password.length >= 8;
+  const hasLetter = /[a-zA-Z]/.test(form.password);
+  const hasNumber = /[0-9]/.test(form.password);
+  const isPasswordCompliant = hasMinLength && hasLetter && hasNumber;
+
+  const generateSecurePassword = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%';
+    let res = 'Bistro@';
+    for (let i = 0; i < 4; i++) {
+      res += Math.floor(Math.random() * 10);
+    }
+    setForm(f => ({ ...f, password: res }));
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.restaurantId) {
@@ -2234,8 +2248,8 @@ function AddManagerModal({ restaurants = [], defaultRestaurantId, onClose, onSuc
       setError('Name, email, and password are required.');
       return;
     }
-    if (form.password.length < 6) {
-      setError('Password must be at least 6 characters.');
+    if (!isPasswordCompliant) {
+      setError('Password restriction failed: Password must be at least 8 characters long and contain both letters and numbers.');
       return;
     }
 
@@ -2354,7 +2368,24 @@ function AddManagerModal({ restaurants = [], defaultRestaurantId, onClose, onSuc
           </label>
 
           <label className="pos-field">
-            <span>Initial Password (Min 6 chars) *</span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+              <span>Manager Password (Full & Final) *</span>
+              <button
+                type="button"
+                onClick={generateSecurePassword}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--p-blue, #2563eb)',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  padding: 0
+                }}
+              >
+                ⚡ Generate Secure
+              </button>
+            </div>
             <div style={{ position: 'relative' }}>
               <Lock size={15} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--p-muted)', pointerEvents: 'none' }} />
               <input
@@ -2363,9 +2394,9 @@ function AddManagerModal({ restaurants = [], defaultRestaurantId, onClose, onSuc
                 style={{ paddingLeft: 34, paddingRight: 36 }}
                 value={form.password}
                 onChange={e => setForm({ ...form, password: e.target.value })}
-                placeholder="Create secure password"
+                placeholder="Min 8 chars (letters + numbers)"
                 required
-                minLength={6}
+                minLength={8}
               />
               <button
                 type="button"
@@ -2375,6 +2406,17 @@ function AddManagerModal({ restaurants = [], defaultRestaurantId, onClose, onSuc
                 {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
               </button>
             </div>
+            <div style={{ display: 'flex', gap: 12, marginTop: 6, fontSize: 11 }}>
+              <span style={{ color: hasMinLength ? '#16a34a' : 'var(--p-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                {hasMinLength ? '✓' : '○'} 8+ characters
+              </span>
+              <span style={{ color: (hasLetter && hasNumber) ? '#16a34a' : 'var(--p-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                {(hasLetter && hasNumber) ? '✓' : '○'} Letters & Numbers
+              </span>
+            </div>
+            <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--p-muted)' }}>
+              🔒 <strong>Full & Final:</strong> Saved permanently to database for hotel manager login.
+            </p>
           </label>
         </div>
 
@@ -2390,7 +2432,7 @@ function AddManagerModal({ restaurants = [], defaultRestaurantId, onClose, onSuc
           <button
             type="submit"
             className="pos-button primary"
-            disabled={busy || !form.name.trim() || !form.email.trim() || !form.password}
+            disabled={busy || !form.name.trim() || !form.email.trim() || !isPasswordCompliant}
             style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%)', color: '#fff', border: 0, minWidth: 170, display: 'inline-flex', alignItems: 'center', gap: 6 }}
           >
             {busy ? <RefreshCw className="pos-spin" size={14} /> : <UserPlus size={15} />}
@@ -2566,6 +2608,20 @@ function AddStaffModal({ currentRestaurant, currentUserRole, restaurants = [], o
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
+  const hasMinLength = form.password.length >= 8;
+  const hasLetter = /[a-zA-Z]/.test(form.password);
+  const hasNumber = /[0-9]/.test(form.password);
+  const isPasswordCompliant = hasMinLength && hasLetter && hasNumber;
+
+  const generateSecurePassword = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%';
+    let res = 'Bistro@';
+    for (let i = 0; i < 4; i++) {
+      res += Math.floor(Math.random() * 10);
+    }
+    setForm(f => ({ ...f, password: res }));
+  };
+
   const roleDefinitions = [
     {
       id: 'RECEPTIONIST',
@@ -2605,8 +2661,8 @@ function AddStaffModal({ currentRestaurant, currentUserRole, restaurants = [], o
       setError('Name, email, and password are required.');
       return;
     }
-    if (form.password.length < 6) {
-      setError('Password must be at least 6 characters.');
+    if (!isPasswordCompliant) {
+      setError('Password restriction failed: Password must be at least 8 characters long and contain both letters and numbers.');
       return;
     }
 
@@ -2808,7 +2864,24 @@ function AddStaffModal({ currentRestaurant, currentUserRole, restaurants = [], o
           </label>
 
           <label className="pos-field">
-            <span>Station Password (Min 6 chars) *</span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+              <span>Staff Password (Full & Final) *</span>
+              <button
+                type="button"
+                onClick={generateSecurePassword}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--p-blue, #2563eb)',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  padding: 0
+                }}
+              >
+                ⚡ Generate Secure
+              </button>
+            </div>
             <div style={{ position: 'relative' }}>
               <Lock size={15} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--p-muted)', pointerEvents: 'none' }} />
               <input
@@ -2817,9 +2890,9 @@ function AddStaffModal({ currentRestaurant, currentUserRole, restaurants = [], o
                 style={{ paddingLeft: 34, paddingRight: 36 }}
                 value={form.password}
                 onChange={e => setForm({ ...form, password: e.target.value })}
-                placeholder="Create station password"
+                placeholder="Min 8 chars (letters + numbers)"
                 required
-                minLength={6}
+                minLength={8}
               />
               <button
                 type="button"
@@ -2829,6 +2902,17 @@ function AddStaffModal({ currentRestaurant, currentUserRole, restaurants = [], o
                 {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
               </button>
             </div>
+            <div style={{ display: 'flex', gap: 12, marginTop: 6, fontSize: 11 }}>
+              <span style={{ color: hasMinLength ? '#16a34a' : 'var(--p-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                {hasMinLength ? '✓' : '○'} 8+ characters
+              </span>
+              <span style={{ color: (hasLetter && hasNumber) ? '#16a34a' : 'var(--p-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                {(hasLetter && hasNumber) ? '✓' : '○'} Letters & Numbers
+              </span>
+            </div>
+            <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--p-muted)' }}>
+              🔒 <strong>Full & Final:</strong> Saved permanently to database for staff login.
+            </p>
           </label>
         </div>
 
@@ -2844,7 +2928,7 @@ function AddStaffModal({ currentRestaurant, currentUserRole, restaurants = [], o
           <button
             type="submit"
             className="pos-button primary"
-            disabled={busy || !form.name.trim() || !form.email.trim() || !form.password}
+            disabled={busy || !form.name.trim() || !form.email.trim() || !isPasswordCompliant}
             style={{ minWidth: 160, display: 'inline-flex', alignItems: 'center', gap: 6 }}
           >
             {busy ? <RefreshCw className="pos-spin" size={14} /> : <Plus size={15} />}
@@ -5377,8 +5461,8 @@ function StaffPasswordModal({ user, isSelf, currentUser, onClose, onSuccess }) {
     e.preventDefault();
     setError('');
 
-    if (newPassword.length < 8) {
-      setError('Password must be at least 8 characters long.');
+    if (newPassword.length < 8 || !/[a-zA-Z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+      setError('Password restriction failed: Password must be at least 8 characters long and contain both letters and numbers.');
       return;
     }
     if (newPassword !== confirmPassword) {

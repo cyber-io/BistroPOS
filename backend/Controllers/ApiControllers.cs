@@ -1429,7 +1429,7 @@ public class UsersController : ControllerBase
         if (string.IsNullOrWhiteSpace(dto.Password) || dto.Password.Length < 8 ||
             !dto.Password.Any(char.IsLetter) || !dto.Password.Any(char.IsDigit))
         {
-            return BadRequest(new { message = "Password must be at least 8 characters and include letters and numbers." });
+            return BadRequest(new { message = "Password restriction failed: Password must be at least 8 characters long and contain both letters and numbers." });
         }
 
         var isSuperAdmin = User.IsInRole(UserRoles.SuperAdmin);

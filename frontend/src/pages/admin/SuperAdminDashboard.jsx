@@ -1166,11 +1166,25 @@ function AddManagerModal({ restaurants, preSelectedRestaurant, onClose, onCreate
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
-  const [password, setPassword] = useState('Bistro@123');
+  const [password, setPassword] = useState('Bistro@2026');
   const [showPass, setShowPass] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState(false);
+
+  const hasMinLength = password.length >= 8;
+  const hasLetter = /[a-zA-Z]/.test(password);
+  const hasNumber = /[0-9]/.test(password);
+  const isPasswordCompliant = hasMinLength && hasLetter && hasNumber;
+
+  const generateStrongPassword = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%';
+    let res = 'Bistro@';
+    for (let i = 0; i < 4; i++) {
+      res += Math.floor(Math.random() * 10);
+    }
+    setPassword(res);
+  };
 
   useEffect(() => {
     if (preSelectedRestaurant?.restaurantId) {
@@ -1190,6 +1204,10 @@ function AddManagerModal({ restaurants, preSelectedRestaurant, onClose, onCreate
       setError('Manager name and login email are required.');
       return;
     }
+    if (!isPasswordCompliant) {
+      setError('Password restriction: Password must be at least 8 characters long and contain both letters and digits.');
+      return;
+    }
 
     try {
       setBusy(true);
@@ -1198,7 +1216,7 @@ function AddManagerModal({ restaurants, preSelectedRestaurant, onClose, onCreate
         name: name.trim(),
         email: email.trim().toLowerCase(),
         phone: phone.trim() || null,
-        password: password || 'Bistro@123',
+        password: password.trim(),
         role: 'MANAGER',
         restaurantId: selectedRestId
       });
@@ -1337,7 +1355,24 @@ Is login se aap apna Menu, Staff aur Table QR codes manage kar sakte hain.`;
             </label>
 
             <label className="pos-field">
-              <span>Initial Password *</span>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <span>Manager Password (Full & Final) *</span>
+                <button
+                  type="button"
+                  onClick={generateStrongPassword}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--p-blue, #2563eb)',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    padding: 0
+                  }}
+                >
+                  ⚡ Generate Strong
+                </button>
+              </div>
               <div style={{ position: 'relative' }}>
                 <input
                   type={showPass ? "text" : "password"}
@@ -1345,6 +1380,7 @@ Is login se aap apna Menu, Staff aur Table QR codes manage kar sakte hain.`;
                   style={{ width: '100%', paddingRight: 36 }}
                   value={password}
                   onChange={e => setPassword(e.target.value)}
+                  placeholder="Min 8 chars (letters + numbers)"
                   required
                 />
                 <button
@@ -1364,6 +1400,17 @@ Is login se aap apna Menu, Staff aur Table QR codes manage kar sakte hain.`;
                   {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
                 </button>
               </div>
+              <div style={{ display: 'flex', gap: 12, marginTop: 6, fontSize: 11 }}>
+                <span style={{ color: hasMinLength ? '#16a34a' : 'var(--p-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  {hasMinLength ? '✓' : '○'} 8+ characters
+                </span>
+                <span style={{ color: (hasLetter && hasNumber) ? '#16a34a' : 'var(--p-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  {(hasLetter && hasNumber) ? '✓' : '○'} Letters & Numbers
+                </span>
+              </div>
+              <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--p-muted)' }}>
+                🔒 <strong>Full & Final:</strong> Saved permanently to database for manager login.
+              </p>
             </label>
           </div>
 
@@ -1403,7 +1450,7 @@ Is login se aap apna Menu, Staff aur Table QR codes manage kar sakte hain.`;
 
           <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', paddingTop: 16, borderTop: '1px solid var(--p-border)' }}>
             <button type="button" className="pos-button" onClick={onClose} disabled={busy}>Cancel</button>
-            <button type="submit" className="pos-button primary" disabled={busy}>
+            <button type="submit" className="pos-button primary" disabled={busy || !isPasswordCompliant}>
               {busy ? <RefreshCw size={14} className="pos-spin" /> : <UserCheck size={14} />}
               {busy ? 'Creating Manager…' : 'Create Manager Account'}
             </button>
