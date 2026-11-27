@@ -193,7 +193,14 @@ export default function PosShell({ children, alertCount = 0, onAlerts, menuDots 
                           }`}
                         >
                           <div className="truncate pr-2">
-                            <div className="font-medium text-xs truncate">{r.name}</div>
+                            <div className="font-medium text-xs truncate flex items-center gap-1.5">
+                              <span>{r.name}</span>
+                              <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                                isActive ? 'bg-blue-500 text-white' : 'bg-slate-200 text-slate-700'
+                              }`}>
+                                {r.restaurantCode || 'RST-100'}
+                              </span>
+                            </div>
                             <div className={`text-[10px] truncate ${isActive ? 'text-blue-100' : 'text-slate-400'}`}>
                               {r.address ? r.address.split(',')[0] : r.slug}
                             </div>

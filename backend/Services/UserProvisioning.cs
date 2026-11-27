@@ -35,6 +35,7 @@ public static class UserProvisioning
                             ALTER TABLE restaurant_pos.users DROP CONSTRAINT IF EXISTS users_role_check;
                             ALTER TABLE restaurant_pos.users ADD CONSTRAINT users_role_check CHECK (role IN ('SUPER_ADMIN', 'MANAGER', 'RECEPTIONIST', 'KITCHEN', 'WAITER', 'CUSTOMER'));
                             ALTER TABLE restaurant_pos.users ADD COLUMN IF NOT EXISTS employee_code VARCHAR(50);
+                            ALTER TABLE restaurant_pos.restaurants ADD COLUMN IF NOT EXISTS restaurant_code VARCHAR(50);
                         EXCEPTION WHEN OTHERS THEN NULL;
                         END $$;
                     ");
@@ -61,6 +62,7 @@ public static class UserProvisioning
                 primaryRestaurant = new Restaurant
                 {
                     RestaurantId = DefaultRestaurantId,
+                    RestaurantCode = "RST-100",
                     Name = "Bistro & Bloom",
                     Logo = "/favicon.svg",
                     Address = "Plot 42, Gourmet Boulevard, Cyber Hub, Gurugram, HR - 122002",
@@ -74,6 +76,7 @@ public static class UserProvisioning
             }
             else
             {
+                primaryRestaurant.RestaurantCode ??= "RST-100";
                 if (string.IsNullOrWhiteSpace(primaryRestaurant.OpeningHours))
                 {
                     primaryRestaurant.OpeningHours = standardOpeningHours;
@@ -151,6 +154,19 @@ public static class UserProvisioning
             }
 
             await db.SaveChangesAsync();
+
+            // 4.1 Backfill any staff without employee codes sequentially
+            var staffWithoutCodes = await db.Users
+                .Where(u => u.Role != UserRoles.Customer && (u.EmployeeCode == null || u.EmployeeCode == ""))
+                .OrderBy(u => u.CreatedAt)
+                .ToListAsync();
+            foreach (var staffMember in staffWithoutCodes)
+            {
+                staffMember.EmployeeCode = await AuthService.GenerateEmployeeCodeAsync(db, staffMember.Role);
+                await db.SaveChangesAsync();
+            }
+
+            // 5. Ensure table infrastructure for dining operations
             await EnsureRestaurantTablesAsync(db);
             Volatile.Write(ref _initialized, 1);
         }
@@ -707,5 +723,27 @@ public static class UserProvisioning
 
         db.MenuItems.AddRange(items);
         await db.SaveChangesAsync();
+    }
+
+    public static async Task<string> GenerateRestaurantCodeAsync(RestaurantDbContext db)
+    {
+        const string prefix = "RST";
+        const string prefixWithDash = "RST-";
+        var existingCodes = await db.Restaurants
+            .Where(r => r.RestaurantCode != null && r.RestaurantCode.StartsWith(prefixWithDash))
+            .Select(r => r.RestaurantCode!)
+            .ToListAsync();
+
+        int maxNumber = 99; // Sequence starts from 100 (99 + 1)
+        foreach (var code in existingCodes)
+        {
+            var numPart = code.Substring(prefixWithDash.Length);
+            if (int.TryParse(numPart, out var n) && n > maxNumber)
+            {
+                maxNumber = n;
+            }
+        }
+
+        return $"{prefix}-{maxNumber + 1}";
     }
 }

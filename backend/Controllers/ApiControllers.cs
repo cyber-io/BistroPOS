@@ -256,6 +256,16 @@ public class RestaurantsController : ControllerBase
         {
             return await GetRestaurantById(extractedGuid);
         }
+
+        // Support lookup by restaurant code: e.g. "RST-100" or numeric "100"
+        var cleanCode = id.Trim().ToUpperInvariant();
+        if (!cleanCode.StartsWith("RST-") && int.TryParse(cleanCode, out _))
+        {
+            cleanCode = $"RST-{cleanCode}";
+        }
+        var byCode = await _db.Restaurants.FirstOrDefaultAsync(r => r.RestaurantCode == cleanCode);
+        if (byCode != null) return Ok(byCode);
+
         var fallback = await _db.Restaurants.FirstOrDefaultAsync(r => r.Status == "ACTIVE");
         if (fallback != null) return Ok(fallback);
         return NotFound();
@@ -315,6 +325,77 @@ public class RestaurantsController : ControllerBase
             wifiPassword = restaurant.WifiPassword,
             wifiEnabled = restaurant.WifiEnabled
         });
+    }
+
+    [Authorize(Roles = UserRoles.SuperAdmin)]
+    [HttpPost]
+    public async Task<IActionResult> CreateRestaurant([FromBody] CreateRestaurantDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Name))
+            return BadRequest(new { message = "Restaurant name is required." });
+        if (string.IsNullOrWhiteSpace(dto.Address))
+            return BadRequest(new { message = "Restaurant address is required." });
+        if (string.IsNullOrWhiteSpace(dto.Phone))
+            return BadRequest(new { message = "Contact phone is required." });
+        if (string.IsNullOrWhiteSpace(dto.Email))
+            return BadRequest(new { message = "Contact email is required." });
+
+        var restaurant = new Restaurant
+        {
+            RestaurantId = Guid.NewGuid(),
+            Name = dto.Name.Trim(),
+            Address = dto.Address.Trim(),
+            Phone = dto.Phone.Trim(),
+            Email = dto.Email.Trim().ToLowerInvariant(),
+            Logo = dto.Logo?.Trim(),
+            OpeningHours = dto.OpeningHours ?? "{\"mon\":\"09:00 - 22:00\",\"tue\":\"09:00 - 22:00\",\"wed\":\"09:00 - 22:00\",\"thu\":\"09:00 - 22:00\",\"fri\":\"09:00 - 23:00\",\"sat\":\"09:00 - 23:00\",\"sun\":\"09:00 - 22:00\"}",
+            Settings = System.Text.Json.JsonSerializer.Serialize(new { taxRate = dto.TaxRate ?? 0.05m, currency = "INR" }),
+            Status = "ACTIVE",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        _db.Restaurants.Add(restaurant);
+
+        // Auto-seed initial tables if specified
+        var tableCount = dto.InitialTableCount ?? 10;
+        if (tableCount > 0)
+        {
+            for (int i = 1; i <= Math.Min(tableCount, 50); i++)
+            {
+                _db.Tables.Add(new TableEntity
+                {
+                    TableId = Guid.NewGuid(),
+                    RestaurantId = restaurant.RestaurantId,
+                    TableNumber = i,
+                    Capacity = (i % 4 == 0) ? 6 : (i % 2 == 0) ? 2 : 4,
+                    Status = TableStatuses.Available,
+                    QrIdentifier = $"rest_{restaurant.RestaurantId.ToString("N")[..8]}_tbl_{i:D02}",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
+            }
+        }
+
+        // Auto-seed starter menu categories
+        var defaultCategories = new[] { "Starters & Appetizers", "Main Course", "Breads & Rice", "Desserts", "Beverages" };
+        int sort = 0;
+        foreach (var catName in defaultCategories)
+        {
+            _db.MenuCategories.Add(new MenuCategory
+            {
+                CategoryId = Guid.NewGuid(),
+                RestaurantId = restaurant.RestaurantId,
+                Name = catName,
+                SortOrder = sort++,
+                Status = "ACTIVE",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+        }
+
+        await _db.SaveChangesAsync();
+        return CreatedAtAction(nameof(GetRestaurantById), new { id = restaurant.RestaurantId }, restaurant);
     }
 }
 

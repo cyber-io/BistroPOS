@@ -73,6 +73,8 @@ public class Restaurant
 {
     [Key]
     public Guid RestaurantId { get; set; } = Guid.NewGuid();
+    [MaxLength(50)]
+    public string? RestaurantCode { get; set; }
     [Required, MaxLength(255)]
     public string Name { get; set; } = string.Empty;
     public string? Logo { get; set; }

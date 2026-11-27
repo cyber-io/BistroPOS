@@ -2293,7 +2293,7 @@ function AddManagerModal({ restaurants = [], defaultRestaurantId, onClose, onSuc
               <option value="">Select Hotel Outlet...</option>
               {restaurants.map(r => (
                 <option key={r.restaurantId} value={r.restaurantId}>
-                  🏨 {r.name} {r.address ? `— ${r.address.split(',')[0]}` : ''}
+                  🏨 {r.name} [{r.restaurantCode || 'RST-100'}] {r.address ? `— ${r.address.split(',')[0]}` : ''}
                 </option>
               ))}
             </select>
@@ -2675,7 +2675,7 @@ function AddStaffModal({ currentRestaurant, currentUserRole, restaurants = [], o
               >
                 {restaurants.map(r => (
                   <option key={r.restaurantId} value={r.restaurantId}>
-                    🏨 {r.name} {r.address ? `— ${r.address.split(',')[0]}` : ''}
+                    🏨 {r.name} [{r.restaurantCode || 'RST-100'}] {r.address ? `— ${r.address.split(',')[0]}` : ''}
                   </option>
                 ))}
               </select>
