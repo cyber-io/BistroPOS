@@ -280,6 +280,77 @@ public class RestaurantsController : ControllerBase
         return Ok(restaurant);
     }
 
+    [Authorize(Roles = UserRoles.SuperAdmin)]
+    [HttpPost]
+    public async Task<IActionResult> CreateRestaurant([FromBody] CreateRestaurantDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Name))
+            return BadRequest(new { message = "Restaurant name is required." });
+        if (string.IsNullOrWhiteSpace(dto.Address))
+            return BadRequest(new { message = "Restaurant address is required." });
+        if (string.IsNullOrWhiteSpace(dto.Phone))
+            return BadRequest(new { message = "Contact phone is required." });
+        if (string.IsNullOrWhiteSpace(dto.Email))
+            return BadRequest(new { message = "Contact email is required." });
+
+        var restaurant = new Restaurant
+        {
+            RestaurantId = Guid.NewGuid(),
+            Name = dto.Name.Trim(),
+            Address = dto.Address.Trim(),
+            Phone = dto.Phone.Trim(),
+            Email = dto.Email.Trim().ToLowerInvariant(),
+            Logo = dto.Logo?.Trim(),
+            OpeningHours = dto.OpeningHours ?? "{\"mon\":\"09:00 - 22:00\",\"tue\":\"09:00 - 22:00\",\"wed\":\"09:00 - 22:00\",\"thu\":\"09:00 - 22:00\",\"fri\":\"09:00 - 23:00\",\"sat\":\"09:00 - 23:00\",\"sun\":\"09:00 - 22:00\"}",
+            Settings = System.Text.Json.JsonSerializer.Serialize(new { taxRate = dto.TaxRate ?? 0.05m, currency = "INR" }),
+            Status = "ACTIVE",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        _db.Restaurants.Add(restaurant);
+
+        // Auto-seed initial tables if specified
+        var tableCount = dto.InitialTableCount ?? 10;
+        if (tableCount > 0)
+        {
+            for (int i = 1; i <= Math.Min(tableCount, 50); i++)
+            {
+                _db.Tables.Add(new TableEntity
+                {
+                    TableId = Guid.NewGuid(),
+                    RestaurantId = restaurant.RestaurantId,
+                    TableNumber = i,
+                    Capacity = (i % 4 == 0) ? 6 : (i % 2 == 0) ? 2 : 4,
+                    Status = TableStatuses.Available,
+                    QrIdentifier = $"rest_{restaurant.RestaurantId.ToString("N")[..8]}_tbl_{i:D2}",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
+            }
+        }
+
+        // Auto-seed starter menu categories
+        var defaultCategories = new[] { "Starters & Appetizers", "Main Course", "Breads & Rice", "Desserts", "Beverages" };
+        int sort = 0;
+        foreach (var catName in defaultCategories)
+        {
+            _db.MenuCategories.Add(new MenuCategory
+            {
+                CategoryId = Guid.NewGuid(),
+                RestaurantId = restaurant.RestaurantId,
+                Name = catName,
+                SortOrder = sort++,
+                Status = "ACTIVE",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+        }
+
+        await _db.SaveChangesAsync();
+        return CreatedAtAction(nameof(GetRestaurantById), new { id = restaurant.RestaurantId }, restaurant);
+    }
+
     [HttpGet("{id:guid}/wifi")]
     public async Task<IActionResult> GetWifi(Guid id)
     {
@@ -506,16 +577,9 @@ public class MenuController : ControllerBase
     [HttpGet("categories")]
     public async Task<IActionResult> GetCategories([FromQuery] Guid? restaurantId)
     {
-        var targetId = restaurantId.HasValue && restaurantId.Value != Guid.Empty
+        var targetId = (restaurantId.HasValue && restaurantId.Value != Guid.Empty)
             ? restaurantId.Value
             : UserProvisioning.DefaultRestaurantId;
-
-        // If requested outlet has no categories, safely fall back to default/active outlet
-        if (!await _db.MenuCategories.AnyAsync(c => c.RestaurantId == targetId))
-        {
-            var fallback = await _db.Restaurants.Where(r => r.Status == "ACTIVE").Select(r => (Guid?)r.RestaurantId).FirstOrDefaultAsync();
-            if (fallback.HasValue) targetId = fallback.Value;
-        }
 
         var categories = await _db.MenuCategories
             .Where(c => c.RestaurantId == targetId && c.Status == "ACTIVE")
@@ -618,16 +682,9 @@ public class MenuController : ControllerBase
     [HttpGet("items")]
     public async Task<IActionResult> GetMenuItems([FromQuery] Guid? restaurantId, [FromQuery] Guid? categoryId, [FromQuery] string? vegFilter)
     {
-        var targetId = restaurantId.HasValue && restaurantId.Value != Guid.Empty
+        var targetId = (restaurantId.HasValue && restaurantId.Value != Guid.Empty)
             ? restaurantId.Value
             : UserProvisioning.DefaultRestaurantId;
-
-        // If requested outlet has no items, safely fall back to default/active outlet
-        if (!await _db.MenuItems.AnyAsync(m => m.RestaurantId == targetId))
-        {
-            var fallback = await _db.Restaurants.Where(r => r.Status == "ACTIVE").Select(r => (Guid?)r.RestaurantId).FirstOrDefaultAsync();
-            if (fallback.HasValue) targetId = fallback.Value;
-        }
 
         var query = _db.MenuItems.Include(m => m.Category).Where(m => m.RestaurantId == targetId);
 

@@ -11,23 +11,20 @@ import CartDrawer from './components/common/CartDrawer';
 
 // Pages: HomePage is loaded eagerly for instant first contentful paint
 import HomePage from './pages/public/HomePage';
-
-// Other route components are code-split & lazy-loaded on demand to reduce initial bundle size
-const PublicMenuPage = lazy(() => import('./pages/public/PublicMenuPage'));
-const DeliveryPage = lazy(() => import('./pages/public/DeliveryPage'));
-const TakeawayPage = lazy(() => import('./pages/public/TakeawayPage'));
-const BookTablePage = lazy(() => import('./pages/public/BookTablePage'));
-const TrackOrderPage = lazy(() => import('./pages/public/TrackOrderPage'));
-const CustomerProfilePage = lazy(() => import('./pages/public/CustomerProfilePage'));
-const QrDineInPage = lazy(() => import('./pages/dineIn/QrDineInPage'));
-const KitchenDashboard = lazy(() => import('./pages/kitchen/KitchenDashboard'));
-const WaiterDashboard = lazy(() => import('./pages/waiter/WaiterDashboard'));
-const ReceptionistDashboard = lazy(() => import('./pages/receptionist/ReceptionistDashboard'));
-const LoginPage = lazy(() => import('./pages/auth/LoginPage'));
-const CustomerLoginPage = lazy(() => import('./pages/auth/CustomerLoginPage'));
-const PosWorkspace = lazy(() => import('./pages/pos/PosWorkspace'));
-const SuperAdminDashboard = lazy(() => import('./pages/admin/SuperAdminDashboard'));
-
+import PublicMenuPage from './pages/public/PublicMenuPage';
+import DeliveryPage from './pages/public/DeliveryPage';
+import TakeawayPage from './pages/public/TakeawayPage';
+import BookTablePage from './pages/public/BookTablePage';
+import TrackOrderPage from './pages/public/TrackOrderPage';
+import CustomerProfilePage from './pages/public/CustomerProfilePage';
+import QrDineInPage from './pages/dineIn/QrDineInPage';
+import KitchenDashboard from './pages/kitchen/KitchenDashboard';
+import WaiterDashboard from './pages/waiter/WaiterDashboard';
+import ReceptionistDashboard from './pages/receptionist/ReceptionistDashboard';
+import LoginPage from './pages/auth/LoginPage';
+import CustomerLoginPage from './pages/auth/CustomerLoginPage';
+import PosWorkspace from './pages/pos/PosWorkspace';
+import SuperAdminDashboard from './pages/admin/SuperAdminDashboard';
 import PosShell from './components/pos/PosShell';
 import { Spinner } from './components/pos/PosUI';
 import './styles/website.css';
@@ -240,9 +237,6 @@ function MainApp() {
               </RoleRoute>
             }
           />
-          <Route path="/admin-panel" element={<Navigate to="/admin" replace />} />
-          <Route path="/admin-dashboard" element={<Navigate to="/admin" replace />} />
-          <Route path="/adminpanel" element={<Navigate to="/admin" replace />} />
 
           {/* Smart Portal & Dashboard Route Redirectors */}
           <Route path="/portal" element={<SmartPortalRedirect />} />

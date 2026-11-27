@@ -332,7 +332,6 @@ export const api = {
 
   getRestaurants: () => request('/restaurants'),
   createRestaurant: details => request('/restaurants', { method: 'POST', body: details }),
-  deleteRestaurant: id => request(`/restaurants/${id}`, { method: 'DELETE' }),
   getRestaurant: async () => {
     const data = await request(`/restaurants/${restaurantId}`);
     restaurantId = data.restaurantId;
@@ -344,10 +343,55 @@ export const api = {
     };
     return restaurantCache;
   },
-  getTables: () => request(`/tables${query({ restaurantId })}`),
-  getTableById: async tableId => {
-    if (/^\d+$/.test(String(tableId))) return (await api.getTables()).find(table => table.tableNumber === Number(tableId)) || null;
-    return request(`/tables/${encodeURIComponent(tableId)}`);
+  getTables: (targetRestaurantId) => request(`/tables${query({ restaurantId: targetRestaurantId || restaurantId })}`),
+  getTableById: async (tableId, targetRestaurantId) => {
+    if (!tableId) return null;
+    const resId = targetRestaurantId || restaurantId;
+    if (/^\d+$/.test(String(tableId))) {
+      try {
+        const tables = await api.getTables(resId);
+        const found = tables.find(t => t.tableNumber === Number(tableId) || String(t.tableId).toLowerCase() === String(tableId).toLowerCase());
+        if (found) return found;
+      } catch {}
+    }
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(tableId))) {
+      try {
+        const table = await request(`/tables/${encodeURIComponent(tableId)}`);
+        if (table) return table;
+      } catch {}
+    }
+    try {
+      const tables = await api.getTables(resId);
+      return tables.find(t =>
+        String(t.tableId).toLowerCase() === String(tableId).toLowerCase() ||
+        String(t.tableNumber) === String(tableId) ||
+        String(t.qrIdentifier).toLowerCase() === String(tableId).toLowerCase()
+      ) || null;
+    } catch {
+      return null;
+    }
+  },
+  createTable: data => request(`/tables${query({ restaurantId: data?.restaurantId || restaurantId })}`, { method: 'POST', body: data }),
+  updateTable: (id, data) => request(`/tables/${id}`, { method: 'PUT', body: data }),
+  deleteTable: id => request(`/tables/${id}`, { method: 'DELETE' }),
+  getTableSession: async tableId => {
+    try {
+      const data = await request(`/tables/${encodeURIComponent(tableId)}/session`);
+      if (data && Array.isArray(data.orders)) {
+        data.orders = data.orders.map(normalizeOrder);
+      }
+      return data;
+    } catch {
+      return null;
+    }
+  },
+  getTableOrders: async tableId => {
+    try {
+      const sess = await api.getTableSession(tableId);
+      return Array.isArray(sess?.orders) ? sess.orders : [];
+    } catch {
+      return [];
+    }
   },
   getTableSession: async () => null,
   closeTableSession: async () => ({ success: true }),
@@ -571,8 +615,7 @@ export const api = {
   getAllManagers: () => request('/users/managers'),
   getPlatformSummary: () => request('/restaurants/summary'),
   updateRestaurantStatus: (id, status) => request(`/restaurants/${id}/status`, { method: 'PUT', body: { status } }),
-  createStaffUser: details => request(`/users${query({ restaurantId: details?.restaurantId || restaurantId })}`, { method: 'POST', body: details }),
-  updateStaffUser: (userId, details) => request(`/users/${userId}`, { method: 'PUT', body: details }),
+  createStaffUser: details => request(`/users${query({ restaurantId })}`, { method: 'POST', body: details }),
   deleteStaffUser: userId => request(`/users/${userId}`, { method: 'DELETE' }),
   changeMyPassword: ({ currentPassword, newPassword }) => request('/users/me/password', { method: 'PUT', body: { currentPassword, newPassword } }),
   updateUserPassword: (userId, newPassword) => request(`/users/${userId}/password`, { method: 'PUT', body: { newPassword } }),

@@ -18,9 +18,10 @@ export default function LoginPage() {
     const defaultPath = userRole === 'SUPER_ADMIN' ? '/admin' : userRole === 'KITCHEN' ? '/kitchen' : userRole === 'WAITER' ? '/waiter' : ['RECEPTIONIST', 'MANAGER'].includes(userRole) ? '/pos' : '/menu';
     if (!redirect || !redirect.startsWith('/') || redirect.startsWith('//')) return defaultPath;
     const staffPath = redirect.startsWith('/pos') || redirect.startsWith('/receptionist');
-    if (staffPath && !['RECEPTIONIST', 'MANAGER'].includes(userRole)) return defaultPath;
-    if (redirect.startsWith('/kitchen') && userRole !== 'KITCHEN') return defaultPath;
-    if (redirect.startsWith('/waiter') && userRole !== 'WAITER') return defaultPath;
+    if (staffPath && !['RECEPTIONIST', 'MANAGER', 'SUPER_ADMIN'].includes(userRole)) return defaultPath;
+    if (redirect.startsWith('/kitchen') && !['KITCHEN', 'SUPER_ADMIN'].includes(userRole)) return defaultPath;
+    if (redirect.startsWith('/waiter') && !['WAITER', 'SUPER_ADMIN'].includes(userRole)) return defaultPath;
+    if (redirect.startsWith('/admin') && userRole !== 'SUPER_ADMIN') return defaultPath;
     return redirect;
   };
 
