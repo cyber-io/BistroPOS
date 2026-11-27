@@ -1,13 +1,40 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
-  AlertCircle, ArrowUpRight, Building2, CheckCircle2, CircleCheck, Cloud, LayoutGrid,
-  LogOut, Mail, MapPin, MessageSquare, Moon, PanelRightOpen, Pencil, Phone, Plus, RefreshCw, Search,
-  Store, Sun, Trash2, UserMinus, UserPlus, Users,
+  AlertCircle,
+  Building2,
+  CheckCircle2,
+  LayoutGrid,
+  LogOut,
+  Mail,
+  MapPin,
+  MessageSquare,
+  Moon,
+  Pencil,
+  Phone,
+  Plus,
+  RefreshCw,
+  Search,
+  Store,
+  Sun,
+  Trash2,
+  Users,
 } from 'lucide-react';
+
 import { useAuth } from '../../context/AuthContext';
-import { api, getActiveRestaurantId, setActiveRestaurantId } from '../../services/api';
-import { AddManagerModal, AddRestaurantModal, EditManagerModal, EditRestaurantModal } from './AdminForms';
+import {
+  api,
+  setActiveRestaurantId,
+} from '../../services/api';
+
+import {
+  AddManagerModal,
+  AddRestaurantModal,
+  EditManagerModal,
+  EditRestaurantModal,
+} from './AdminForms';
+
 import SmsNotificationsPanel from './SmsNotificationsPanel';
 import '../../styles/pos.css';
 
@@ -15,28 +42,74 @@ export default function SuperAdminDashboard() {
   const { currentUser, logout } = useAuth();
   const navigate = useNavigate();
 
-  const [activeTab, setActiveTab] = useState('restaurants'); // 'restaurants' | 'managers' | 'platform'
-  const [dark, setDark] = useState(() => localStorage.getItem('bistro_pos_theme') === 'dark');
+  const [activeTab, setActiveTab] = useState('restaurants');
+  const [dark, setDark] = useState(
+    () => localStorage.getItem('bistro_pos_theme') === 'dark'
+  );
+
   const [loading, setLoading] = useState(true);
+  const [restaurants, setRestaurants] = useState([]);
+  const [managers, setManagers] = useState([]);
+
   const [summary, setSummary] = useState({
     totalRestaurants: 0,
     activeRestaurants: 0,
     totalTables: 0,
     totalManagers: 0,
-    totalOrders: 0
+    totalOrders: 0,
   });
-  const [restaurants, setRestaurants] = useState([]);
-  const [managers, setManagers] = useState([]);
+
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
+  const [notification, setNotification] = useState(null);
 
-  // Modals
   const [showAddRestaurant, setShowAddRestaurant] = useState(false);
   const [showAddManager, setShowAddManager] = useState(false);
-  const [selectedRestaurantForManager, setSelectedRestaurantForManager] = useState(null);
-  const [showSelfPassword, setShowSelfPassword] = useState(false);
-  const [selectedUserForPassword, setSelectedUserForPassword] = useState(null);
-  const [notification, setNotification] = useState(null);
+  const [selectedRestaurantForManager, setSelectedRestaurantForManager] =
+    useState(null);
+
+  const [editingRestaurant, setEditingRestaurant] = useState(null);
+  const [editingManager, setEditingManager] = useState(null);
+
+  const [updatingId, setUpdatingId] = useState(null);
+
+  const showToast = useCallback((message, type = 'success') => {
+    setNotification({ message, type });
+    window.setTimeout(() => setNotification(null), 4000);
+  }, []);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+
+    try {
+      const [summaryResult, restaurantResult, managerResult] =
+        await Promise.all([
+          api.getPlatformSummary().catch(() => ({})),
+          api.getRestaurants().catch(() => []),
+          api.getAllManagers().catch(() => []),
+        ]);
+
+      if (summaryResult && typeof summaryResult === 'object') {
+        setSummary((previous) => ({
+          ...previous,
+          ...summaryResult,
+        }));
+      }
+
+      setRestaurants(
+        Array.isArray(restaurantResult) ? restaurantResult : []
+      );
+
+      setManagers(
+        Array.isArray(managerResult) ? managerResult : []
+      );
+    } catch (error) {
+      console.error('Failed to load super admin data:', error);
+      showToast('Unable to load dashboard data.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [showToast]);
 
   useEffect(() => {
     localStorage.setItem('bistro_pos_theme', dark ? 'dark' : 'light');
@@ -44,604 +117,628 @@ export default function SuperAdminDashboard() {
     document.documentElement.classList.toggle('pos-dark', dark);
   }, [dark]);
 
-  const loadData = async () => {
-    try {
-      setLoading(true);
-      const [summaryRes, restList, managerList] = await Promise.all([
-        api.getPlatformSummary().catch(() => ({})),
-        api.getRestaurants().catch(() => []),
-        api.getAllManagers().catch(() => [])
-      ]);
-
-      if (summaryRes && typeof summaryRes === 'object') {
-        setSummary(prev => ({ ...prev, ...summaryRes }));
-      }
-      if (Array.isArray(restList)) {
-        setRestaurants(restList);
-      }
-      if (Array.isArray(managerList)) {
-        setManagers(managerList);
-      }
-    } catch (err) {
-      console.error('Failed to load super admin data:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
     loadData();
-  }, []);
-
-  const showToast = (message, type = 'success') => {
-    setNotification({ message, type });
-    setTimeout(() => setNotification(null), 4000);
-  };
-
-  const handleOpenRestaurantPortal = (restaurant) => {
-    setActiveRestaurantId(restaurant.restaurantId);
-    showToast(`Switched active workspace to ${restaurant.name}`, 'info');
-    navigate('/pos');
-  };
-
-  const handleToggleRestaurantStatus = async (restaurant) => {
-    const newStatus = restaurant.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
-    try {
-      await api.updateRestaurantStatus(restaurant.restaurantId, newStatus);
-      showToast(`${restaurant.name} marked as ${newStatus}`, 'success');
-      loadData();
-    } catch (err) {
-      showToast(err.message || 'Failed to update status', 'error');
-    }
-  };
+  }, [loadData]);
 
   const filteredRestaurants = useMemo(() => {
-    return restaurants.filter(r => {
-      const matchSearch = String(r.name || '').toLowerCase().includes(search.toLowerCase()) ||
-        String(r.email || '').toLowerCase().includes(search.toLowerCase()) ||
-        String(r.address || '').toLowerCase().includes(search.toLowerCase());
-      const matchStatus = statusFilter === 'ALL' || r.status === statusFilter;
-      return matchSearch && matchStatus;
+    const query = search.toLowerCase().trim();
+
+    return restaurants.filter((restaurant) => {
+      const matchesSearch =
+        !query ||
+        [
+          restaurant.name,
+          restaurant.email,
+          restaurant.address,
+          restaurant.phone,
+        ].some((value) =>
+          String(value || '').toLowerCase().includes(query)
+        );
+
+      const matchesStatus =
+        statusFilter === 'ALL' ||
+        restaurant.status === statusFilter;
+
+      return matchesSearch && matchesStatus;
     });
   }, [restaurants, search, statusFilter]);
 
   const filteredManagers = useMemo(() => {
-    return managers.filter(m => {
-      return String(m.name || '').toLowerCase().includes(search.toLowerCase()) ||
-        String(m.email || '').toLowerCase().includes(search.toLowerCase()) ||
-        String(m.restaurantName || '').toLowerCase().includes(search.toLowerCase());
-    });
+    const query = search.toLowerCase().trim();
+
+    return managers.filter((manager) =>
+      [
+        manager.name,
+        manager.email,
+        manager.restaurantName,
+      ].some((value) =>
+        String(value || '').toLowerCase().includes(query)
+      )
+    );
   }, [managers, search]);
 
+  const handleToggleStatus = async (restaurant) => {
+    const newStatus =
+      restaurant.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+
+    try {
+      setUpdatingId(restaurant.restaurantId);
+
+      await api.updateRestaurantStatus(
+        restaurant.restaurantId,
+        newStatus
+      );
+
+      showToast(
+        `${restaurant.name} marked as ${newStatus}.`
+      );
+
+      await loadData();
+    } catch (error) {
+      showToast(
+        error.message || 'Failed to update restaurant status.',
+        'error'
+      );
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
+  const handleDeleteRestaurant = async (restaurant) => {
+    const confirmed = window.confirm(
+      `Are you sure you want to delete ${restaurant.name}? This action may permanently remove its data.`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setUpdatingId(restaurant.restaurantId);
+
+      await api.deleteRestaurant(restaurant.restaurantId);
+
+      showToast('Restaurant deleted successfully.');
+      await loadData();
+    } catch (error) {
+      showToast(
+        error.message || 'Failed to delete restaurant.',
+        'error'
+      );
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
+  const handleOpenRestaurant = (restaurant) => {
+    setActiveRestaurantId(restaurant.restaurantId);
+    navigate('/pos');
+  };
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+      navigate('/login');
+    } catch (error) {
+      console.error('Logout failed:', error);
+    }
+  };
+
+  const tabs = [
+    { id: 'restaurants', label: 'Restaurants', icon: Building2 },
+    { id: 'managers', label: 'Managers', icon: Users },
+    { id: 'platform', label: 'Platform', icon: LayoutGrid },
+    { id: 'sms', label: 'SMS & Notifications', icon: MessageSquare },
+  ];
+
   return (
-    <dl className="admin-summary" aria-label="Platform overview">
-      {metrics.map(([label, value, Icon]) => (
-        <div className="admin-metric" key={label}>
-          <dt>{label}<span><Icon size={16} aria-hidden="true" /></span></dt>
-          <dd>{value ?? '—'}</dd>
+    <div className="pos-app admin-dashboard">
+      <header
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 16,
+          padding: '18px 24px',
+          borderBottom: '1px solid var(--p-border)',
+          background: 'var(--p-surface)',
+        }}
+      >
+        <div>
+          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800 }}>
+            BistroPOS
+          </h1>
+          <p style={{ margin: '4px 0 0', color: 'var(--p-muted)', fontSize: 12 }}>
+            Super Admin Dashboard
+          </p>
         </div>
-      ))}
-    </dl>
-  );
-}
 
-function OutletCard({ outlet, managers, featured, onInspect, onAssign, onEdit, onDelete, onRemoveManager, onOpen, onToggle, updating, headingRef }) {
-  const { name, status, address, phone, email } = outlet;
-  const contacts = [
-    ['Address', address, MapPin],
-    ['Phone', phone, Phone],
-    ['Email', email, Mail],
-  ].filter(([, value]) => value);
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>
+            {currentUser?.name || 'Super Admin'}
+          </span>
 
-  return (
-    <article className={`admin-outlet${featured ? ' admin-outlet--detail' : ''}`} aria-label={name}>
-      <div className="admin-outlet-info">
-        <header className="admin-outlet-heading">
-          <span className="admin-avatar" aria-hidden="true">{initials(name)}</span>
-          <div className="admin-outlet-title">
-            <div className="admin-name-line">
-              <h2 ref={headingRef} tabIndex={featured ? -1 : undefined}>{name}</h2>
-              {onInspect && (
-                <button type="button" className="admin-inspect" onClick={onInspect}
-                  aria-label={`Show details for ${name}`} title="Show outlet details">
-                  <PanelRightOpen size={15} />
-                </button>
-              )}
+          <button
+            type="button"
+            className="pos-icon-button"
+            title="Toggle theme"
+            onClick={() => setDark((value) => !value)}
+          >
+            {dark ? <Sun size={17} /> : <Moon size={17} />}
+          </button>
+
+          <button
+            type="button"
+            className="pos-icon-button"
+            title="Logout"
+            onClick={handleLogout}
+          >
+            <LogOut size={17} />
+          </button>
+        </div>
+      </header>
+
+      <main style={{ padding: 24 }}>
+        {notification && (
+          <div
+            role="status"
+            style={{
+              padding: '12px 16px',
+              marginBottom: 18,
+              borderRadius: 10,
+              background:
+                notification.type === 'error'
+                  ? '#fee2e2'
+                  : '#dcfce7',
+              color:
+                notification.type === 'error'
+                  ? '#991b1b'
+                  : '#166534',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+            }}
+          >
+            {notification.type === 'error' ? (
+              <AlertCircle size={17} />
+            ) : (
+              <CheckCircle2 size={17} />
+            )}
+            {notification.message}
+          </div>
+        )}
+
+        <section
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+            gap: 14,
+            marginBottom: 24,
+          }}
+        >
+          {[
+            ['Total Restaurants', summary.totalRestaurants],
+            ['Active Restaurants', summary.activeRestaurants],
+            ['Total Tables', summary.totalTables],
+            ['Total Managers', summary.totalManagers],
+            ['Total Orders', summary.totalOrders],
+          ].map(([label, value]) => (
+            <div
+              key={label}
+              style={{
+                padding: 18,
+                border: '1px solid var(--p-border)',
+                borderRadius: 12,
+                background: 'var(--p-surface)',
+              }}
+            >
+              <p style={{ margin: 0, fontSize: 12, color: 'var(--p-muted)' }}>
+                {label}
+              </p>
+              <h2 style={{ margin: '8px 0 0', fontSize: 25 }}>
+                {value ?? 0}
+              </h2>
             </div>
-            <Status value={status} outlet />
-          </div>
-          <div className="admin-head-actions">
-            <button type="button" className="admin-status-action" onClick={() => onDelete(outlet)}
-              disabled={updating} aria-label={`Delete ${name}`} title="Delete restaurant"
-              style={{ color: '#e11d48', borderColor: 'rgba(225, 29, 72, 0.28)' }}>
-              <Trash2 size={12} /> Delete
-            </button>
-            <button type="button" className="admin-status-action" onClick={() => onEdit(outlet)}
-              aria-label={`Edit ${name}`} title="Edit restaurant">
-              <Pencil size={12} /> Edit
-            </button>
-            <button type="button" className="admin-status-action" onClick={() => onToggle(outlet)}
-              disabled={updating} aria-label={`${status === 'ACTIVE' ? 'Suspend' : 'Activate'} ${name}`}>
-              {status === 'ACTIVE' ? 'Suspend' : 'Activate'}
-            </button>
-          </div>
+          ))}
+        </section>
 
-          {/* Search & Refresh */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {activeTab !== 'platform' && (
-              <div style={{ position: 'relative', minWidth: 260 }}>
-                <Search size={14} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--p-muted)' }} />
+        <nav
+          style={{
+            display: 'flex',
+            gap: 8,
+            flexWrap: 'wrap',
+            marginBottom: 22,
+          }}
+        >
+          {tabs.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              className={`pos-button ${activeTab === id ? 'primary' : ''}`}
+              onClick={() => {
+                setActiveTab(id);
+                setSearch('');
+              }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 7,
+              }}
+            >
+              <Icon size={15} />
+              {label}
+            </button>
+          ))}
+        </nav>
+
+        {activeTab === 'restaurants' && (
+          <section>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 12,
+                marginBottom: 18,
+              }}
+            >
+              <h2 style={{ margin: 0 }}>Restaurant Outlets</h2>
+
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <input
                   className="pos-input"
-                  style={{ paddingLeft: 32, fontSize: 13, height: 38, borderRadius: 10 }}
-                  placeholder={activeTab === 'restaurants' ? "Search restaurant by name, city…" : "Search managers…"}
+                  placeholder="Search restaurants..."
                   value={search}
-                  onChange={e => setSearch(e.target.value)}
+                  onChange={(event) => setSearch(event.target.value)}
+                  style={{ minWidth: 210 }}
                 />
-              </div>
-            )}
 
-            {activeTab === 'restaurants' && (
-              <select
-                className="pos-select"
-                value={statusFilter}
-                onChange={e => setStatusFilter(e.target.value)}
-                style={{ height: 38, borderRadius: 10, fontSize: 13 }}
-              >
-                <option value="ALL">All Status</option>
-                <option value="ACTIVE">Active Outlets</option>
-                <option value="INACTIVE">Suspended</option>
-              </select>
-            )}
-
-            <button
-              onClick={loadData}
-              className="pos-icon-button"
-              title="Refresh Data"
-              disabled={loading}
-              style={{ width: 38, height: 38, borderRadius: 10, border: '1px solid var(--p-border)', background: 'var(--p-surface)' }}
-            >
-              <RefreshCw size={15} className={loading ? 'pos-spin' : ''} />
-            </button>
-          </div>
-        </div>
-
-        {/* Tab 1: Restaurants List */}
-        {activeTab === 'restaurants' && (
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))',
-            gap: 18
-          }}>
-            {filteredRestaurants.map(r => {
-              const assignedGMs = managers.filter(m => m.restaurantId === r.restaurantId);
-              return (
-                <div
-                  key={r.restaurantId}
-                  style={{
-                    backgroundColor: 'var(--p-surface, #ffffff)',
-                    borderRadius: 14,
-                    border: '1px solid var(--p-border, #e2e8f0)',
-                    padding: 22,
-                    boxShadow: '0 2px 6px rgba(0,0,0,0.03)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'space-between',
-                    position: 'relative'
-                  }}
+                <select
+                  className="pos-select"
+                  value={statusFilter}
+                  onChange={(event) => setStatusFilter(event.target.value)}
                 >
-                  <div>
-                    {/* Header */}
-                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 14 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <div style={{
-                          width: 42,
-                          height: 42,
-                          borderRadius: 10,
-                          background: 'linear-gradient(135deg, rgba(79, 70, 229, 0.15), rgba(6, 182, 212, 0.15))',
-                          color: '#4f46e5',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontWeight: 700,
-                          fontSize: 18
-                        }}>
-                          {r.name?.charAt(0) || 'R'}
-                        </div>
-                        <div>
-                          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--p-text)' }}>
-                            {r.name}
-                          </h3>
-                          <span style={{
-                            display: 'inline-block',
-                            marginTop: 3,
-                            fontSize: 10,
-                            fontWeight: 700,
-                            padding: '1px 6px',
-                            borderRadius: 6,
-                            background: r.status === 'ACTIVE' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
-                            color: r.status === 'ACTIVE' ? '#10b981' : '#ef4444'
-                          }}>
-                            ● {r.status}
-                          </span>
-                        </div>
-                      </div>
+                  <option value="ALL">All Status</option>
+                  <option value="ACTIVE">Active</option>
+                  <option value="INACTIVE">Inactive</option>
+                </select>
 
-                      <button
-                        onClick={() => handleToggleRestaurantStatus(r)}
-                        style={{
-                          background: 'transparent',
-                          border: 'none',
-                          fontSize: 11,
-                          fontWeight: 600,
-                          color: r.status === 'ACTIVE' ? 'var(--p-muted)' : '#10b981',
-                          cursor: 'pointer',
-                          textDecoration: 'underline'
-                        }}
-                      >
-                        {r.status === 'ACTIVE' ? 'Suspend' : 'Activate'}
-                      </button>
-                    </div>
-
-                    {/* Contact Details */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, color: 'var(--p-muted)', marginBottom: 16 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <MapPin size={13} style={{ flexShrink: 0 }} />
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {r.address || 'Address not provided'}
-                        </span>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <Phone size={13} style={{ flexShrink: 0 }} />
-                        <span>{r.phone || 'Phone not set'}</span>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <Mail size={13} style={{ flexShrink: 0 }} />
-                        <span>{r.email || 'Email not set'}</span>
-                      </div>
-                    </div>
-
-                    {/* Assigned Managers */}
-                    <div style={{
-                      padding: '10px 12px',
-                      background: 'var(--p-bg, #f8fafc)',
-                      borderRadius: 10,
-                      marginBottom: 16,
-                      fontSize: 12
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                        <strong style={{ fontSize: 11, color: 'var(--p-muted)', textTransform: 'uppercase' }}>
-                          Assigned Owner / GM:
-                        </strong>
-                        {assignedGMs.length === 0 && (
-                          <button
-                            onClick={() => {
-                              setSelectedRestaurantForManager(r);
-                              setShowAddManager(true);
-                            }}
-                            style={{
-                              background: 'transparent',
-                              border: 'none',
-                              color: 'var(--p-blue, #2563eb)',
-                              fontSize: 11,
-                              fontWeight: 600,
-                              cursor: 'pointer'
-                            }}
-                          >
-                            + Assign GM
-                          </button>
-                        )}
-                      </div>
-                      {assignedGMs.length > 0 ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                          {assignedGMs.map(gm => (
-                            <div key={gm.userId} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                              <span style={{ fontWeight: 600, color: 'var(--p-text)' }}>{gm.name}</span>
-                              <span style={{ color: 'var(--p-muted)', fontSize: 11 }}>{gm.email}</span>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <span style={{ color: '#f59e0b', fontSize: 11, fontWeight: 500 }}>
-                          ⚠ No General Manager assigned yet
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Actions */}
-                  <div style={{ display: 'flex', gap: 8, paddingTop: 12, borderTop: '1px solid var(--p-border)' }}>
-                    <button
-                      type="button"
-                      style={{
-                        flex: 1,
-                        padding: '9px 14px',
-                        fontSize: 12,
-                        fontWeight: 700,
-                        justifyContent: 'center',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 8,
-                        borderRadius: 10,
-                        background: '#1e40af',
-                        color: '#ffffff',
-                        border: '2px solid #3b82f6',
-                        boxShadow: '0 2px 8px rgba(30, 64, 175, 0.35)',
-                        cursor: 'pointer',
-                        letterSpacing: '0.01em',
-                        transition: 'all 0.15s ease'
-                      }}
-                      onClick={() => handleOpenRestaurantPortal(r)}
-                    >
-                      <Store size={15} style={{ color: '#ffffff', flexShrink: 0 }} />
-                      <span style={{ color: '#ffffff', fontWeight: 700 }}>Open Restaurant Workspace</span>
-                    </button>
-                    <button
-                      type="button"
-                      style={{
-                        padding: '9px 14px',
-                        fontSize: 12,
-                        fontWeight: 650,
-                        borderRadius: 10,
-                        border: '1.5px solid var(--p-border, #cbd5e1)',
-                        background: 'var(--p-surface, #ffffff)',
-                        color: 'var(--p-text, #0f172a)',
-                        cursor: 'pointer',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 6
-                      }}
-                      title="Assign Hotel Manager"
-                      onClick={() => {
-                        setSelectedRestaurantForManager(r);
-                        setShowAddManager(true);
-                      }}
-                    >
-                      <Plus size={14} /> GM
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-
-            {filteredRestaurants.length === 0 && (
-              <div style={{
-                gridColumn: '1 / -1',
-                padding: '48px 24px',
-                textAlign: 'center',
-                background: 'var(--p-surface)',
-                borderRadius: 14,
-                border: '1px dashed var(--p-border)'
-              }}>
-                <Building2 size={40} style={{ color: 'var(--p-muted)', margin: '0 auto 12px' }} />
-                <h3 style={{ margin: '0 0 6px', fontWeight: 650 }}>No restaurants found</h3>
-                <p style={{ margin: '0 0 16px', color: 'var(--p-muted)', fontSize: 13 }}>
-                  Create your first client restaurant to get started.
-                </p>
                 <button
+                  type="button"
+                  className="pos-button"
+                  onClick={loadData}
+                  disabled={loading}
+                >
+                  <RefreshCw size={15} />
+                </button>
+
+                <button
+                  type="button"
                   className="pos-button primary"
                   onClick={() => setShowAddRestaurant(true)}
                 >
-                  <Plus size={15} /> Add Restaurant Outlet
+                  <Plus size={15} /> Add Restaurant
                 </button>
               </div>
-            )}
-          </div>
-        )}
+            </div>
 
-        {/* Tab 2: Hotel General Managers */}
-        {activeTab === 'managers' && (
-          <div style={{
-            background: 'var(--p-surface, #ffffff)',
-            borderRadius: 14,
-            border: '1px solid var(--p-border, #e2e8f0)',
-            overflow: 'hidden',
-            boxShadow: '0 2px 6px rgba(0,0,0,0.03)'
-          }}>
-            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--p-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Restaurant Owners & General Managers</h3>
-                <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--p-muted)' }}>
-                  These client accounts have full control over their restaurant's tables, menus, and staff.
-                </p>
-              </div>
-              <button
-                className="pos-button primary"
-                style={{ padding: '6px 14px', fontSize: 12 }}
-                onClick={() => {
-                  setSelectedRestaurantForManager(null);
-                  setShowAddManager(true);
+            {loading ? (
+              <p>Loading restaurants...</p>
+            ) : filteredRestaurants.length === 0 ? (
+              <p>No restaurants found.</p>
+            ) : (
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))',
+                  gap: 16,
                 }}
               >
-                <Plus size={14} /> Assign New GM
-              </button>
-            </div>
+                {filteredRestaurants.map((restaurant) => {
+                  const assignedManagers = managers.filter(
+                    (manager) =>
+                      manager.restaurantId === restaurant.restaurantId
+                  );
 
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead>
-                <tr style={{ background: 'var(--p-bg, #f8fafc)', borderBottom: '1px solid var(--p-border)', textAlign: 'left', color: 'var(--p-muted)' }}>
-                  <th style={{ padding: '12px 20px', fontWeight: 600 }}>Manager Name</th>
-                  <th style={{ padding: '12px 20px', fontWeight: 600 }}>Assigned Property</th>
-                  <th style={{ padding: '12px 20px', fontWeight: 600 }}>Email Address</th>
-                  <th style={{ padding: '12px 20px', fontWeight: 600 }}>Mobile Number</th>
-                  <th style={{ padding: '12px 20px', fontWeight: 600 }}>Status</th>
-                  <th style={{ padding: '12px 20px', fontWeight: 600, textAlign: 'right' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredManagers.map(m => (
-                  <tr key={m.userId} style={{ borderBottom: '1px solid var(--p-border)' }}>
-                    <td style={{ padding: '14px 20px', fontWeight: 650 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <div style={{
-                          width: 32,
-                          height: 32,
-                          borderRadius: 8,
-                          background: 'rgba(59, 130, 246, 0.12)',
-                          color: '#3b82f6',
+                  const updating =
+                    updatingId === restaurant.restaurantId;
+
+                  return (
+                    <article
+                      key={restaurant.restaurantId}
+                      style={{
+                        padding: 20,
+                        border: '1px solid var(--p-border)',
+                        borderRadius: 14,
+                        background: 'var(--p-surface)',
+                      }}
+                    >
+                      <div
+                        style={{
                           display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontWeight: 700,
-                          fontSize: 13
-                        }}>
-                          {m.name?.charAt(0) || 'M'}
-                        </div>
-                        {m.name}
-                      </div>
-                    </td>
-                    <td style={{ padding: '14px 20px', color: 'var(--p-text)' }}>
-                      <span style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        padding: '3px 8px',
-                        borderRadius: 6,
-                        background: 'var(--p-bg, #f1f5f9)',
-                        fontWeight: 600,
-                        fontSize: 12
-                      }}>
-                        <Building2 size={12} /> {m.restaurantName || 'Unassigned'}
-                      </span>
-                    </td>
-                    <td style={{ padding: '14px 20px', color: 'var(--p-muted)' }}>{m.email}</td>
-                    <td style={{ padding: '14px 20px', color: 'var(--p-muted)' }}>{m.phone || '—'}</td>
-                    <td style={{ padding: '14px 20px' }}>
-                      <span style={{
-                        fontSize: 11,
-                        fontWeight: 700,
-                        padding: '2px 8px',
-                        borderRadius: 12,
-                        background: 'rgba(16, 185, 129, 0.12)',
-                        color: '#10b981'
-                      }}>
-                        ● ACTIVE
-                      </span>
-                    </td>
-                    <td style={{ padding: '14px 20px', textAlign: 'right' }}>
-                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                        <button
-                          className="pos-button small"
-                          title={`Change password for ${m.name}`}
-                          onClick={() => setSelectedUserForPassword(m)}
-                          style={{ gap: 4 }}
-                        >
-                          <KeyRound size={12} style={{ color: '#4f46e5' }} /> Password
-                        </button>
-                        <button
-                          className="pos-button small"
-                          onClick={() => {
-                            if (m.restaurantId) {
-                              setActiveRestaurantId(m.restaurantId);
-                              navigate('/pos');
-                            }
+                          justifyContent: 'space-between',
+                          gap: 10,
+                        }}
+                      >
+                        <h3 style={{ margin: 0 }}>
+                          {restaurant.name}
+                        </h3>
+
+                        <span
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 700,
+                            color:
+                              restaurant.status === 'ACTIVE'
+                                ? '#059669'
+                                : '#dc2626',
                           }}
                         >
-                          View Outlet <ArrowRight size={11} />
+                          {restaurant.status || 'UNKNOWN'}
+                        </span>
+                      </div>
+
+                      <div
+                        style={{
+                          display: 'grid',
+                          gap: 9,
+                          margin: '16px 0',
+                          color: 'var(--p-muted)',
+                          fontSize: 13,
+                        }}
+                      >
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <MapPin size={15} />
+                          {restaurant.address || 'Address not provided'}
+                        </div>
+
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <Phone size={15} />
+                          {restaurant.phone || 'Phone not provided'}
+                        </div>
+
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <Mail size={15} />
+                          {restaurant.email || 'Email not provided'}
+                        </div>
+                      </div>
+
+                      <div
+                        style={{
+                          padding: 12,
+                          borderRadius: 9,
+                          background: 'var(--p-bg)',
+                          marginBottom: 14,
+                          fontSize: 12,
+                        }}
+                      >
+                        <strong>Assigned Managers</strong>
+
+                        {assignedManagers.length ? (
+                          assignedManagers.map((manager) => (
+                            <div key={manager.userId} style={{ marginTop: 7 }}>
+                              {manager.name} — {manager.email}
+                            </div>
+                          ))
+                        ) : (
+                          <p style={{ margin: '7px 0 0' }}>
+                            No manager assigned.
+                          </p>
+                        )}
+
+                        <button
+                          type="button"
+                          className="pos-button small"
+                          style={{ marginTop: 10 }}
+                          onClick={() => {
+                            setSelectedRestaurantForManager(restaurant);
+                            setShowAddManager(true);
+                          }}
+                        >
+                          <Plus size={13} /> Assign Manager
                         </button>
                       </div>
-                    </td>
-                  </tr>
-                ))}
 
-                {filteredManagers.length === 0 && (
-                  <tr>
-                    <td colSpan={6} style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--p-muted)' }}>
-                      No managers registered yet. Click "+ Assign New GM" to create credentials for a restaurant owner.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                      <div
+                        style={{
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          gap: 7,
+                        }}
+                      >
+                        <button
+                          type="button"
+                          className="pos-button primary small"
+                          onClick={() => handleOpenRestaurant(restaurant)}
+                        >
+                          <Store size={13} /> Open Workspace
+                        </button>
+
+                        <button
+                          type="button"
+                          className="pos-button small"
+                          onClick={() => setEditingRestaurant(restaurant)}
+                        >
+                          <Pencil size={13} /> Edit
+                        </button>
+
+                        <button
+                          type="button"
+                          className="pos-button small"
+                          disabled={updating}
+                          onClick={() => handleToggleStatus(restaurant)}
+                        >
+                          {restaurant.status === 'ACTIVE' ? 'Suspend' : 'Activate'}
+                        </button>
+
+                        <button
+                          type="button"
+                          className="pos-button small"
+                          disabled={updating}
+                          onClick={() => handleDeleteRestaurant(restaurant)}
+                          style={{ color: '#e11d48' }}
+                        >
+                          <Trash2 size={13} /> Delete
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </section>
         )}
 
-        {/* Tab 3: Client Delivery Workflow */}
-        {activeTab === 'platform' && (
-          <div style={{ maxWidth: 840, margin: '0 auto' }}>
-            {/* Delivery Workflow Guide */}
-            <div style={{
-              background: 'var(--p-surface, #ffffff)',
-              borderRadius: 14,
-              border: '1px solid var(--p-border, #e2e8f0)',
-              padding: 28,
-              boxShadow: '0 2px 6px rgba(0,0,0,0.03)'
-            }}>
-              <h3 style={{ margin: '0 0 14px', fontSize: 16, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Sparkles size={18} color="#4f46e5" />
-                Step-by-Step Delivery Flow (Developer to Client)
-              </h3>
-              <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--p-muted)', lineHeight: 1.5 }}>
-                Follow this 4-step delivery pipeline whenever you onboard a new restaurant client:
-              </p>
+        {activeTab === 'managers' && (
+          <section>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 12,
+                marginBottom: 18,
+              }}
+            >
+              <h2 style={{ margin: 0 }}>General Managers</h2>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                <div style={{ display: 'flex', gap: 14 }}>
-                  <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#4f46e5', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 750, fontSize: 13, flexShrink: 0 }}>
-                    1
-                  </div>
-                  <div>
-                    <h4 style={{ margin: 0, fontSize: 14, fontWeight: 650 }}>Create Restaurant Tenant</h4>
-                    <p style={{ margin: '3px 0 0', fontSize: 12, color: 'var(--p-muted)', lineHeight: 1.4 }}>
-                      Register the restaurant name, address, and GST rate. The system provisions an isolated tenant space.
-                    </p>
-                  </div>
-                </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  className="pos-input"
+                  placeholder="Search managers..."
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                />
 
-                <div style={{ display: 'flex', gap: 14 }}>
-                  <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#4f46e5', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 750, fontSize: 13, flexShrink: 0 }}>
-                    2
-                  </div>
-                  <div>
-                    <h4 style={{ margin: 0, fontSize: 14, fontWeight: 650 }}>Handover Manager Login</h4>
-                    <p style={{ margin: '3px 0 0', fontSize: 12, color: 'var(--p-muted)', lineHeight: 1.4 }}>
-                      Create the restaurant owner's credentials with the <code>MANAGER</code> role and send them their Welcome Portal kit (URL, login email, password).
-                    </p>
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', gap: 14 }}>
-                  <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#4f46e5', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 750, fontSize: 13, flexShrink: 0 }}>
-                    3
-                  </div>
-                  <div>
-                    <h4 style={{ margin: 0, fontSize: 14, fontWeight: 650 }}>Owner Sets Tables & Menu</h4>
-                    <p style={{ margin: '3px 0 0', fontSize: 12, color: 'var(--p-muted)', lineHeight: 1.4 }}>
-                      The restaurant owner logs in, configures their 2-seater, 4-seater, or VIP tables with custom seating capacities, prints the Table QR codes, and uploads their food menu.
-                    </p>
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', gap: 14 }}>
-                  <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#10b981', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 750, fontSize: 13, flexShrink: 0 }}>
-                    ✓
-                  </div>
-                  <div>
-                    <h4 style={{ margin: 0, fontSize: 14, fontWeight: 650, color: '#10b981' }}>Go-Live Operations</h4>
-                    <p style={{ margin: '3px 0 0', fontSize: 12, color: 'var(--p-muted)', lineHeight: 1.4 }}>
-                      Waiters log into <code>/waiter</code>, chefs log into <code>/kitchen</code>, and counter cashiers log into <code>/pos</code>. Customer scans table QR to place instant orders.
-                    </p>
-                  </div>
-                </div>
+                <button
+                  type="button"
+                  className="pos-button primary"
+                  onClick={() => {
+                    setSelectedRestaurantForManager(null);
+                    setShowAddManager(true);
+                  }}
+                >
+                  <Plus size={15} /> Add Manager
+                </button>
               </div>
             </div>
-          </div>
+
+            <div
+              style={{
+                overflowX: 'auto',
+                border: '1px solid var(--p-border)',
+                borderRadius: 12,
+              }}
+            >
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    {['Name', 'Email', 'Phone', 'Restaurant', 'Actions'].map(
+                      (heading) => (
+                        <th
+                          key={heading}
+                          style={{
+                            textAlign: 'left',
+                            padding: 14,
+                            borderBottom: '1px solid var(--p-border)',
+                          }}
+                        >
+                          {heading}
+                        </th>
+                      )
+                    )}
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {filteredManagers.map((manager) => (
+                    <tr key={manager.userId}>
+                      <td style={{ padding: 14 }}>{manager.name}</td>
+                      <td style={{ padding: 14 }}>{manager.email}</td>
+                      <td style={{ padding: 14 }}>{manager.phone || '—'}</td>
+                      <td style={{ padding: 14 }}>
+                        {manager.restaurantName || '—'}
+                      </td>
+                      <td style={{ padding: 14 }}>
+                        <button
+                          type="button"
+                          className="pos-button small"
+                          onClick={() => setEditingManager(manager)}
+                        >
+                          <Pencil size={13} /> Edit
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+
+                  {filteredManagers.length === 0 && (
+                    <tr>
+                      <td colSpan={5} style={{ padding: 20, textAlign: 'center' }}>
+                        No managers found.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
+        {activeTab === 'platform' && (
+          <section style={{ maxWidth: 850 }}>
+            <h2>Platform Delivery Workflow</h2>
+
+            <div
+              style={{
+                padding: 22,
+                border: '1px solid var(--p-border)',
+                borderRadius: 14,
+                background: 'var(--p-surface)',
+              }}
+            >
+              <ol style={{ lineHeight: 2 }}>
+                <li>
+                  <strong>Create Restaurant:</strong> Register the restaurant
+                  and provision its tenant.
+                </li>
+                <li>
+                  <strong>Assign Manager:</strong> Create the manager account
+                  and provide login credentials.
+                </li>
+                <li>
+                  <strong>Configure Restaurant:</strong> The manager configures
+                  tables, menu items, and restaurant settings.
+                </li>
+                <li>
+                  <strong>Go Live:</strong> Staff use their respective portals
+                  to manage orders and restaurant operations.
+                </li>
+              </ol>
+            </div>
+          </section>
+        )}
+
+        {activeTab === 'sms' && (
+          <section>
+            <SmsNotificationsPanel />
+          </section>
         )}
       </main>
 
-      {/* Add Restaurant Modal */}
       {showAddRestaurant && (
         <AddRestaurantModal
           onClose={() => setShowAddRestaurant(false)}
-          onCreated={(newRes) => {
+          onCreated={async (restaurant) => {
             setShowAddRestaurant(false);
-            showToast(`Restaurant ${newRes.name} onboarded successfully!`, 'success');
-            loadData();
+            showToast(
+              `${restaurant.name} created successfully.`
+            );
+            await loadData();
           }}
         />
       )}
 
-      {/* Add Manager Modal */}
       {showAddManager && (
         <AddManagerModal
           restaurants={restaurants}
@@ -650,466 +747,38 @@ function OutletCard({ outlet, managers, featured, onInspect, onAssign, onEdit, o
             setShowAddManager(false);
             setSelectedRestaurantForManager(null);
           }}
-          onCreated={(newManager) => {
+          onCreated={async (manager) => {
             setShowAddManager(false);
             setSelectedRestaurantForManager(null);
-            showToast(`General Manager account created for ${newManager.name}!`, 'success');
-            loadData();
+            showToast(
+              `Manager ${manager.name} created successfully.`
+            );
+            await loadData();
           }}
         />
       )}
-      {/* Change Password Modal (For Self or Manager) */}
-      {(showSelfPassword || selectedUserForPassword) && (
-        <ChangePasswordModal
-          user={selectedUserForPassword || currentUser}
-          isSelf={showSelfPassword}
-          onClose={() => {
-            setShowSelfPassword(false);
-            setSelectedUserForPassword(null);
-          }}
-          onSuccess={(msg) => {
-            showToast(msg, 'success');
-          }}
-        />
-      )}
-    </div>
-  );
-}
 
-// Standalone AddRestaurantModal with >= 24px padding
-function AddRestaurantModal({ onClose, onCreated }) {
-  const [form, setForm] = useState({
-    name: '',
-    address: '',
-    phone: '',
-    email: '',
-    logo: '',
-    taxRate: '5'
-  });
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(null);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!form.name.trim() || !form.email.trim() || !form.phone.trim() || !form.address.trim()) {
-      setError('Please fill in all mandatory restaurant details.');
-      return;
-    }
-
-    try {
-      setBusy(true);
-      setError(null);
-      const res = await api.createRestaurant({
-        name: form.name.trim(),
-        address: form.address.trim(),
-        phone: form.phone.trim(),
-        email: form.email.trim().toLowerCase(),
-        logo: form.logo.trim() || null,
-        taxRate: Number(form.taxRate) ? Number(form.taxRate) / 100 : 0.05,
-        initialTableCount: 0
-      });
-      onCreated(res);
-    } catch (err) {
-      setError(err.message || 'Failed to create restaurant.');
-    } finally {
-      setUpdating(false);
-    }
-  };
-
-  return (
-    <div className="pos-modal-backdrop" style={{
-      position: 'fixed',
-      inset: 0,
-      backgroundColor: 'rgba(0,0,0,0.6)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 100,
-      padding: 16
-    }}>
-      <div className="pos-modal-inner" style={{
-        backgroundColor: 'var(--p-surface, #ffffff)',
-        borderRadius: 16,
-        maxWidth: 580,
-        width: '100%',
-        boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
-        overflow: 'hidden'
-      }}>
-        {/* Header with 24px padding */}
-        <header style={{
-          padding: '24px 24px 18px',
-          borderBottom: '1px solid var(--p-border)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between'
-        }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Onboard New Restaurant</h2>
-            <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--p-muted)' }}>
-              Step 1: Create isolated tenant property for new client
-            </p>
-          </div>
-          <button className="pos-icon-button" onClick={onClose}>✕</button>
-        </header>
-
-        {/* Form Body with 24px padding */}
-        <form onSubmit={handleSubmit} style={{ padding: 24 }}>
-          {error && (
-            <div className="pos-error" style={{ marginBottom: 16, padding: '10px 14px' }}>
-              <AlertCircle size={15} /> {error}
-            </div>
-          )}
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 14, marginBottom: 14 }}>
-            <label className="pos-field">
-              <span>Restaurant / Hotel Name *</span>
-              <input
-                className="pos-input"
-                value={form.name}
-                onChange={e => setForm({ ...form, name: e.target.value })}
-                placeholder="e.g. Royal Orchid Fine Dining"
-                required
-                autoFocus
-              />
-            </label>
-            <label className="pos-field">
-              <span>Contact Email *</span>
-              <input
-                type="email"
-                className="pos-input"
-                value={form.email}
-                onChange={e => setForm({ ...form, email: e.target.value })}
-                placeholder="contact@royalorchid.com"
-                required
-              />
-            </label>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
-            <label className="pos-field">
-              <span>Contact Phone / Mobile *</span>
-              <input
-                type="tel"
-                className="pos-input"
-                value={form.phone}
-                onChange={e => setForm({ ...form, phone: e.target.value })}
-                placeholder="+91 98765 43210"
-                required
-              />
-            </label>
-            <label className="pos-field">
-              <span>Street Address & City *</span>
-              <input
-                className="pos-input"
-                value={form.address}
-                onChange={e => setForm({ ...form, address: e.target.value })}
-                placeholder="e.g. 45, MG Road, Bengaluru"
-                required
-              />
-            </label>
-          </div>
-
-          <div style={{ marginBottom: 24 }}>
-            <label className="pos-field">
-              <span>Default Tax Rate (GST %)</span>
-              <input
-                type="number"
-                min={0}
-                max={28}
-                step={0.5}
-                className="pos-input"
-                value={form.taxRate}
-                onChange={e => setForm({ ...form, taxRate: e.target.value })}
-              />
-              <small style={{ color: 'var(--p-muted)', marginTop: 4 }}>Standard GST applied to restaurant orders (default: 5%)</small>
-            </label>
-          </div>
-
-          <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', paddingTop: 16, borderTop: '1px solid var(--p-border)' }}>
-            <button type="button" className="pos-button" onClick={onClose} disabled={busy}>Cancel</button>
-            <button type="submit" className="pos-button primary" disabled={busy}>
-              {busy ? <RefreshCw size={14} className="pos-spin" /> : <Plus size={14} />}
-              {busy ? 'Registering Tenant…' : 'Create Restaurant'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-// Standalone AddManagerModal with >= 24px padding & Client Handover Toolkit
-function AddManagerModal({ restaurants, preSelectedRestaurant, onClose, onCreated }) {
-  const [selectedRestId, setSelectedRestId] = useState(() => preSelectedRestaurant?.restaurantId || restaurants[0]?.restaurantId || '');
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
-  const [password, setPassword] = useState('Bistro@123');
-  const [showPass, setShowPass] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(null);
-  const [copied, setCopied] = useState(false);
-
-  const targetRest = restaurants.find(r => r.restaurantId === selectedRestId) || preSelectedRestaurant;
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!selectedRestId) {
-      setError('Please select a target restaurant.');
-      return;
-    }
-    if (!name.trim() || !email.trim()) {
-      setError('Manager name and login email are required.');
-      return;
-    }
-
-    try {
-      setBusy(true);
-      setError(null);
-      const user = await api.createStaffUser({
-        name: name.trim(),
-        email: email.trim().toLowerCase(),
-        phone: phone.trim() || null,
-        password: password || 'Bistro@123',
-        role: 'MANAGER',
-        restaurantId: selectedRestId
-      });
-      onCreated(user);
-    } catch (err) {
-      setError(err.message || 'Failed to create manager account.');
-    } finally {
-      setUpdating(false);
-    }
-  };
-  const outletCard = (outlet, featured = false) => (
-    <OutletCard key={outlet.restaurantId} outlet={outlet} featured={featured}
-      managers={managers && (managersByOutlet.get(outlet.restaurantId) || [])}
-      onAssign={assignManager} onEdit={editOutlet} onDelete={deleteOutlet} onRemoveManager={removeManager} onOpen={openWorkspace} onToggle={toggleStatus} updating={updating}
-      onInspect={!featured && detailOutlet ? () => setSelectedId(outlet.restaurantId) : undefined}
-      headingRef={featured ? detailHeading : undefined} />
-  );
-
-  const records = isOutlets ? restaurants : managers;
-  const hasMatches = isOutlets ? visibleOutlets.length > 0 : visibleManagers.length > 0;
-  const filtered = Boolean(query || (isOutlets && status !== 'ALL'));
-  const name = currentUser?.name || 'Admin';
-
-  return (
-    <div className="pos-modal-backdrop" style={{
-      position: 'fixed',
-      inset: 0,
-      backgroundColor: 'rgba(0,0,0,0.6)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 100,
-      padding: 16
-    }}>
-      <div className="pos-modal-inner" style={{
-        backgroundColor: 'var(--p-surface, #ffffff)',
-        borderRadius: 16,
-        maxWidth: 580,
-        width: '100%',
-        boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
-        overflow: 'hidden'
-      }}>
-        {/* Header with 24px padding */}
-        <header style={{
-          padding: '24px 24px 18px',
-          borderBottom: '1px solid var(--p-border)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between'
-        }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Step 2: Assign Hotel General Manager</h2>
-            <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--p-muted)' }}>
-              Create owner credentials with full restaurant administrative rights
-            </p>
-          </div>
-          <button className="pos-icon-button" onClick={onClose}>✕</button>
-        </header>
-
-        {/* Form Body with 24px padding */}
-        <form onSubmit={handleSubmit} style={{ padding: 24 }}>
-          {error && (
-            <div className="pos-error" style={{ marginBottom: 16, padding: '10px 14px' }}>
-              <AlertCircle size={15} /> {error}
-            </div>
-          )}
-
-          <label className="pos-field" style={{ marginBottom: 14 }}>
-            <span>Target Restaurant Property *</span>
-            <select
-              className="pos-select"
-              style={{ width: '100%', fontWeight: 600 }}
-              value={selectedRestId}
-              onChange={e => setSelectedRestId(e.target.value)}
-              required
-            >
-              {restaurants.map(r => (
-                <option key={r.restaurantId} value={r.restaurantId}>
-                  {r.name} ({r.address || 'No address'})
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 14, marginBottom: 14 }}>
-            <label className="pos-field">
-              <span>Owner / Manager Full Name *</span>
-              <input
-                className="pos-input"
-                value={name}
-                onChange={e => setName(e.target.value)}
-                placeholder="e.g. Ramesh Sharma"
-                required
-              />
-            </label>
-            <label className="pos-field">
-              <span>Login Email Address *</span>
-              <input
-                type="email"
-                className="pos-input"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                placeholder="owner@royalorchid.com"
-                required
-              />
-            </label>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 18 }}>
-            <label className="pos-field">
-              <span>Contact Mobile Phone</span>
-              <input
-                type="tel"
-                className="pos-input"
-                value={phone}
-                onChange={e => setPhone(e.target.value)}
-                placeholder="+91 98765 43210"
-              />
-            </label>
-
-            <label className="pos-field">
-              <span>Initial Password *</span>
-              <div style={{ position: 'relative' }}>
-                <input
-                  type={showPass ? "text" : "password"}
-                  className="pos-input"
-                  style={{ width: '100%', paddingRight: 36 }}
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPass(!showPass)}
-                  style={{
-                    position: 'absolute',
-                    right: 8,
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--p-muted)',
-                    cursor: 'pointer'
-                  }}
-                >
-                  {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
-                </button>
-              </div>
-            </label>
-          </div>
-
-          {/* Quick Copy Handover message */}
-          <div style={{
-            padding: '12px 14px',
-            background: 'var(--p-bg, #f8fafc)',
-            borderRadius: 10,
-            border: '1px dashed var(--p-border)',
-            marginBottom: 20
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-              <strong style={{ fontSize: 11, color: 'var(--p-muted)' }}>CLIENT WELCOME MESSAGE:</strong>
-              <button
-                type="button"
-                onClick={copyHandover}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: copied ? '#10b981' : 'var(--p-blue)',
-                  fontSize: 11,
-                  fontWeight: 650,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4
-                }}
-              >
-                {copied ? <Check size={12} /> : <Copy size={12} />}
-                {copied ? 'Copied to Clipboard!' : 'Copy Onboarding Message'}
-              </button>
-            </div>
-            <p style={{ margin: 0, fontSize: 11, color: 'var(--p-muted)', fontFamily: 'monospace', lineHeight: 1.4 }}>
-              Portal: {window.location.origin}/pos/login · Email: {email || 'owner@...'} · Password: {password}
-            </p>
-          </div>
-
-          <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', paddingTop: 16, borderTop: '1px solid var(--p-border)' }}>
-            <button type="button" className="pos-button" onClick={onClose} disabled={busy}>Cancel</button>
-            <button type="submit" className="pos-button primary" disabled={busy}>
-              {busy ? <RefreshCw size={14} className="pos-spin" /> : <UserCheck size={14} />}
-              {busy ? 'Creating Manager…' : 'Create Manager Account'}
-            </button>
-            {isOutlets && <button type="button" className="admin-button admin-primary admin-add" onClick={() => setDialog({ type: 'outlet' })}><Plus size={16} />Add restaurant</button>}
-          </div>}
-        </div>
-
-        {loadError && <div className="admin-load-error" role="alert"><AlertCircle size={16} />{loadError}<button type="button" disabled={loading} onClick={refresh}>Retry</button></div>}
-
-        {tab === 'sms' ? (
-          <SmsNotificationsPanel restaurants={restaurants || []} onNotify={setNotification} />
-        ) : (
-        <div className={`admin-board${detailOutlet ? ' with-inspector' : ''}`} aria-busy={loading}>
-          <Summary summary={summary} restaurants={restaurants} managers={managers} />
-          {detailOutlet && outletCard(detailOutlet, true)}
-          {hasMatches ? (
-            isOutlets
-              ? <div className="admin-outlet-grid">{otherOutlets.map(outlet => outletCard(outlet))}</div>
-              : <ManagerDirectory managers={visibleManagers} onOpen={openWorkspace} onEdit={manager => setDialog({ type: 'edit-manager', manager })} />
-          ) : records ? (
-            <div className="admin-empty">
-              {isOutlets ? <Building2 size={28} /> : <Users size={28} />}
-              <h2>{filtered ? 'No matching ' : 'No '}{isOutlets ? 'restaurants' : 'managers'}{filtered ? '' : ' yet'}</h2>
-              {filtered && <button className="admin-button" type="button" onClick={() => { setSearch(''); setStatus('ALL'); }}>Clear filters</button>}
-            </div>
-          ) : loading && <div className="admin-empty" role="status"><RefreshCw size={20} className="pos-spin" />Loading {isOutlets ? 'restaurants' : 'managers'}…</div>}
-        </div>
-        )}
-      </main>
-
-      {notification && <div className={`admin-toast${notification.error ? ' is-error' : ''}`} role={notification.error ? 'alert' : 'status'}>
-        {notification.error ? <AlertCircle size={17} /> : <CheckCircle2 size={17} />}{notification.message}
-      </div>}
-      {dialog?.type === 'outlet' && <AddRestaurantModal onClose={closeDialog} onCreated={r => onCreated(`${r.name} added.`)} />}
-      {dialog?.type === 'edit-outlet' && dialog.outlet && (
+      {editingRestaurant && (
         <EditRestaurantModal
-          restaurant={dialog.outlet}
-          managers={managersByOutlet.get(dialog.outlet.restaurantId) || []}
-          onClose={closeDialog}
-          onRemoveManager={manager => removeManager(manager, dialog.outlet)}
-          onSaved={r => onCreated(`${r?.name || dialog.outlet.name || 'Restaurant'} updated.`)}
+          restaurant={editingRestaurant}
+          onClose={() => setEditingRestaurant(null)}
+          onUpdated={async () => {
+            setEditingRestaurant(null);
+            showToast('Restaurant updated successfully.');
+            await loadData();
+          }}
         />
       )}
-      {dialog?.type === 'manager' && <AddManagerModal restaurants={restaurants || []} restaurantId={dialog.restaurantId}
-        onClose={closeDialog} onCreated={m => onCreated(`Manager account created for ${m.name}.`)} />}
-      {dialog?.type === 'edit-manager' && dialog.manager && (
+
+      {editingManager && (
         <EditManagerModal
-          manager={dialog.manager}
-          restaurants={restaurants || []}
-          onClose={closeDialog}
-          onSaved={m => onCreated(`Updated ${m.name}.`)}
+          manager={editingManager}
+          onClose={() => setEditingManager(null)}
+          onUpdated={async () => {
+            setEditingManager(null);
+            showToast('Manager updated successfully.');
+            await loadData();
+          }}
         />
       )}
     </div>

@@ -136,45 +136,6 @@ public class RestaurantsController : ControllerBase
     }
 
     [Authorize(Roles = UserRoles.SuperAdmin)]
-    [HttpPost]
-    public async Task<IActionResult> CreateRestaurant([FromBody] CreateRestaurantDto dto)
-    {
-        if (string.IsNullOrWhiteSpace(dto.Name) || string.IsNullOrWhiteSpace(dto.Address) ||
-            string.IsNullOrWhiteSpace(dto.Phone) || string.IsNullOrWhiteSpace(dto.Email))
-        {
-            return BadRequest(new { message = "Name, address, phone, and email are required." });
-        }
-
-        var restaurant = new Restaurant
-        {
-            RestaurantId = Guid.NewGuid(),
-            Name = dto.Name.Trim(),
-            Address = dto.Address.Trim(),
-            Phone = dto.Phone.Trim(),
-            Email = dto.Email.Trim().ToLowerInvariant(),
-            Logo = string.IsNullOrWhiteSpace(dto.Logo) ? null : dto.Logo.Trim(),
-            OpeningHours = string.IsNullOrWhiteSpace(dto.OpeningHours) ? "{}" : dto.OpeningHours,
-            Settings = System.Text.Json.JsonSerializer.Serialize(new { taxRate = dto.TaxRate ?? 0.05m }),
-            Status = "ACTIVE",
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
-
-        _db.Restaurants.Add(restaurant);
-        await _db.SaveChangesAsync();
-
-        if (!string.IsNullOrWhiteSpace(restaurant.Phone))
-        {
-            await _sms.EnqueueEventSmsAsync(null, "SOFTWARE_PURCHASE_WELCOME", restaurant.Phone, new Dictionary<string, string>
-            {
-                ["restaurant"] = restaurant.Name
-            }, restaurant.RestaurantId.ToString());
-        }
-
-        return Created($"/api/restaurants/{restaurant.RestaurantId}", restaurant);
-    }
-
-    [Authorize(Roles = UserRoles.SuperAdmin)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> DeleteRestaurant(Guid id)
     {
@@ -395,6 +356,22 @@ public class RestaurantsController : ControllerBase
         }
 
         await _db.SaveChangesAsync();
+
+        // Send welcome SMS after the restaurant has been saved.
+        if (!string.IsNullOrWhiteSpace(restaurant.Phone))
+        {
+            await _sms.EnqueueEventSmsAsync(
+                null,
+                "SOFTWARE_PURCHASE_WELCOME",
+                restaurant.Phone,
+                new Dictionary<string, string>
+                {
+                    ["restaurant"] = restaurant.Name
+                },
+                restaurant.RestaurantId.ToString()
+            );
+        }
+
         return CreatedAtAction(nameof(GetRestaurantById), new { id = restaurant.RestaurantId }, restaurant);
     }
 }
