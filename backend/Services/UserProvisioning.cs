@@ -34,6 +34,7 @@ public static class UserProvisioning
                         BEGIN
                             ALTER TABLE restaurant_pos.users DROP CONSTRAINT IF EXISTS users_role_check;
                             ALTER TABLE restaurant_pos.users ADD CONSTRAINT users_role_check CHECK (role IN ('SUPER_ADMIN', 'MANAGER', 'RECEPTIONIST', 'KITCHEN', 'WAITER', 'CUSTOMER'));
+                            ALTER TABLE restaurant_pos.users ADD COLUMN IF NOT EXISTS employee_code VARCHAR(50);
                         EXCEPTION WHEN OTHERS THEN NULL;
                         END $$;
                     ");
@@ -119,6 +120,7 @@ public static class UserProvisioning
                     Phone = "+91 99999 00001",
                     PasswordHash = BCrypt.Net.BCrypt.HashPassword(targetAdminPassword),
                     Role = UserRoles.SuperAdmin,
+                    EmployeeCode = "ADM-1000",
                     Status = "ACTIVE",
                     EmailVerified = true,
                     CreatedAt = DateTime.UtcNow,
@@ -133,11 +135,23 @@ public static class UserProvisioning
                 existingAdmin.RestaurantId = null;
                 existingAdmin.Status = "ACTIVE";
                 existingAdmin.EmailVerified = true;
+                existingAdmin.EmployeeCode ??= "ADM-1000";
                 existingAdmin.PasswordHash = BCrypt.Net.BCrypt.HashPassword(targetAdminPassword);
                 existingAdmin.UpdatedAt = DateTime.UtcNow;
             }
 
             await db.SaveChangesAsync();
+
+            // 4.1 Backfill any staff without employee codes sequentially
+            var staffWithoutCodes = await db.Users
+                .Where(u => u.Role != UserRoles.Customer && (u.EmployeeCode == null || u.EmployeeCode == ""))
+                .OrderBy(u => u.CreatedAt)
+                .ToListAsync();
+            foreach (var staffMember in staffWithoutCodes)
+            {
+                staffMember.EmployeeCode = await AuthService.GenerateEmployeeCodeAsync(db, staffMember.Role);
+                await db.SaveChangesAsync();
+            }
 
             // 5. Ensure table infrastructure for dining operations
             await EnsureRestaurantTablesAsync(db);

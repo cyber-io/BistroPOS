@@ -83,18 +83,18 @@ export default function LoginPage() {
 
             <form onSubmit={submit} className="space-y-4">
               <div>
-                <label htmlFor="auth-email" className="block text-xs font-medium mb-2">Email address</label>
+                <label htmlFor="auth-email" className="block text-xs font-medium mb-2">Email address or Employee Code</label>
                 <input
                   id="auth-email"
                   name="email"
-                  type="email"
+                  type="text"
                   required
                   maxLength={255}
-                  autoComplete="email"
+                  autoComplete="username"
                   value={form.email}
                   onChange={change}
                   className="auth-field"
-                  placeholder="admin@bistropos.com"
+                  placeholder="e.g. admin@bistropos.com or ADM-1000"
                 />
               </div>
 

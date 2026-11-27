@@ -19,6 +19,9 @@ ALTER TABLE IF EXISTS restaurant_pos.menu_items ADD COLUMN IF NOT EXISTS dietary
 ALTER TABLE IF EXISTS restaurant_pos.menu_items ADD COLUMN IF NOT EXISTS is_special BOOLEAN DEFAULT FALSE;
 ALTER TABLE IF EXISTS restaurant_pos.menu_items ADD COLUMN IF NOT EXISTS prep_time_minutes INT DEFAULT 15;
 
+ALTER TABLE IF EXISTS restaurant_pos.users ADD COLUMN IF NOT EXISTS employee_code VARCHAR(50);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_employee_code ON restaurant_pos.users(employee_code) WHERE employee_code IS NOT NULL;
+
 DO $$
 BEGIN
     ALTER TABLE restaurant_pos.users DROP CONSTRAINT IF EXISTS users_role_check;
@@ -98,6 +101,7 @@ INSERT INTO restaurant_pos.users (
     role,
     status,
     email_verified,
+    employee_code,
     created_at,
     updated_at
 ) VALUES (
@@ -110,12 +114,14 @@ INSERT INTO restaurant_pos.users (
     'SUPER_ADMIN',
     'ACTIVE',
     TRUE,
+    'ADM-1000',
     NOW(),
     NOW()
 ) ON CONFLICT (user_id) DO UPDATE 
 SET email = 'admin@bistropos.com',
     role = 'SUPER_ADMIN',
     status = 'ACTIVE',
+    employee_code = 'ADM-1000',
     updated_at = NOW();
 
 -- ----------------------------------------------------------------------------

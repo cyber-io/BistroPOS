@@ -1122,6 +1122,7 @@ export default function PosWorkspace() {
       list = list.filter(s =>
         (s.name || '').toLowerCase().includes(q) ||
         (s.email || '').toLowerCase().includes(q) ||
+        (s.employeeCode || '').toLowerCase().includes(q) ||
         (s.phone || '').toLowerCase().includes(q) ||
         (s.role || '').toLowerCase().includes(q)
       );
@@ -1940,6 +1941,20 @@ export default function PosWorkspace() {
                                 </div>
 
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '12px 0', flexWrap: 'wrap' }}>
+                                  {member.employeeCode && (
+                                    <span style={{
+                                      fontSize: 11,
+                                      fontWeight: 800,
+                                      padding: '3px 8px',
+                                      borderRadius: 6,
+                                      background: '#0f172a',
+                                      color: '#38bdf8',
+                                      fontFamily: 'monospace',
+                                      letterSpacing: '0.5px'
+                                    }}>
+                                      {member.employeeCode}
+                                    </span>
+                                  )}
                                   <span style={{
                                     fontSize: 11,
                                     fontWeight: 700,
