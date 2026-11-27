@@ -488,7 +488,8 @@ public record CreateStaffDto(
     [Required, EmailAddress] string Email,
     string? Phone,
     string? Role,
-    string? Password
+    string? Password,
+    Guid? RestaurantId = null
 );
 
 public record ResetStaffPasswordDto(

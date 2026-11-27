@@ -1389,7 +1389,7 @@ public class UsersController : ControllerBase
         }
 
         var users = await query.ToListAsync();
-        var dtos = users.Select(u => new UserDto(u.UserId, u.RestaurantId, u.Name, u.Email, u.Phone, u.Role, u.Status)).ToList();
+        var dtos = users.Select(u => new UserDto(u.UserId, u.RestaurantId, u.Name, u.Email, u.Phone, u.Role, u.Status, u.EmployeeCode)).ToList();
         return Ok(dtos);
     }
 
@@ -1406,10 +1406,12 @@ public class UsersController : ControllerBase
                 u.UserId,
                 u.RestaurantId,
                 RestaurantName = u.Restaurant != null ? u.Restaurant.Name : "Unassigned",
+                RestaurantCode = u.Restaurant != null ? u.Restaurant.RestaurantCode : null,
                 u.Name,
                 u.Email,
                 u.Phone,
                 u.Role,
+                u.EmployeeCode,
                 u.Status,
                 u.CreatedAt
             })
@@ -1434,7 +1436,7 @@ public class UsersController : ControllerBase
         Guid targetRestaurantId;
         if (isSuperAdmin)
         {
-            targetRestaurantId = restaurantId ?? _tenant.RestaurantId ?? Guid.Empty;
+            targetRestaurantId = dto.RestaurantId ?? restaurantId ?? _tenant.RestaurantId ?? Guid.Empty;
             if (targetRestaurantId == Guid.Empty) return BadRequest(new { message = "Target restaurant ID is required." });
         }
         else
@@ -1460,6 +1462,7 @@ public class UsersController : ControllerBase
             return Forbid();
         }
 
+        var empCode = await AuthService.GenerateEmployeeCodeAsync(_db, role);
         var user = new User
         {
             RestaurantId = targetRestaurantId,
@@ -1467,6 +1470,7 @@ public class UsersController : ControllerBase
             Email = normalizedEmail,
             Phone = dto.Phone?.Trim(),
             Role = role,
+            EmployeeCode = empCode,
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password),
             Status = "ACTIVE",
             EmailVerified = true,
@@ -1476,9 +1480,9 @@ public class UsersController : ControllerBase
 
         _db.Users.Add(user);
         await _db.SaveChangesAsync();
-        await _audit.LogAsync(targetRestaurantId, _tenant.CurrentUserId, _tenant.CurrentRole, "STAFF_CREATED", "users", new { user.UserId, user.Role });
+        await _audit.LogAsync(targetRestaurantId, _tenant.CurrentUserId, _tenant.CurrentRole, "STAFF_CREATED", "users", new { user.UserId, user.Role, user.EmployeeCode });
 
-        return Ok(new UserDto(user.UserId, user.RestaurantId, user.Name, user.Email, user.Phone, user.Role, user.Status));
+        return Ok(new UserDto(user.UserId, user.RestaurantId, user.Name, user.Email, user.Phone, user.Role, user.Status, user.EmployeeCode));
     }
 
     [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]

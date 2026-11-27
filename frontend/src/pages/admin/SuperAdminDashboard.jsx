@@ -778,7 +778,23 @@ export default function SuperAdminDashboard() {
                         }}>
                           {m.name?.charAt(0) || 'M'}
                         </div>
-                        {m.name}
+                        <div>
+                          <div>{m.name}</div>
+                          {m.employeeCode && (
+                            <span style={{
+                              display: 'inline-block',
+                              fontSize: 10,
+                              fontWeight: 700,
+                              padding: '1px 6px',
+                              borderRadius: 4,
+                              background: '#e0e7ff',
+                              color: '#4338ca',
+                              marginTop: 2
+                            }}>
+                              {m.employeeCode}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </td>
                     <td style={{ padding: '14px 20px', color: 'var(--p-text)' }}>
@@ -792,7 +808,7 @@ export default function SuperAdminDashboard() {
                         fontWeight: 600,
                         fontSize: 12
                       }}>
-                        <Building2 size={12} /> {m.restaurantName || 'Unassigned'}
+                        <Building2 size={12} /> {m.restaurantName || 'Unassigned'} {m.restaurantCode ? `[${m.restaurantCode}]` : ''}
                       </span>
                     </td>
                     <td style={{ padding: '14px 20px', color: 'var(--p-muted)' }}>{m.email}</td>
@@ -1155,6 +1171,12 @@ function AddManagerModal({ restaurants, preSelectedRestaurant, onClose, onCreate
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (preSelectedRestaurant?.restaurantId) {
+      setSelectedRestId(preSelectedRestaurant.restaurantId);
+    }
+  }, [preSelectedRestaurant]);
 
   const targetRest = restaurants.find(r => r.restaurantId === selectedRestId) || preSelectedRestaurant;
 
