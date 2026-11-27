@@ -108,12 +108,13 @@ export default function Navbar({ onOpenCart }) {
   const menuActive = location.pathname.startsWith('/menu') || location.pathname === '/delivery' || location.pathname === '/takeaway';
   const storyActive = isHome && location.hash === '#our-story';
   const visitActive = isHome && location.hash === '#visit';
-  const rQuery = location.search.includes('r=') ? location.search : (restaurant?.restaurantCode ? `?r=${encodeURIComponent(restaurant.restaurantCode)}` : '');
+  const rQuery = location.search.includes('r=') ? location.search : (restaurant?.restaurantCode ? `?r=${encodeURIComponent(restaurant.restaurantCode)}` : (restaurant?.restaurantId ? `?r=${encodeURIComponent(restaurant.restaurantId)}` : ''));
+  const homePath = rQuery ? `/${rQuery}` : '/home';
 
   const navigation = (
     <>
       <Link
-        to={`/${rQuery}`}
+        to={homePath}
         className={navClass(homeActive)}
         aria-current={homeActive ? 'page' : undefined}
         onClick={handleHomeClick}
@@ -151,7 +152,7 @@ export default function Navbar({ onOpenCart }) {
     <header className="website-header">
       <div className="website-header-inner">
         <Link
-          to={`/${rQuery}`}
+          to={homePath}
           className="website-brand"
           aria-label={`${restaurant?.name || 'Bistro and Bloom'} home`}
           onClick={handleHomeClick}

@@ -199,13 +199,37 @@ function RestaurantUrlSync() {
   return null;
 }
 
+function RootRouteHandler({ onOpenCart }) {
+  const location = useLocation();
+  const searchParams = new URLSearchParams(location.search);
+  const hasRestaurant = Boolean(
+    searchParams.get('r') ||
+    searchParams.get('restaurant') ||
+    searchParams.get('rst') ||
+    searchParams.get('code')
+  );
+
+  if (hasRestaurant) {
+    return <HomePage onOpenCart={onOpenCart} />;
+  }
+
+  return <Navigate to="/admin" replace />;
+}
+
 function MainApp() {
   const [isCartOpen, setIsCartOpen] = useState(false);
   const location = useLocation();
   const isStaffLogin = location.pathname === '/pos/login' || location.pathname === '/staff/login';
   const isWorkspace = /^\/(pos|kitchen|waiter|receptionist|admin)(\/|$)/.test(location.pathname);
   const isQrMenu = location.pathname.startsWith('/qr/');
-  const isPublicWebsite = !isStaffLogin && !isWorkspace && !isQrMenu;
+  const searchParams = new URLSearchParams(location.search);
+  const hasRestaurantParam = Boolean(
+    searchParams.get('r') ||
+    searchParams.get('restaurant') ||
+    searchParams.get('rst') ||
+    searchParams.get('code')
+  );
+  const isPublicWebsite = !isStaffLogin && !isWorkspace && !isQrMenu && (location.pathname !== '/' || hasRestaurantParam);
 
   return (
     <div className={`min-h-screen flex flex-col font-sans ${isPublicWebsite ? 'bg-slate-50 website-shell' : 'bg-[#f4f7fb] pos-portal-shell'}`}>
@@ -235,7 +259,8 @@ function MainApp() {
           <Route path="/r/:code" element={<RestaurantRouteHandler />} />
 
           {/* Public Website Routes (Part 5) */}
-          <Route path="/" element={<HomePage onOpenCart={() => setIsCartOpen(true)} />} />
+          <Route path="/" element={<RootRouteHandler onOpenCart={() => setIsCartOpen(true)} />} />
+          <Route path="/home" element={<HomePage onOpenCart={() => setIsCartOpen(true)} />} />
           <Route path="/menu" element={<PublicMenuPage onOpenCart={() => setIsCartOpen(true)} />} />
           <Route path="/delivery" element={<DeliveryPage />} />
           <Route path="/takeaway" element={<TakeawayPage />} />
