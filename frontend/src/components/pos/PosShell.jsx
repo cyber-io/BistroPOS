@@ -119,7 +119,7 @@ export default function PosShell({ children, alertCount = 0, onAlerts, menuDots 
         <Link
           to={frontdesk ? '/pos' : role === 'KITCHEN' ? '/kitchen' : '/waiter'}
           className="pos-logo"
-          aria-label="Bistro & Bloom POS"
+          aria-label="BistroPOS"
         >
           <Cloud size={27} strokeWidth={1.8} />
           <span>Bistro<span className="pos-logo-muted">POS</span></span>
