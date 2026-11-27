@@ -142,6 +142,37 @@ public static class UserProvisioning
 
             await db.SaveChangesAsync();
 
+            // 4.2 Ensure primary Restaurant Manager exists
+            const string defaultManagerEmail = "kunalsugandhi007@gmail.com";
+            var existingManager = await db.Users.FirstOrDefaultAsync(u => u.Email.ToLower() == defaultManagerEmail);
+            if (existingManager == null)
+            {
+                db.Users.Add(new User
+                {
+                    UserId = Guid.Parse("9d54a9de-4516-4df7-ad2d-9c96d033d7bc"),
+                    RestaurantId = DefaultRestaurantId,
+                    Name = "Kunal Sugandhi",
+                    Email = defaultManagerEmail,
+                    Phone = "9575264633",
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword("Admin@12345"),
+                    Role = UserRoles.Manager,
+                    EmployeeCode = "MGR-1000",
+                    Status = "ACTIVE",
+                    EmailVerified = true,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
+                await db.SaveChangesAsync();
+            }
+            else
+            {
+                existingManager.RestaurantId = DefaultRestaurantId;
+                existingManager.Role = UserRoles.Manager;
+                existingManager.EmployeeCode ??= "MGR-1000";
+                existingManager.Status = "ACTIVE";
+                await db.SaveChangesAsync();
+            }
+
             // 4.1 Backfill any staff without employee codes sequentially
             var staffWithoutCodes = await db.Users
                 .Where(u => u.Role != UserRoles.Customer && (u.EmployeeCode == null || u.EmployeeCode == ""))

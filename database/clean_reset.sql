@@ -125,6 +125,44 @@ SET email = 'admin@bistropos.com',
     updated_at = NOW();
 
 -- ----------------------------------------------------------------------------
+-- STEP 4B: Insert primary Restaurant Manager account (Password: Admin@12345)
+-- ----------------------------------------------------------------------------
+INSERT INTO restaurant_pos.users (
+    user_id,
+    restaurant_id,
+    name,
+    email,
+    phone,
+    password_hash,
+    role,
+    status,
+    email_verified,
+    employee_code,
+    created_at,
+    updated_at
+) VALUES (
+    '9d54a9de-4516-4df7-ad2d-9c96d033d7bc',
+    'a0000000-0000-0000-0000-000000000001',
+    'Kunal Sugandhi',
+    'kunalsugandhi007@gmail.com',
+    '9575264633',
+    '$2a$11$w8/q3m2eA8zJ5m7nB3r9TuG4h.8Z.u2v8kP.vYg/H8K1.p2wEa2XW',
+    'MANAGER',
+    'ACTIVE',
+    TRUE,
+    'MGR-1000',
+    NOW(),
+    NOW()
+) ON CONFLICT (email) DO UPDATE 
+SET restaurant_id = 'a0000000-0000-0000-0000-000000000001',
+    name = 'Kunal Sugandhi',
+    phone = '9575264633',
+    role = 'MANAGER',
+    status = 'ACTIVE',
+    employee_code = 'MGR-1000',
+    updated_at = NOW();
+
+-- ----------------------------------------------------------------------------
 -- STEP 5: Insert 12 clean empty tables for floor plan and QR dine-in
 -- ----------------------------------------------------------------------------
 INSERT INTO restaurant_pos.tables (
@@ -206,7 +244,7 @@ INSERT INTO restaurant_pos.menu_items (
 ) VALUES
     ('d0000001-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', 'c0000001-0000-0000-0000-000000000001', 'Margherita Supreme Pizza', 'San Marzano tomato sauce, fresh buffalo mozzarella, organic basil, extra virgin olive oil', 399.00, 'https://images.unsplash.com/photo-1604382354936-07c5d9983bd3?auto=format&fit=crop&w=400&q=80', 'VEG', TRUE, 'NONE', FALSE, '[]'::jsonb, '[]'::jsonb, NOW(), NOW()),
     ('d0000001-0000-0000-0000-000000000002', 'a0000000-0000-0000-0000-000000000001', 'c0000001-0000-0000-0000-000000000001', 'Spicy Paneer Tikka Pizza', 'Tandoori spiced paneer cubes, capsicum, red onions, mozzarella, spicy drizzle', 469.00, 'https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?auto=format&fit=crop&w=400&q=80', 'VEG', TRUE, 'SPICY', FALSE, '[]'::jsonb, '[]'::jsonb, NOW(), NOW()),
-    ('d0000001-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', 'c0000001-0000-0000-0000-000000000001', 'BBQ Chicken Feast Pizza', 'Smoked BBQ chicken chunks, caramelized onions, smoked gouda & mozzarella', 529.00, 'https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=400&q=80', 'NON_VEG', TRUE, 'MEDIUM', FALSE, '[]'::jsonb, '[]'::jsonb, NOW(), NOW()),
+    ('d0000001-0000-0000-0000-000000000003', 'a0000000-0000-0000-0000-000000000001', 'c0000001-0000-0000-0000-000000000001', 'BBQ Chicken Feast Pizza', 'Smoked BBQ chicken chunks, caramelized onions, smoked gouda & mozzarella', 529.00, 'https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=400&q=80', 'NON_VEG', TRUE, 'MEDIUM', FALSE, '[]'::jsonb, '[]'::jsonb, NOW(), NOW()),
     ('d0000001-0000-0000-0000-000000000004', 'a0000000-0000-0000-0000-000000000001', 'c0000001-0000-0000-0000-000000000002', 'Crispy Veggie Crunch Burger', 'Crispy spiced potato-corn patty, lettuce, tomatoes, secret house chipotle sauce', 219.00, 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=400&q=80', 'VEG', TRUE, 'MILD', FALSE, '[]'::jsonb, '[]'::jsonb, NOW(), NOW()),
     ('d0000001-0000-0000-0000-000000000005', 'a0000000-0000-0000-0000-000000000001', 'c0000001-0000-0000-0000-000000000002', 'Smokey Grilled Chicken Burger', 'Tender grilled chicken breast, sharp cheddar, gherkins, caramelized onions, garlic aioli', 319.00, 'https://images.unsplash.com/photo-1586190848861-99aa4a171e90?auto=format&fit=crop&w=400&q=80', 'NON_VEG', TRUE, 'MEDIUM', FALSE, '[]'::jsonb, '[]'::jsonb, NOW(), NOW()),
     ('d0000001-0000-0000-0000-000000000006', 'a0000000-0000-0000-0000-000000000001', 'c0000001-0000-0000-0000-000000000003', 'Chilli Paneer Dry', 'Crispy cottage cheese cubes tossed with bell peppers, spring onions, and spicy soy-chilli glaze', 299.00, 'https://images.unsplash.com/photo-1541832676-9b763b0239ab?auto=format&fit=crop&w=400&q=80', 'VEG', TRUE, 'SPICY', FALSE, '[]'::jsonb, '[]'::jsonb, NOW(), NOW()),
@@ -235,7 +273,8 @@ SET name = EXCLUDED.name,
 -- ----------------------------------------------------------------------------
 SELECT 
     (SELECT count(*) FROM restaurant_pos.restaurants) as total_restaurants,
-    (SELECT count(*) FROM restaurant_pos.users) as total_admin,
+    (SELECT count(*) FROM restaurant_pos.users WHERE role = 'SUPER_ADMIN') as total_super_admins,
+    (SELECT count(*) FROM restaurant_pos.users WHERE role = 'MANAGER') as total_managers,
     (SELECT count(*) FROM restaurant_pos.tables) as total_tables,
     (SELECT count(*) FROM restaurant_pos.menu_categories) as total_categories,
     (SELECT count(*) FROM restaurant_pos.menu_items) as total_dishes;
