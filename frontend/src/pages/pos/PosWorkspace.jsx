@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Plus, Search, RefreshCw, ArrowUpRight, CreditCard, Banknote, Timer, Check, ClipboardCheck, ClipboardList, Package, Armchair, CalendarDays, History, LayoutGrid, Info, AlertCircle, Bell, SlidersHorizontal, UtensilsCrossed, ShoppingBag, Truck, Minus, Trash2, Printer, QrCode, ArrowLeft, CheckCircle2, X, Users, HandPlatter, Coffee, MapPin, Download, Upload, Sparkles, ChevronLeft, ChevronRight, Calendar, ChevronDown, ChevronUp, Clock, Phone, User, UserPlus, ShieldCheck, FolderPlus, Pencil, Building2, Lock, Mail, Eye, EyeOff, ChefHat, UserCheck, Flame } from 'lucide-react';
+import { Plus, Search, RefreshCw, ArrowUpRight, CreditCard, Banknote, Timer, Check, ClipboardCheck, ClipboardList, Package, Armchair, CalendarDays, History, LayoutGrid, Info, AlertCircle, Bell, SlidersHorizontal, UtensilsCrossed, ShoppingBag, Truck, Minus, Trash2, Printer, QrCode, ArrowLeft, CheckCircle2, X, Users, HandPlatter, Coffee, MapPin, Download, Upload, Sparkles, ChevronLeft, ChevronRight, Calendar, ChevronDown, ChevronUp, Clock, Phone, User, UserPlus, ShieldCheck, FolderPlus, Pencil, Building2, Lock, KeyRound, Mail, Eye, EyeOff, ChefHat, UserCheck, Flame } from 'lucide-react';
 import QRCode from 'qrcode';
 import { api, subscribeRealtimeEvents, uniqueKey, getActiveRestaurantId, setActiveRestaurantId } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';

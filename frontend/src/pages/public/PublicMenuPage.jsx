@@ -4,7 +4,7 @@ import { api, subscribeRealtimeEvents } from '../../services/api';
 import { useCart } from '../../context/CartContext';
 import { useNotification } from '../../context/NotificationContext';
 import ItemCustomizationModal from '../../components/common/ItemCustomizationModal';
-import { Search, Flame, Candy, Utensils, ShoppingBag, Plus } from 'lucide-react';
+import { Search, Flame, Candy, Utensils, ShoppingBag, Plus, ChevronDown, Check } from 'lucide-react';
 
 export default function PublicMenuPage({ onOpenCart }) {
   const [searchParams] = useSearchParams();
@@ -17,6 +17,10 @@ export default function PublicMenuPage({ onOpenCart }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [isCategoryOpen, setIsCategoryOpen] = useState(false);
+  const filterPanelRef = useRef(null);
+  const categoryPanelRef = useRef(null);
 
   const { addItem, itemCount, orderSource, setOrderSource } = useCart();
   const { addToast } = useNotification();
