@@ -242,24 +242,13 @@ export default function HomePage() {
           <p className="website-hero-description">
             {branding.heroDescription || 'Vibrant plates, comforting flavours, and a little time to savour it all. Come for a meal. Stay for the feeling.'}
           </p>
-          <div className="website-hero-links">
-            {showBookTable && (
+          {showBookTable && (
+            <div className="website-hero-links">
               <Link to={`/book-table${rQuery}`} className="website-button website-button--red">
                 Reserve a table<ArrowUpRight size={17} />
               </Link>
-            )}
-            <Link to={`/menu${rQuery}`} className={showBookTable ? "website-button website-button--outline" : "website-button website-button--red"}>
-              <UtensilsCrossed size={17} /> See today’s menu
-            </Link>
-            {showVisit && (
-              <a href="#visit" className="website-location-link">
-                <MapPin size={17} />Find your way here
-              </a>
-            )}
-          </div>
-          <Link to={`/menu${rQuery}`} className="website-explore-link">
-            Explore our menu<ArrowRight size={16} />
-          </Link>
+            </div>
+          )}
         </div>
       </section>
 
