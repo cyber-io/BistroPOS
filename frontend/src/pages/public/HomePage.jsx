@@ -68,14 +68,23 @@ export default function HomePage() {
     async function loadData(silent = false) {
       if (!silent) { setLoading(true); setError(''); }
       try {
-        const [rest, items, cats] = await Promise.all([api.getRestaurant(), api.getMenuItems(), api.getCategories()]);
-        if (active) {
+        // 1. First fetch restaurant branding & info so name & logo ALWAYS update immediately
+        const rest = await api.getRestaurant().catch(() => null);
+        if (active && rest) {
           setRestaurant(rest);
-          setPopularItems(items.slice(0, 6));
-          setCategories(cats);
-          if (rest?.name) {
+          if (rest.name) {
             document.title = `${rest.name} — Gourmet Dining & Online Ordering`;
           }
+        }
+
+        // 2. Then load menu items and categories
+        const [items, cats] = await Promise.all([
+          api.getMenuItems().catch(() => []),
+          api.getCategories().catch(() => [])
+        ]);
+        if (active) {
+          setPopularItems(items.slice(0, 6));
+          setCategories(cats);
         }
       } catch (err) {
         if (active && !silent) setError(err.message || 'Our menu is temporarily unavailable. Please try again.');
@@ -90,7 +99,7 @@ export default function HomePage() {
       unsubscribe();
       window.removeEventListener('rs_outlet_changed', onOutletChanged);
     };
-  }, [retry]);
+  }, [retry, location.search]);
 
   const rawHours = (restaurant?.openingHours && typeof restaurant.openingHours === 'object')
     ? restaurant.openingHours

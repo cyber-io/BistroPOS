@@ -368,21 +368,23 @@ public class TablesController : ControllerBase
 {
     private readonly ITableService _tables;
     private readonly ITenantContext _tenant;
+    private readonly RestaurantDbContext _db;
 
-    public TablesController(ITableService tables, ITenantContext tenant)
+    public TablesController(ITableService tables, ITenantContext tenant, RestaurantDbContext db)
     {
         _tables = tables;
         _tenant = tenant;
+        _db = db;
     }
 
     [HttpGet]
-    public async Task<IActionResult> GetTables([FromQuery] Guid? restaurantId)
+    public async Task<IActionResult> GetTables([FromQuery] string? restaurantId)
     {
-        var targetId = (restaurantId.HasValue && restaurantId.Value != Guid.Empty)
-            ? restaurantId.Value
+        var targetId = !string.IsNullOrWhiteSpace(restaurantId)
+            ? await UserProvisioning.ResolveRestaurantIdAsync(_db, restaurantId)
             : (_tenant.RestaurantId.HasValue && _tenant.RestaurantId.Value != Guid.Empty
                 ? _tenant.RestaurantId.Value
-                : Guid.Empty);
+                : UserProvisioning.DefaultRestaurantId);
         var list = await _tables.GetTablesAsync(targetId);
         if (User.Identity?.IsAuthenticated != true || User.IsInRole(UserRoles.Customer))
             list = list.Select(t => t with { CurrentCustomerName = null, AssignedWaiterId = null, AssignedWaiterName = null, QrIdentifier = "" }).ToList();
@@ -548,11 +550,9 @@ public class MenuController : ControllerBase
     }
 
     [HttpGet("categories")]
-    public async Task<IActionResult> GetCategories([FromQuery] Guid? restaurantId)
+    public async Task<IActionResult> GetCategories([FromQuery] string? restaurantId)
     {
-        var targetId = restaurantId.HasValue && restaurantId.Value != Guid.Empty
-            ? restaurantId.Value
-            : UserProvisioning.DefaultRestaurantId;
+        var targetId = await UserProvisioning.ResolveRestaurantIdAsync(_db, restaurantId);
 
         // If requested outlet has no categories, safely fall back to default/active outlet
         if (!await _db.MenuCategories.AnyAsync(c => c.RestaurantId == targetId))
@@ -660,11 +660,9 @@ public class MenuController : ControllerBase
     }
 
     [HttpGet("items")]
-    public async Task<IActionResult> GetMenuItems([FromQuery] Guid? restaurantId, [FromQuery] Guid? categoryId, [FromQuery] string? vegFilter)
+    public async Task<IActionResult> GetMenuItems([FromQuery] string? restaurantId, [FromQuery] Guid? categoryId, [FromQuery] string? vegFilter)
     {
-        var targetId = restaurantId.HasValue && restaurantId.Value != Guid.Empty
-            ? restaurantId.Value
-            : UserProvisioning.DefaultRestaurantId;
+        var targetId = await UserProvisioning.ResolveRestaurantIdAsync(_db, restaurantId);
 
         // If requested outlet has no items, safely fall back to default/active outlet
         if (!await _db.MenuItems.AnyAsync(m => m.RestaurantId == targetId))
@@ -1001,16 +999,19 @@ public class OrdersController : ControllerBase
 public class ReservationsController : ControllerBase
 {
     private readonly IReservationService _reservations;
+    private readonly RestaurantDbContext _db;
 
-    public ReservationsController(IReservationService reservations)
+    public ReservationsController(IReservationService reservations, RestaurantDbContext db)
     {
         _reservations = reservations;
+        _db = db;
     }
 
     [HttpGet("availability")]
-    public async Task<IActionResult> CheckAvailability([FromQuery] Guid restaurantId, [FromQuery] DateOnly date, [FromQuery] int guestCount)
+    public async Task<IActionResult> CheckAvailability([FromQuery] string restaurantId, [FromQuery] DateOnly date, [FromQuery] int guestCount)
     {
-        var slots = await _reservations.GetAvailabilityAsync(restaurantId, date, guestCount);
+        var targetId = await UserProvisioning.ResolveRestaurantIdAsync(_db, restaurantId);
+        var slots = await _reservations.GetAvailabilityAsync(targetId, date, guestCount);
         return Ok(slots);
     }
 

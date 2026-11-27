@@ -308,4 +308,23 @@ public static class UserProvisioning
 
         return $"{prefix}-{maxNumber + 1}";
     }
+
+    public static async Task<Guid> ResolveRestaurantIdAsync(RestaurantDbContext db, string? idOrCode)
+    {
+        if (string.IsNullOrWhiteSpace(idOrCode))
+            return DefaultRestaurantId;
+
+        if (Guid.TryParse(idOrCode, out var guid) && guid != Guid.Empty)
+            return guid;
+
+        var clean = idOrCode.Trim().ToUpperInvariant();
+        if (!clean.StartsWith("RST-") && int.TryParse(clean, out _))
+            clean = $"RST-{clean}";
+
+        var rest = await db.Restaurants.FirstOrDefaultAsync(r => r.RestaurantCode == clean);
+        if (rest != null) return rest.RestaurantId;
+
+        var activeFallback = await db.Restaurants.Where(r => r.Status == "ACTIVE").Select(r => (Guid?)r.RestaurantId).FirstOrDefaultAsync();
+        return activeFallback ?? DefaultRestaurantId;
+    }
 }

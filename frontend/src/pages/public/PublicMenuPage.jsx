@@ -51,8 +51,18 @@ export default function PublicMenuPage({ onOpenCart }) {
     const load = async (silent = false) => {
       if (!silent) { setLoading(true); setError(''); }
       try {
-        const [cats, items] = await Promise.all([api.getCategories(), api.getMenuItems()]);
-        if (active) { setCategories(cats); setMenuItems(items); }
+        const [rest, cats, items] = await Promise.all([
+          api.getRestaurant().catch(() => null),
+          api.getCategories(),
+          api.getMenuItems()
+        ]);
+        if (active) {
+          if (rest?.name) {
+            document.title = `${rest.name} — Menu`;
+          }
+          setCategories(cats);
+          setMenuItems(items);
+        }
       } catch (err) { if (active && !silent) setError(err.message || 'Unable to load the menu. Please try again.'); }
       finally { if (active && !silent) setLoading(false); }
     };
@@ -62,7 +72,7 @@ export default function PublicMenuPage({ onOpenCart }) {
     window.addEventListener('rs_outlet_changed', onOutletChanged);
     const timer = setInterval(() => load(true), 15000);
     return () => { active = false; unsubscribe(); clearInterval(timer); window.removeEventListener('rs_outlet_changed', onOutletChanged); };
-  }, [retry]);
+  }, [retry, searchParams]);
 
   useEffect(() => { setActiveCategory(searchParams.get('category') || 'ALL'); }, [searchParams]);
 

@@ -64,8 +64,26 @@ export function getActiveRestaurantId() {
   return restaurantId;
 }
 
+function isGuid(val) {
+  return typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+}
+
+let activeResolutionPromise = null;
+export async function ensureActiveRestaurant(overrideId) {
+  const target = overrideId || restaurantId;
+  if (restaurantCache && isGuid(target) && restaurantCache.restaurantId === target) {
+    return restaurantCache;
+  }
+  if (!activeResolutionPromise) {
+    activeResolutionPromise = api.getRestaurant(target).finally(() => {
+      activeResolutionPromise = null;
+    });
+  }
+  return activeResolutionPromise;
+}
+
 export function setActiveRestaurantId(newId) {
-  if (!newId || newId === restaurantId) return;
+  if (!newId) return;
   restaurantId = newId;
   restaurantCache = null;
   snapshots.clear();
@@ -345,6 +363,7 @@ export const api = {
   createRestaurant: details => request('/restaurants', { method: 'POST', body: details }),
   getRestaurant: async (overrideId) => {
     const target = overrideId || restaurantId;
+    const previousId = restaurantId;
     const data = await request(`/restaurants/${encodeURIComponent(target)}`);
     if (data?.restaurantId) {
       restaurantId = data.restaurantId;
@@ -353,6 +372,9 @@ export const api = {
           localStorage.setItem('rs_active_restaurant_id', data.restaurantId);
         }
       } catch {}
+      if (previousId !== data.restaurantId && typeof window !== 'undefined' && typeof CustomEvent !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('rs_outlet_changed', { detail: data.restaurantId }));
+      }
     }
     restaurantCache = {
       ...data,
@@ -362,7 +384,16 @@ export const api = {
     };
     return restaurantCache;
   },
-  getTables: () => request(`/tables${query({ restaurantId })}`),
+  getTables: async (overrideResId) => {
+    let target = overrideResId || restaurantId;
+    if (!isGuid(target)) {
+      try {
+        const resolved = await ensureActiveRestaurant(target);
+        if (resolved?.restaurantId) target = resolved.restaurantId;
+      } catch {}
+    }
+    return request(`/tables${query({ restaurantId: target })}`);
+  },
   getTableById: async tableId => {
     if (/^\d+$/.test(String(tableId))) return (await api.getTables()).find(table => table.tableNumber === Number(tableId)) || null;
     return request(`/tables/${encodeURIComponent(tableId)}`);
@@ -374,12 +405,32 @@ export const api = {
     return result;
   }),
   validateQr: qrCode => request(`/qr/validate/${encodeURIComponent(qrCode)}`),
-  getCategories: async (overrideResId) => (await request(`/menu/categories${query({ restaurantId: overrideResId || restaurantId })}`)).map(category => ({ ...category, icon: ({ Pizza: '🍕', Burger: '🍔', Chinese: '🥢', Indian: '🍛', 'South Indian': '🥞', 'North Indian': '🥘', Desserts: '🍨', Beverages: '☕' })[category.name] || '🍽️' })),
+  getCategories: async (overrideResId) => {
+    let target = overrideResId || restaurantId;
+    if (!isGuid(target)) {
+      try {
+        const resolved = await ensureActiveRestaurant(target);
+        if (resolved?.restaurantId) target = resolved.restaurantId;
+      } catch {}
+    }
+    return (await request(`/menu/categories${query({ restaurantId: target })}`)).map(category => ({
+      ...category,
+      icon: ({ Pizza: '🍕', Burger: '🍔', Chinese: '🥢', Indian: '🍛', 'South Indian': '🥞', 'North Indian': '🥘', Desserts: '🍨', Beverages: '☕' })[category.name] || '🍽️'
+    }));
+  },
   createCategory: data => request(`/menu/categories`, { method: 'POST', body: { restaurantId, ...data } }),
   updateCategory: (id, data) => request(`/menu/categories/${id}`, { method: 'PUT', body: data }),
   deleteCategory: id => request(`/menu/categories/${id}`, { method: 'DELETE' }),
 
-  getMenuItems: async (overrideResId) => (await request(`/menu/items${query({ restaurantId: overrideResId || restaurantId })}`)).map(item => ({
+  getMenuItems: async (overrideResId) => {
+    let target = overrideResId || restaurantId;
+    if (!isGuid(target)) {
+      try {
+        const resolved = await ensureActiveRestaurant(target);
+        if (resolved?.restaurantId) target = resolved.restaurantId;
+      } catch {}
+    }
+    return (await request(`/menu/items${query({ restaurantId: target })}`)).map(item => ({
     ...item,
     price: Number(item.price),
     vegNonveg: item.vegNonveg || item.vegNonVeg,
@@ -402,7 +453,8 @@ export const api = {
     dietaryTags: parseJson(item.dietaryTagsJson ?? item.dietaryTags, []).filter(t => !/^(vegetarian|non-vegetarian|veg|non-veg)$/i.test(String(t).trim())),
     isSpecial: Boolean(item.isSpecial),
     prepTimeMinutes: Number(item.prepTimeMinutes || 15)
-  })),
+  }));
+  },
   createMenuItem: data => request(`/menu/items`, { method: 'POST', body: { restaurantId, ...data } }),
   updateMenuItem: (id, data) => request(`/menu/items/${id}`, { method: 'PUT', body: data }),
   deleteMenuItem: id => request(`/menu/items/${id}`, { method: 'DELETE' }),
