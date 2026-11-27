@@ -74,14 +74,17 @@ export default function Navbar({ onOpenCart }) {
   const handleSectionScroll = (e, sectionId) => {
     e.preventDefault();
     closeNavigation();
+    const currentQuery = location.search.includes('r=') ? location.search : rQuery;
+    const targetUrl = currentQuery ? `/${currentQuery}#${sectionId}` : `/#${sectionId}`;
+
+    const el = document.getElementById(sectionId);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth' });
+    }
     if (isHome) {
-      const el = document.getElementById(sectionId);
-      if (el) {
-        el.scrollIntoView({ behavior: 'auto' });
-      }
-      navigate(`/#${sectionId}`, { replace: true });
+      navigate(targetUrl, { replace: true });
     } else {
-      navigate(`/#${sectionId}`);
+      navigate(targetUrl);
     }
   };
 
@@ -89,9 +92,9 @@ export default function Navbar({ onOpenCart }) {
     closeNavigation();
     if (isHome) {
       e.preventDefault();
-      window.scrollTo({ top: 0, behavior: 'auto' });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       if (location.hash) {
-        navigate('/');
+        navigate(homePath, { replace: true });
       }
     }
   };
@@ -113,7 +116,6 @@ export default function Navbar({ onOpenCart }) {
 
   const settings = restaurant?.settings || {};
   const sections = settings.sectionsVisibility || {};
-  const showBookTable = sections.showBookTable !== false;
   const showOurStory = sections.showOurStory !== false;
   const showVisit = sections.showVisit !== false;
 
@@ -135,18 +137,9 @@ export default function Navbar({ onOpenCart }) {
       >
         Our menu
       </Link>
-      {showBookTable && (
-        <Link
-          to={`/book-table${rQuery}`}
-          className={navClass(location.pathname === '/book-table')}
-          onClick={closeNavigation}
-        >
-          Reservations
-        </Link>
-      )}
       {showOurStory && (
         <a
-          href="/#our-story"
+          href={rQuery ? `/${rQuery}#our-story` : "/#our-story"}
           className={navClass(storyActive)}
           aria-current={storyActive ? 'location' : undefined}
           onClick={(e) => handleSectionScroll(e, 'our-story')}
@@ -156,7 +149,7 @@ export default function Navbar({ onOpenCart }) {
       )}
       {showVisit && (
         <a
-          href="/#visit"
+          href={rQuery ? `/${rQuery}#visit` : "/#visit"}
           className={navClass(visitActive)}
           aria-current={visitActive ? 'location' : undefined}
           onClick={(e) => handleSectionScroll(e, 'visit')}

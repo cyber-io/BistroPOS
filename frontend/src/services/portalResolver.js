@@ -32,6 +32,8 @@ export function getPortalContext() {
   const hostname = (window.location.hostname || '').toLowerCase();
   const pathname = (window.location.pathname || '/').toLowerCase();
   const searchParams = new URLSearchParams(window.location.search || '');
+  const hash = (window.location.hash || '').toLowerCase();
+  const isWebsiteHash = hash === '#our-story' || hash === '#visit' || hash === '#favourites' || (hash.length > 1 && !hash.startsWith('#/'));
 
   // 1. Query Overrides (useful for development, explicit navigation, & testing)
   const portalParam = (searchParams.get('portal') || searchParams.get('mode') || searchParams.get('app') || '').toLowerCase();
@@ -73,9 +75,9 @@ export function getPortalContext() {
     mode = PORTAL_MODES.CUSTOMER_WEBSITE;
   } else if (pathname === '/') {
     // Root default:
-    // If a restaurant is specified (via query or restaurant subdomain), it is a Customer Website.
+    // If a restaurant is specified (via query or restaurant subdomain or website section hash), it is a Customer Website.
     // Otherwise, root base link loads the Staff / Admin POS portal.
-    if (rParam || (subdomain && !SYSTEM_SUBDOMAINS.has(subdomain))) {
+    if (rParam || (subdomain && !SYSTEM_SUBDOMAINS.has(subdomain)) || isWebsiteHash) {
       mode = PORTAL_MODES.CUSTOMER_WEBSITE;
     } else {
       mode = PORTAL_MODES.STAFF_POS;
@@ -86,6 +88,12 @@ export function getPortalContext() {
   let restaurantIdentifier = rParam ? rParam.trim() : null;
   if (!restaurantIdentifier && subdomain && !STAFF_SUBDOMAINS.has(subdomain) && !SYSTEM_SUBDOMAINS.has(subdomain)) {
     restaurantIdentifier = subdomain;
+  }
+  if (!restaurantIdentifier && isWebsiteHash && typeof localStorage !== 'undefined') {
+    try {
+      const saved = localStorage.getItem('rs_active_restaurant_id');
+      if (saved) restaurantIdentifier = saved;
+    } catch {}
   }
 
   return {
@@ -111,6 +119,11 @@ export function isCustomerWebsiteView(pathname, search) {
   const searchParams = new URLSearchParams(search || '');
   const portalParam = (searchParams.get('portal') || searchParams.get('mode') || '').toLowerCase();
   if (portalParam === 'pos') return false;
+
+  const hash = typeof window !== 'undefined' ? (window.location.hash || '').toLowerCase() : '';
+  if (hash === '#our-story' || hash === '#visit' || hash === '#favourites') {
+    return true;
+  }
 
   const rParam = searchParams.get('r') || searchParams.get('restaurant') || searchParams.get('rst') || searchParams.get('code');
   if (pathname === '/' && !rParam) {
