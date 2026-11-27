@@ -98,6 +98,8 @@ export default function SuperAdminDashboard() {
     return restaurants.filter(r => {
       const matchSearch = String(r.name || '').toLowerCase().includes(search.toLowerCase()) ||
         String(r.email || '').toLowerCase().includes(search.toLowerCase()) ||
+        String(r.restaurantCode || '').toLowerCase().includes(search.toLowerCase()) ||
+        String(r.restaurantId || '').toLowerCase().includes(search.toLowerCase()) ||
         String(r.address || '').toLowerCase().includes(search.toLowerCase());
       const matchStatus = statusFilter === 'ALL' || r.status === statusFilter;
       return matchSearch && matchStatus;
@@ -488,9 +490,23 @@ export default function SuperAdminDashboard() {
                           {r.name?.charAt(0) || 'R'}
                         </div>
                         <div>
-                          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--p-text)' }}>
-                            {r.name}
-                          </h3>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--p-text)' }}>
+                              {r.name}
+                            </h3>
+                            <span style={{
+                              display: 'inline-block',
+                              fontSize: 10,
+                              fontWeight: 700,
+                              padding: '2px 7px',
+                              borderRadius: 6,
+                              background: '#e0e7ff',
+                              color: '#4338ca',
+                              letterSpacing: '0.5px'
+                            }}>
+                              {r.restaurantCode || 'RST-100'}
+                            </span>
+                          </div>
                           <span style={{
                             display: 'inline-block',
                             marginTop: 3,
@@ -537,6 +553,40 @@ export default function SuperAdminDashboard() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <Mail size={13} style={{ flexShrink: 0 }} />
                         <span>{r.email || 'Email not set'}</span>
+                      </div>
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        fontSize: 10,
+                        color: 'var(--p-muted)',
+                        padding: '4px 8px',
+                        background: 'rgba(0,0,0,0.03)',
+                        borderRadius: 6,
+                        fontFamily: 'monospace',
+                        marginTop: 4
+                      }}>
+                        <span title={r.restaurantId} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 230 }}>
+                          UUID: {r.restaurantId}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(r.restaurantId);
+                            showToast('Restaurant UUID copied to clipboard!', 'info');
+                          }}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: 'var(--p-blue, #2563eb)',
+                            cursor: 'pointer',
+                            fontSize: 10,
+                            padding: '1px 4px',
+                            fontWeight: 600
+                          }}
+                        >
+                          Copy
+                        </button>
                       </div>
                     </div>
 
@@ -993,6 +1043,21 @@ function AddRestaurantModal({ onClose, onCreated }) {
 
         {/* Form Body with 24px padding */}
         <form onSubmit={handleSubmit} style={{ padding: 24 }}>
+          <div style={{
+            padding: '10px 14px',
+            background: 'linear-gradient(135deg, rgba(79, 70, 229, 0.08), rgba(6, 182, 212, 0.08))',
+            borderRadius: 10,
+            marginBottom: 16,
+            fontSize: 12,
+            color: '#3730a3',
+            border: '1px solid rgba(79, 70, 229, 0.15)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8
+          }}>
+            <span>✨ <strong>Auto-Generated:</strong> Sequential Restaurant Code (starting from <strong>RST-100</strong>) & Unique Database UUID</span>
+          </div>
+
           {error && (
             <div className="pos-error" style={{ marginBottom: 16, padding: '10px 14px' }}>
               <AlertCircle size={15} /> {error}
@@ -1173,6 +1238,21 @@ Is login se aap apna Menu, Staff aur Table QR codes manage kar sakte hain.`;
 
         {/* Form Body with 24px padding */}
         <form onSubmit={handleSubmit} style={{ padding: 24 }}>
+          <div style={{
+            padding: '10px 14px',
+            background: 'linear-gradient(135deg, rgba(79, 70, 229, 0.08), rgba(6, 182, 212, 0.08))',
+            borderRadius: 10,
+            marginBottom: 16,
+            fontSize: 12,
+            color: '#3730a3',
+            border: '1px solid rgba(79, 70, 229, 0.15)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8
+          }}>
+            <span>✨ <strong>Auto-Generated:</strong> Sequential Restaurant Code (starting from <strong>RST-100</strong>) & Unique Database UUID</span>
+          </div>
+
           {error && (
             <div className="pos-error" style={{ marginBottom: 16, padding: '10px 14px' }}>
               <AlertCircle size={15} /> {error}
@@ -1190,7 +1270,7 @@ Is login se aap apna Menu, Staff aur Table QR codes manage kar sakte hain.`;
             >
               {restaurants.map(r => (
                 <option key={r.restaurantId} value={r.restaurantId}>
-                  {r.name} ({r.address || 'No address'})
+                  {r.name} [{r.restaurantCode || 'RST-100'}] ({r.address || 'No address'})
                 </option>
               ))}
             </select>

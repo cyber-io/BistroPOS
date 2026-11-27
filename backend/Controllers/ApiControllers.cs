@@ -217,6 +217,16 @@ public class RestaurantsController : ControllerBase
         {
             return await GetRestaurantById(extractedGuid);
         }
+
+        // Support lookup by restaurant code: e.g. "RST-100" or numeric "100"
+        var cleanCode = id.Trim().ToUpperInvariant();
+        if (!cleanCode.StartsWith("RST-") && int.TryParse(cleanCode, out _))
+        {
+            cleanCode = $"RST-{cleanCode}";
+        }
+        var byCode = await _db.Restaurants.FirstOrDefaultAsync(r => r.RestaurantCode == cleanCode);
+        if (byCode != null) return Ok(byCode);
+
         var fallback = await _db.Restaurants.FirstOrDefaultAsync(r => r.Status == "ACTIVE");
         if (fallback != null) return Ok(fallback);
         return NotFound();
@@ -291,9 +301,11 @@ public class RestaurantsController : ControllerBase
         if (string.IsNullOrWhiteSpace(dto.Email))
             return BadRequest(new { message = "Contact email is required." });
 
+        var restaurantCode = await UserProvisioning.GenerateRestaurantCodeAsync(_db);
         var restaurant = new Restaurant
         {
             RestaurantId = Guid.NewGuid(),
+            RestaurantCode = restaurantCode,
             Name = dto.Name.Trim(),
             Address = dto.Address.Trim(),
             Phone = dto.Phone.Trim(),

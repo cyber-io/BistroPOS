@@ -22,6 +22,9 @@ ALTER TABLE IF EXISTS restaurant_pos.menu_items ADD COLUMN IF NOT EXISTS prep_ti
 ALTER TABLE IF EXISTS restaurant_pos.users ADD COLUMN IF NOT EXISTS employee_code VARCHAR(50);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_employee_code ON restaurant_pos.users(employee_code) WHERE employee_code IS NOT NULL;
 
+ALTER TABLE IF EXISTS restaurant_pos.restaurants ADD COLUMN IF NOT EXISTS restaurant_code VARCHAR(50);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_restaurants_restaurant_code ON restaurant_pos.restaurants(restaurant_code) WHERE restaurant_code IS NOT NULL;
+
 DO $$
 BEGIN
     ALTER TABLE restaurant_pos.users DROP CONSTRAINT IF EXISTS users_role_check;
@@ -61,6 +64,7 @@ END $$;
 -- ----------------------------------------------------------------------------
 INSERT INTO restaurant_pos.restaurants (
     restaurant_id,
+    restaurant_code,
     name,
     logo,
     address,
@@ -73,6 +77,7 @@ INSERT INTO restaurant_pos.restaurants (
     updated_at
 ) VALUES (
     'a0000000-0000-0000-0000-000000000001',
+    'RST-100',
     'Bistro & Bloom',
     '/favicon.svg',
     'Plot 42, Gourmet Boulevard, Cyber Hub, Gurugram, HR - 122002',
@@ -85,6 +90,7 @@ INSERT INTO restaurant_pos.restaurants (
     NOW()
 ) ON CONFLICT (restaurant_id) DO UPDATE
 SET name = 'Bistro & Bloom',
+    restaurant_code = COALESCE(restaurant_pos.restaurants.restaurant_code, 'RST-100'),
     status = 'ACTIVE',
     updated_at = NOW();
 
