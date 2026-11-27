@@ -36,8 +36,23 @@ public sealed class WorkflowExpiryService(IServiceScopeFactory scopes, ILogger<W
                 }
                 var rules = scope.ServiceProvider.GetRequiredService<IOptions<BusinessRulesOptions>>().Value;
                 var cutoff = DateTime.UtcNow.AddMinutes(-rules.OrderConfirmationTimeoutMinutes);
-                await db.Orders.Where(o => o.Status == OrderStatuses.PendingConfirmation && o.ConfirmationRequestedAt < cutoff)
-                    .ExecuteUpdateAsync(setters => setters.SetProperty(o => o.Status, OrderStatuses.ConfirmationTimeout).SetProperty(o => o.UpdatedAt, DateTime.UtcNow), stoppingToken);
+                if (db.Database.IsNpgsql() || db.Database.IsRelational())
+                {
+                    await db.Orders.Where(o => o.Status == OrderStatuses.PendingConfirmation && o.ConfirmationRequestedAt < cutoff)
+                        .ExecuteUpdateAsync(setters => setters.SetProperty(o => o.Status, OrderStatuses.ConfirmationTimeout).SetProperty(o => o.UpdatedAt, DateTime.UtcNow), stoppingToken);
+                }
+                else
+                {
+                    var timedOutOrders = await db.Orders
+                        .Where(o => o.Status == OrderStatuses.PendingConfirmation && o.ConfirmationRequestedAt < cutoff)
+                        .ToListAsync(stoppingToken);
+                    foreach (var o in timedOutOrders)
+                    {
+                        o.Status = OrderStatuses.ConfirmationTimeout;
+                        o.UpdatedAt = DateTime.UtcNow;
+                    }
+                    if (timedOutOrders.Any()) await db.SaveChangesAsync(stoppingToken);
+                }
                 
                 var localNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, GetLocalTimeZone());
                 var date = DateOnly.FromDateTime(localNow);

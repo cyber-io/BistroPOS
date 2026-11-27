@@ -220,6 +220,8 @@ public class User
     [MaxLength(50)]
     public string Status { get; set; } = "ACTIVE";
     public bool EmailVerified { get; set; } = false;
+    [MaxLength(50)]
+    public string? EmployeeCode { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

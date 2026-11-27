@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { ArrowRight, ArrowUpRight, Clock, Coffee, Leaf, MapPin, Phone, Mail, Plus, QrCode, Truck, UtensilsCrossed } from 'lucide-react';
 import { api, subscribeRealtimeEvents } from '../../services/api';
 import ItemCustomizationModal from '../../components/common/ItemCustomizationModal';
@@ -7,15 +7,29 @@ import { useCart } from '../../context/CartContext';
 import { useNotification } from '../../context/NotificationContext';
 
 const weekdays = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+const DEFAULT_HOURS = {
+  monday: { open: '10:00', close: '23:00' },
+  tuesday: { open: '10:00', close: '23:00' },
+  wednesday: { open: '10:00', close: '23:00' },
+  thursday: { open: '10:00', close: '23:00' },
+  friday: { open: '10:00', close: '23:30' },
+  saturday: { open: '10:00', close: '23:30' },
+  sunday: { open: '10:00', close: '23:00' }
+};
+
 const formatHour = value => {
+  if (!value) return '';
   if (/AM|PM/i.test(value)) return value;
-  const [h, m] = value.split(':');
+  const parts = String(value).split(':');
+  if (parts.length < 2) return value;
+  const [h, m] = parts;
   return `${Number(h) % 12 || 12}:${m} ${Number(h) >= 12 ? 'PM' : 'AM'}`;
 };
 
 const HERO_DISH_IMAGE = '/images/reference/salad-bowl.webp';
 
 export default function HomePage() {
+  const location = useLocation();
   const [restaurant, setRestaurant] = useState(null);
   const [popularItems, setPopularItems] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -26,6 +40,26 @@ export default function HomePage() {
 
   const { addItem, setOrderSource } = useCart();
   const { addToast } = useNotification();
+
+  // Instant section jump handler for in-page navigation (e.g. #our-story, #visit)
+  useEffect(() => {
+    if (location.hash) {
+      const targetId = location.hash.replace('#', '');
+      const jumpToSection = () => {
+        const el = document.getElementById(targetId);
+        if (el) {
+          el.scrollIntoView({ behavior: 'auto' });
+        }
+      };
+      jumpToSection();
+      const t1 = setTimeout(jumpToSection, 40);
+      const t2 = setTimeout(jumpToSection, 150);
+      return () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+      };
+    }
+  }, [location.pathname, location.hash]);
 
   useEffect(() => { setOrderSource('DELIVERY'); }, [setOrderSource]);
 
@@ -45,9 +79,28 @@ export default function HomePage() {
     return () => { active = false; unsubscribe(); };
   }, [retry]);
 
-  const hours = Object.entries(restaurant?.openingHours || {})
-    .filter(([, value]) => value && typeof value === 'object' && value.open && value.close)
-    .sort(([a], [b]) => weekdays.indexOf(a) - weekdays.indexOf(b));
+  const rawHours = (restaurant?.openingHours && typeof restaurant.openingHours === 'object')
+    ? restaurant.openingHours
+    : {};
+
+  const normalizeDayValue = (val, dayName) => {
+    if (val && typeof val === 'object' && val.open && val.close) {
+      return `${formatHour(val.open)} – ${formatHour(val.close)}`;
+    }
+    if (typeof val === 'string' && val.includes('-')) {
+      const [o, c] = val.split('-');
+      return `${formatHour(o.trim())} – ${formatHour(c.trim())}`;
+    }
+    const def = DEFAULT_HOURS[dayName] || { open: '10:00', close: '23:00' };
+    return `${formatHour(def.open)} – ${formatHour(def.close)}`;
+  };
+
+  const hours = weekdays.map(day => {
+    const val = rawHours[day] || rawHours[day.slice(0, 3)];
+    const timeDisplay = normalizeDayValue(val, day);
+    const dayLabel = day.charAt(0).toUpperCase() + day.slice(1);
+    return [dayLabel, timeDisplay];
+  });
   const address = restaurant?.address;
 
   return (
@@ -63,21 +116,29 @@ export default function HomePage() {
             className="website-hero-leaf website-hero-leaf--top"
             src="/images/reference/basil-leaf.webp"
             alt=""
+            loading="lazy"
+            decoding="async"
           />
           <img
             className="website-hero-leaf website-hero-leaf--bottom"
             src="/images/reference/basil-leaf.webp"
             alt=""
+            loading="lazy"
+            decoding="async"
           />
           <img
             className="website-hero-tomato website-hero-tomato--top"
             src="/images/reference/cherry-tomato.webp"
             alt=""
+            loading="lazy"
+            decoding="async"
           />
           <img
             className="website-hero-tomato website-hero-tomato--bottom"
             src="/images/reference/cherry-tomato.webp"
             alt=""
+            loading="lazy"
+            decoding="async"
           />
           <Leaf
             className="website-hero-sketch website-hero-sketch--one"
@@ -212,7 +273,7 @@ export default function HomePage() {
           <div>
             <h3><Clock size={18} />Opening hours</h3>
             {hours.length ? (
-              <dl>{hours.map(([day, value]) => <div key={day}><dt>{day}</dt><dd>{formatHour(value.open)} – {formatHour(value.close)}</dd></div>)}</dl>
+              <dl>{hours.map(([day, timeDisplay]) => <div key={day}><dt>{day}</dt><dd>{timeDisplay}</dd></div>)}</dl>
             ) : <p>Contact the restaurant for today’s opening hours.</p>}
           </div>
           <div>

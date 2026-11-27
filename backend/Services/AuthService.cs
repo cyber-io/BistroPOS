@@ -72,8 +72,10 @@ public class AuthService(
 
     public async Task<AuthResponse> LoginAsync(LoginRequest request)
     {
-        var email = request.Email.Trim().ToLowerInvariant();
-        var user = await db.Users.FirstOrDefaultAsync(x => x.Email.ToLower() == email);
+        var input = request.Email.Trim();
+        var lowerInput = input.ToLowerInvariant();
+        var email = lowerInput;
+        var user = await db.Users.FirstOrDefaultAsync(x => x.Email.ToLower() == lowerInput || (x.EmployeeCode != null && x.EmployeeCode.ToLower() == lowerInput));
 
         if (user != null)
         {
@@ -142,6 +144,81 @@ public class AuthService(
         return new(false, "", null, "Invalid email or password.");
     }
 
+    public async Task<AuthResponse> DemoLoginAsync(string role, Guid? restaurantId = null)
+    {
+        if (!env.IsDevelopment() || !features.Value.EnableDemoLogin)
+        {
+            return new(false, "", null, "Demonstration login is disabled in this environment.");
+        }
+
+        var targetRole = role.Trim().ToUpperInvariant();
+        if (targetRole is not (UserRoles.SuperAdmin or UserRoles.Manager or UserRoles.Receptionist or UserRoles.Kitchen or UserRoles.Waiter or UserRoles.Customer))
+            return new(false, "", null, "Unknown demo role.");
+
+        if (!UserProvisioning.IsInitialized)
+        {
+            await UserProvisioning.EnsureDefaultDataAsync(db, allowDevSeedCredentials: true);
+        }
+
+        User? user = null;
+        if (restaurantId.HasValue && targetRole != UserRoles.SuperAdmin)
+        {
+            user = await db.Users.FirstOrDefaultAsync(u => u.Role == targetRole && u.RestaurantId == restaurantId.Value);
+        }
+
+        if (user == null)
+        {
+            if (targetRole == UserRoles.Manager)
+            {
+                // Prefer the default restaurant manager (Rohit Mehta at Bistro & Bloom) matching Receptionist demo experience
+                user = await db.Users.FirstOrDefaultAsync(u => u.Role == targetRole && u.RestaurantId == UserProvisioning.DefaultRestaurantId)
+                    ?? await db.Users.FirstOrDefaultAsync(u => u.Role == targetRole);
+            }
+            else
+            {
+                user = await db.Users.FirstOrDefaultAsync(u => u.Role == targetRole);
+            }
+        }
+
+        var devSecret = Environment.GetEnvironmentVariable("DEV_DEMO_SEED_PASSWORD") ?? "Password@123";
+        if (user == null && targetRole == UserRoles.Manager)
+        {
+            var firstRestaurant = restaurantId.HasValue
+                ? await db.Restaurants.FindAsync(restaurantId.Value)
+                : await db.Restaurants.FirstOrDefaultAsync();
+
+            var existingByEmail = await db.Users.FirstOrDefaultAsync(u => u.Email.ToLower() == "manager.rahul@royalpalace.com" || u.Email.ToLower() == "manager@sunrisecafe.com");
+            if (existingByEmail != null)
+            {
+                existingByEmail.Role = UserRoles.Manager;
+                existingByEmail.Status = "ACTIVE";
+                user = existingByEmail;
+            }
+            else
+            {
+                user = new User
+                {
+                    UserId = Guid.NewGuid(),
+                    RestaurantId = firstRestaurant?.RestaurantId,
+                    Name = "Rahul Sharma (Manager)",
+                    Email = "manager.rahul@royalpalace.com",
+                    Phone = "+91 98000 00010",
+                    Role = UserRoles.Manager,
+                    Status = "ACTIVE",
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword(devSecret),
+                    EmailVerified = true
+                };
+                db.Users.Add(user);
+            }
+
+            await db.SaveChangesAsync();
+        }
+
+        return user == null
+            ? new(false, "", null, "User account not found for this role.")
+            : await SignedIn(user, "Local demonstration account.");
+    }
+
     public async Task<UserDto?> GetUserByIdAsync(Guid userId)
     {
         var user = await db.Users.FindAsync(userId);
@@ -202,6 +279,7 @@ public class AuthService(
         }
 
         var newUserId = Guid.NewGuid();
+        var empCode = await GenerateEmployeeCodeAsync(db, normalizedRole);
         var user = new User
         {
             UserId = newUserId,
@@ -210,6 +288,7 @@ public class AuthService(
             Email = email,
             Phone = request.Phone?.Trim(),
             Role = normalizedRole,
+            EmployeeCode = empCode,
             Status = "ACTIVE",
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
             EmailVerified = true,
@@ -222,7 +301,7 @@ public class AuthService(
 
         await audit.LogAsync(targetRestaurantId, user.UserId, tenant.CurrentRole, "STAFF_CREATED", "users");
 
-        var dto = new StaffDto(user.UserId, user.UserId, user.RestaurantId, user.Name, user.Email, user.Phone, user.Role, user.Status, user.CreatedAt);
+        var dto = new StaffDto(user.UserId, user.UserId, user.RestaurantId, user.Name, user.Email, user.Phone, user.Role, user.Status, user.CreatedAt, user.EmployeeCode);
         return (true, dto, "Staff account created successfully.");
     }
 
@@ -247,6 +326,7 @@ public class AuthService(
         }
 
         var managerId = Guid.NewGuid();
+        var empCode = await GenerateEmployeeCodeAsync(db, UserRoles.Manager);
         var managerUser = new User
         {
             UserId = managerId,
@@ -255,6 +335,7 @@ public class AuthService(
             Email = email,
             Phone = request.Phone?.Trim(),
             Role = UserRoles.Manager,
+            EmployeeCode = empCode,
             Status = "ACTIVE",
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
             EmailVerified = true,
@@ -267,7 +348,7 @@ public class AuthService(
 
         await audit.LogAsync(request.RestaurantId, managerUser.UserId, tenant.CurrentRole, "MANAGER_CREATED", "users");
 
-        var dto = new StaffDto(managerUser.UserId, managerUser.UserId, managerUser.RestaurantId, managerUser.Name, managerUser.Email, managerUser.Phone, managerUser.Role, managerUser.Status, managerUser.CreatedAt);
+        var dto = new StaffDto(managerUser.UserId, managerUser.UserId, managerUser.RestaurantId, managerUser.Name, managerUser.Email, managerUser.Phone, managerUser.Role, managerUser.Status, managerUser.CreatedAt, managerUser.EmployeeCode);
         return (true, dto, "Restaurant Manager created successfully.");
     }
 
@@ -311,7 +392,8 @@ public class AuthService(
             u.Phone,
             u.Role,
             u.Status,
-            u.CreatedAt
+            u.CreatedAt,
+            u.EmployeeCode
         )).ToList();
     }
 
@@ -373,7 +455,8 @@ public class AuthService(
             user.Role,
             user.Status,
             tenant.IsSuperAdmin,
-            tenant.IsManager
+            tenant.IsManager,
+            user.EmployeeCode
         );
     }
 
@@ -382,7 +465,16 @@ public class AuthService(
         if (string.Equals(user.Status, "DISABLED", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(user.Status, "INACTIVE", StringComparison.OrdinalIgnoreCase))
         {
-            return new(false, "", null, "This account has been disabled by management.");
+            return new(false, "", null, "This staff account has been deactivated or suspended by platform administration.");
+        }
+
+        if (user.Role != UserRoles.SuperAdmin && user.RestaurantId.HasValue)
+        {
+            var restaurant = await db.Restaurants.FindAsync(user.RestaurantId.Value);
+            if (restaurant != null && string.Equals(restaurant.Status, "INACTIVE", StringComparison.OrdinalIgnoreCase))
+            {
+                return new(false, "", null, $"The restaurant '{restaurant.Name}' is currently inactive or suspended. All staff access (Manager, POS, Kitchen, Waiter, Receptionist) has been disabled by platform administration.");
+            }
         }
 
         await audit.LogAsync(user.RestaurantId, user.UserId, user.Role, "USER_LOGIN", "users");
@@ -408,7 +500,38 @@ public class AuthService(
         }
     }
 
-    private static UserDto ToDto(User u) => new(u.UserId, u.RestaurantId, u.Name, u.Email, u.Phone, u.Role, u.Status);
+    private static UserDto ToDto(User u) => new(u.UserId, u.RestaurantId, u.Name, u.Email, u.Phone, u.Role, u.Status, u.EmployeeCode);
+
+    public static async Task<string> GenerateEmployeeCodeAsync(RestaurantDbContext db, string role)
+    {
+        var prefix = role switch
+        {
+            UserRoles.SuperAdmin => "ADM",
+            UserRoles.Manager => "MGR",
+            UserRoles.Receptionist => "REC",
+            UserRoles.Waiter => "WTR",
+            UserRoles.Kitchen => "KIT",
+            _ => "EMP"
+        };
+
+        var prefixWithDash = $"{prefix}-";
+        var existingCodes = await db.Users
+            .Where(u => u.EmployeeCode != null && u.EmployeeCode.StartsWith(prefixWithDash))
+            .Select(u => u.EmployeeCode!)
+            .ToListAsync();
+
+        int maxNumber = 999;
+        foreach (var code in existingCodes)
+        {
+            var numPart = code.Substring(prefixWithDash.Length);
+            if (int.TryParse(numPart, out var n) && n > maxNumber)
+            {
+                maxNumber = n;
+            }
+        }
+
+        return $"{prefix}-{maxNumber + 1}";
+    }
 
     private string GenerateJwtToken(User user)
     {
@@ -419,7 +542,8 @@ public class AuthService(
             new(ClaimTypes.Name, user.Name),
             new(ClaimTypes.Email, user.Email),
             new(ClaimTypes.Role, user.Role),
-            new("status", user.Status)
+            new("status", user.Status),
+            new("employee_code", user.EmployeeCode ?? "")
         };
 
         if (user.RestaurantId.HasValue)
