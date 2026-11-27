@@ -494,18 +494,20 @@ export default function SuperAdminDashboard() {
                             <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--p-text)' }}>
                               {r.name}
                             </h3>
-                            <span style={{
-                              display: 'inline-block',
-                              fontSize: 10,
-                              fontWeight: 700,
-                              padding: '2px 7px',
-                              borderRadius: 6,
-                              background: '#e0e7ff',
-                              color: '#4338ca',
-                              letterSpacing: '0.5px'
-                            }}>
-                              {r.restaurantCode || 'RST-100'}
-                            </span>
+                            {r.restaurantCode && (
+                              <span style={{
+                                display: 'inline-block',
+                                fontSize: 10,
+                                fontWeight: 700,
+                                padding: '2px 7px',
+                                borderRadius: 6,
+                                background: '#e0e7ff',
+                                color: '#4338ca',
+                                letterSpacing: '0.5px'
+                              }}>
+                                {r.restaurantCode}
+                              </span>
+                            )}
                           </div>
                           <span style={{
                             display: 'inline-block',
@@ -1270,7 +1272,7 @@ Is login se aap apna Menu, Staff aur Table QR codes manage kar sakte hain.`;
             >
               {restaurants.map(r => (
                 <option key={r.restaurantId} value={r.restaurantId}>
-                  {r.name} [{r.restaurantCode || 'RST-100'}] ({r.address || 'No address'})
+                  {r.name} {r.restaurantCode ? `[${r.restaurantCode}]` : ''} ({r.address || 'No address'})
                 </option>
               ))}
             </select>
