@@ -375,8 +375,23 @@ public class TableService : ITableService
         var table = await _db.Tables.FindAsync(tableId);
         if (table == null) return null;
 
-        // 1. If table is already AVAILABLE, any lingering previous session is closed and finished
-        if (table.Status == TableStatuses.Available)
+        // 1. If table has no active unpaid orders and is marked AVAILABLE, close lingering previous sessions
+        var activeTableOrders = await _db.Orders
+            .Where(o => o.TableId == tableId && o.Status != OrderStatuses.Cancelled)
+            .ToListAsync();
+
+        bool hasUnpaidOrders = false;
+        if (activeTableOrders.Any())
+        {
+            var ordIds = activeTableOrders.Select(o => o.OrderId).ToList();
+            var paids = await _db.Payments
+                .Where(p => p.OrderId.HasValue && ordIds.Contains(p.OrderId.Value) && p.Status == PaymentStatuses.Paid)
+                .ToListAsync();
+            var paidSums = paids.GroupBy(p => p.OrderId!.Value).ToDictionary(g => g.Key, g => g.Sum(p => p.Amount));
+            hasUnpaidOrders = activeTableOrders.Any(o => (paidSums.TryGetValue(o.OrderId, out var pAmt) ? pAmt : 0m) < (o.Total - 0.05m));
+        }
+
+        if (table.Status == TableStatuses.Available && !hasUnpaidOrders)
         {
             var lingeringSessions = await _db.DiningSessions
                 .Where(s => s.TableId == tableId && s.Status == "ACTIVE")
@@ -387,6 +402,12 @@ public class TableService : ITableService
                 ls.ClosedAt = DateTime.UtcNow;
             }
             if (lingeringSessions.Any()) await _db.SaveChangesAsync();
+        }
+        else if (hasUnpaidOrders && table.Status == TableStatuses.Available)
+        {
+            // Auto-heal table status to OCCUPIED if there are active unpaid orders
+            table.Status = TableStatuses.Occupied;
+            await _db.SaveChangesAsync();
         }
 
         DiningSession? session = null;
@@ -401,7 +422,7 @@ public class TableService : ITableService
             if (session != null)
             {
                 var sessionOrders = await _db.Orders
-                    .Where(o => o.TableId == tableId && o.SessionId == session.SessionId && o.Status != OrderStatuses.Cancelled)
+                    .Where(o => o.TableId == tableId && (o.SessionId == session.SessionId || !o.SessionId.HasValue) && o.Status != OrderStatuses.Cancelled)
                     .ToListAsync();
 
                 if (sessionOrders.Any())
@@ -418,6 +439,8 @@ public class TableService : ITableService
                         // All orders for this session were settled! Close this session so next customer gets a clean table!
                         session.Status = "CLOSED";
                         session.ClosedAt = DateTime.UtcNow;
+                        table.Status = TableStatuses.Available;
+                        table.CurrentCustomerName = null;
                         await _db.SaveChangesAsync();
                         session = null;
                     }
@@ -455,7 +478,7 @@ public class TableService : ITableService
         var orders = await _db.Orders
             .Include(o => o.Items)
             .Where(o => o.TableId == tableId && 
-                        o.SessionId == session.SessionId && 
+                        (o.SessionId == session.SessionId || !o.SessionId.HasValue) && 
                         o.Status != OrderStatuses.Cancelled)
             .OrderByDescending(o => o.CreatedAt)
             .ToListAsync();
@@ -607,10 +630,19 @@ public class HelpRequestService : IHelpRequestService
         _db.HelpRequests.Add(helpReq);
         await _db.SaveChangesAsync();
 
-        // Customer -> Waiter: TABLE 1 IS CALLING FOR HELP (Section 7 & 47)
+        // Customer -> Waiter & Receptionist: TABLE 1 IS CALLING FOR HELP / BILL (Section 7 & 47)
         await _notifications.NotifyRoleAsync(
             request.RestaurantId,
             UserRoles.Waiter,
+            "CUSTOMER_HELP_REQUEST",
+            $"Table {tableNum} needs assistance",
+            $"TABLE {tableNum} IS CALLING FOR HELP ({helpReq.RequestType}): \"{request.Message}\"",
+            new { helpReq.RequestId, TableNumber = tableNum, request.Message, helpReq.RequestType }
+        );
+
+        await _notifications.NotifyRoleAsync(
+            request.RestaurantId,
+            UserRoles.Receptionist,
             "CUSTOMER_HELP_REQUEST",
             $"Table {tableNum} needs assistance",
             $"TABLE {tableNum} IS CALLING FOR HELP ({helpReq.RequestType}): \"{request.Message}\"",

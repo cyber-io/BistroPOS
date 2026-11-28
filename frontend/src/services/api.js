@@ -398,8 +398,14 @@ export const api = {
     if (/^\d+$/.test(String(tableId))) return (await api.getTables()).find(table => table.tableNumber === Number(tableId)) || null;
     return request(`/tables/${encodeURIComponent(tableId)}`);
   },
-  getTableSession: async () => null,
-  closeTableSession: async () => ({ success: true }),
+  getTableSession: async tableId => {
+    if (!tableId) return null;
+    return request(`/tables/${encodeURIComponent(tableId)}/session`).catch(() => null);
+  },
+  closeTableSession: async tableId => {
+    if (!tableId) return { success: true };
+    return request(`/tables/${encodeURIComponent(tableId)}/session/close`, { method: 'POST' });
+  },
   updateTableStatus: (tableId, status, customerName = null, assignedWaiterId = null) => request(`/tables/${tableId}/status`, { method: 'PUT', body: { status, customerName, assignedWaiterId } }).then(result => {
     broadcastEvent('TABLE_STATUS_UPDATED', { tableId, status, customerName });
     return result;

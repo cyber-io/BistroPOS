@@ -43,7 +43,8 @@ import {
   Gamepad2,
   Users,
   User,
-  Phone
+  Phone,
+  History
 } from 'lucide-react';
 
 const getCategoryIcon = (name = '') => {
@@ -63,6 +64,155 @@ const getCategoryIcon = (name = '') => {
   if (n.includes('grill') || n.includes('bbq') || n.includes('tandoor') || n.includes('tikka')) return '🍢';
   return '🍽️';
 };
+
+const ORDER_HISTORY_KEY = 'bistro_customer_order_history';
+
+function getLocalOrderHistory() {
+  try {
+    const raw = localStorage.getItem(ORDER_HISTORY_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveOrderToLocalHistory(order, restName, tableNum) {
+  if (!order || !order.orderId) return;
+  try {
+    const existing = getLocalOrderHistory();
+    const idx = existing.findIndex(o => o.orderId === order.orderId);
+    const entry = {
+      orderId: order.orderId,
+      orderNumber: order.orderNumber,
+      restaurantId: order.restaurantId,
+      restaurantName: restName || order.restaurantName || 'BistroPOS',
+      tableNumber: tableNum || order.tableNumber || '',
+      createdAt: order.createdAt || new Date().toISOString(),
+      status: order.status || 'NEW',
+      paymentStatus: order.paymentStatus || 'UNPAID',
+      total: Number(order.total || 0),
+      items: (order.items || []).map(i => ({
+        orderItemId: i.orderItemId,
+        name: i.name || i.itemName,
+        quantity: Number(i.quantity || 1),
+        price: Number(i.price || 0),
+        lineTotal: Number(i.lineTotal || (Number(i.price || 0) * Number(i.quantity || 1)))
+      }))
+    };
+    if (idx >= 0) {
+      existing[idx] = { ...existing[idx], ...entry };
+    } else {
+      existing.unshift(entry);
+    }
+    localStorage.setItem(ORDER_HISTORY_KEY, JSON.stringify(existing.slice(0, 30)));
+  } catch {}
+}
+
+function MyOrdersModal({ isOpen, onClose, orders = [], onReorder }) {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+      <div className="bg-white rounded-3xl max-w-lg w-full max-h-[85vh] flex flex-col shadow-2xl border border-slate-100 overflow-hidden">
+        {/* Header */}
+        <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center">
+              <History size={18} className="text-amber-300" />
+            </div>
+            <div>
+              <h3 className="text-base font-black tracking-tight">My Orders &amp; History</h3>
+              <p className="text-[11px] text-slate-300">
+                {orders.length} past order{orders.length === 1 ? '' : 's'} saved on this device
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Content list */}
+        <div className="p-4 sm:p-5 overflow-y-auto space-y-3.5 flex-1 bg-slate-50">
+          {orders.length === 0 ? (
+            <div className="py-12 text-center space-y-3">
+              <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-50 text-amber-500 flex items-center justify-center">
+                <ShoppingBag size={24} />
+              </div>
+              <h4 className="text-sm font-bold text-slate-800">No Past Orders Found</h4>
+              <p className="text-xs text-slate-500 max-w-xs mx-auto leading-relaxed">
+                When you place orders at this table or restaurant, they are saved here so you can easily review what you enjoyed.
+              </p>
+            </div>
+          ) : (
+            orders.map((ord, idx) => {
+              const formattedDate = ord.createdAt
+                ? new Date(ord.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                : 'Recent order';
+              return (
+                <div key={ord.orderId || idx} className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-2.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <div>
+                      <span className="font-extrabold text-slate-900 text-sm">
+                        #{ord.orderNumber || 'Order'}
+                      </span>
+                      <span className="text-[11px] text-slate-400 block mt-0.5">
+                        {formattedDate} {ord.tableNumber ? `· Table ${ord.tableNumber}` : ''}
+                      </span>
+                    </div>
+                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase ${
+                      ord.status === 'READY' ? 'bg-purple-100 text-purple-700' :
+                      ord.status === 'DELIVERED' ? 'bg-emerald-100 text-emerald-700' :
+                      ord.status === 'PREPARING' ? 'bg-amber-100 text-amber-700' :
+                      ord.paymentStatus === 'PAID' ? 'bg-emerald-100 text-emerald-700' :
+                      'bg-slate-100 text-slate-700'
+                    }`}>
+                      {ord.status?.replaceAll('_', ' ') || 'CONFIRMED'}
+                    </span>
+                  </div>
+
+                  {/* Items list */}
+                  <div className="p-2.5 rounded-xl bg-slate-50 space-y-1.5 text-xs text-slate-700">
+                    {(ord.items || []).map((item, itemIdx) => (
+                      <div key={item.orderItemId || itemIdx} className="flex items-center justify-between">
+                        <span className="font-medium truncate pr-2">
+                          <b className="text-slate-900">{item.quantity}×</b> {item.name}
+                        </span>
+                        <span className="font-bold text-slate-900 whitespace-nowrap">
+                          ₹{Number(item.lineTotal || (item.price * item.quantity) || 0).toFixed(2)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-xs">
+                    <span className="text-slate-500 font-medium">Total Bill</span>
+                    <span className="font-black text-slate-900 text-sm">
+                      ₹{Number(ord.total || 0).toFixed(2)}
+                    </span>
+                  </div>
+
+                  {onReorder && ord.items && ord.items.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => onReorder(ord)}
+                      className="w-full mt-1 py-2 px-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors border border-emerald-200"
+                    >
+                      <ShoppingBag size={14} />
+                      <span>Re-order dishes to cart</span>
+                    </button>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function QrDineInPage() {
   const { restaurantId, tableId } = useParams();
@@ -105,6 +255,9 @@ export default function QrDineInPage() {
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [selectedItemForModal, setSelectedItemForModal] = useState(null);
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
+  const [receiptOrder, setReceiptOrder] = useState(null);
+  const [isMyOrdersOpen, setIsMyOrdersOpen] = useState(false);
+  const [myOrdersHistory, setMyOrdersHistory] = useState(() => getLocalOrderHistory());
 
   // Guest Identification (Customer Name & Mobile Number)
   const [guestName, setGuestName] = useState('');
@@ -127,12 +280,9 @@ export default function QrDineInPage() {
     setActiveOrder(validOrder);
     activeOrderRef.current = validOrder;
     if (validOrder?.status === 'PENDING_CONFIRMATION') {
-      const promptKey = `${validOrder.orderId}:${validOrder.confirmationRequestedAt || ''}`;
-      if (!promptedOrders.current.has(promptKey)) {
-        promptedOrders.current.add(promptKey);
-        setIsReceiptModalOpen(true);
-      }
-    } else setIsReceiptModalOpen(false);
+      setReceiptOrder(validOrder);
+      setIsReceiptModalOpen(true);
+    }
   }, []);
 
   // Restore guest info from active order or localStorage
@@ -219,6 +369,7 @@ export default function QrDineInPage() {
       setTableOrders(curTableOrders);
       if (curTableOrders.length > 0) {
         setTable(prev => prev ? { ...prev, status: 'OCCUPIED' } : prev);
+        curTableOrders.forEach(ord => saveOrderToLocalHistory(ord, rest?.name, currentTable?.tableNumber));
       }
 
       const context = { tableId: currentTable.tableId, tableNumber: currentTable.tableNumber, restaurantId: rest.restaurantId };
@@ -265,6 +416,7 @@ export default function QrDineInPage() {
           setTableOrders(list);
           if (list.length > 0) {
             setTable(prev => prev ? { ...prev, status: 'OCCUPIED' } : prev);
+            list.forEach(ord => saveOrderToLocalHistory(ord, restaurant?.name, table?.tableNumber));
           }
           const current = activeOrderRef.current;
           if (current) {
@@ -308,8 +460,10 @@ export default function QrDineInPage() {
 
       // Realtime Confirmation Prompt when order is delivered or needs confirmation
       if (type === 'ORDER_CONFIRMATION_PROMPT' || status === 'PENDING_CONFIRMATION') {
+        const target = (tableOrders || []).find(o => o.orderId === payload?.orderId || o.orderNumber === orderNum) || activeOrder || payload?.order;
+        if (target) setReceiptOrder(target);
         setIsReceiptModalOpen(true);
-        addToast(`Order #${orderNum} delivered! Please confirm receipt.`, 'info');
+        addToast(`Order #${orderNum || target?.orderNumber || ''} delivered! Please confirm you have received your order.`, 'info');
       }
 
       if (type === 'WAITER_HELP_ACCEPTED' && payload.tableId === table.tableId) setWaiterArrivingMsg(`The waiter ${payload.waiterName || payload.assignedWaiterName || ''} is coming.`);
@@ -414,6 +568,8 @@ export default function QrDineInPage() {
       const isExistingOrder = activeOrder && activeOrder.orderId === order.orderId;
       updateActiveOrder(order);
       setTableOrders(prev => [order, ...prev.filter(o => o.orderId !== order.orderId)]);
+      saveOrderToLocalHistory(order, restaurant?.name, table?.tableNumber);
+      setMyOrdersHistory(getLocalOrderHistory());
       clearCart();
       setIsCartOpen(false);
       addToast(
@@ -440,6 +596,29 @@ export default function QrDineInPage() {
     } finally {
       placingRef.current = false;
       setIsPlacing(false);
+    }
+  };
+
+  // Re-order past order dishes
+  const handleReorder = (pastOrder) => {
+    if (!pastOrder || !pastOrder.items || !pastOrder.items.length) return;
+    let addedCount = 0;
+    pastOrder.items.forEach(it => {
+      const target = menuItems.find(m =>
+        (m.menuItemId && it.orderItemId && m.menuItemId === it.orderItemId) ||
+        (m.name && it.name && m.name.toLowerCase() === it.name.toLowerCase())
+      );
+      if (target) {
+        addItem(target, Number(it.quantity) || 1);
+        addedCount += Number(it.quantity) || 1;
+      }
+    });
+    if (addedCount > 0) {
+      addToast(`Added ${addedCount} dish(es) from Order #${pastOrder.orderNumber} to your cart!`, 'success');
+      setIsMyOrdersOpen(false);
+      setIsCartOpen(true);
+    } else {
+      addToast('Dishes from this past order are currently not on today’s active menu.', 'warning');
     }
   };
 
@@ -585,7 +764,24 @@ export default function QrDineInPage() {
               <Gamepad2 size={18} />
             </button>
 
-            {/* 3. Help Button */}
+            {/* 3. My Orders & Cache History Button */}
+            <button
+              type="button"
+              onClick={() => {
+                setMyOrdersHistory(getLocalOrderHistory());
+                setIsMyOrdersOpen(true);
+              }}
+              className="h-9 px-2.5 sm:px-3 rounded-2xl bg-white border border-slate-200 text-slate-800 hover:bg-slate-50 flex items-center gap-1.5 transition-all shadow-2xs active:scale-95"
+              title="My Orders & Past History"
+            >
+              <History size={15} className="text-brand-600" />
+              <span className="text-xs font-bold hidden xs:inline">My Orders</span>
+              {myOrdersHistory.length > 0 && (
+                <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+              )}
+            </button>
+
+            {/* 4. Help Button */}
             <button
               type="button"
               onClick={() => setIsHelpOpen(true)}
@@ -786,8 +982,11 @@ export default function QrDineInPage() {
             {activeOrder.status === 'CANCELLED' && <p className="text-xs text-red-700 bg-red-50 p-3 rounded-lg">{activeOrder.rejectionReason || activeOrder.cancellationReason || 'This order was cancelled.'}</p>}
             {activeOrder.status === 'PENDING_CONFIRMATION' && (
               <button
-                onClick={() => setIsReceiptModalOpen(true)}
-                className="w-full py-2 px-3 rounded-xl bg-brand-500 text-white font-bold text-xs flex items-center justify-center space-x-1 shadow-sm"
+                onClick={() => {
+                  setReceiptOrder(activeOrder);
+                  setIsReceiptModalOpen(true);
+                }}
+                className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold text-xs flex items-center justify-center space-x-2 shadow-md animate-bounce"
               >
                 <CheckCircle2 className="w-4 h-4" />
                 <span>Confirm Food Received (Tap Here)</span>
@@ -964,6 +1163,20 @@ export default function QrDineInPage() {
                     </span>
                     <strong className="text-slate-900">₹{Number(ord.total).toFixed(2)}</strong>
                   </div>
+
+                  {ord.status === 'PENDING_CONFIRMATION' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReceiptOrder(ord);
+                        setIsReceiptModalOpen(true);
+                      }}
+                      className="w-full mt-2 py-2 px-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
+                    >
+                      <CheckCircle2 size={14} />
+                      <span>Confirm Food Received (Tap Here)</span>
+                    </button>
+                  )}
                 </div>
               ))
             )}
@@ -1537,12 +1750,25 @@ export default function QrDineInPage() {
       <OrderReceiptModal
         isOpen={isReceiptModalOpen}
         onClose={() => setIsReceiptModalOpen(false)}
-        order={activeOrder}
+        order={receiptOrder || activeOrder || tableOrders.find(o => o.status === 'PENDING_CONFIRMATION') || tableOrders[0]}
         onConfirmed={(received) => {
           if (received) {
             setActiveOrder(prev => prev ? { ...prev, status: 'DELIVERED' } : null);
           }
+          if (table?.tableId) {
+            api.getTableSession(table.tableId).then(sess => {
+              if (sess) setTableSession(sess);
+            }).catch(() => {});
+          }
         }}
+      />
+
+      {/* Feature: My Orders & Past History Modal */}
+      <MyOrdersModal
+        isOpen={isMyOrdersOpen}
+        onClose={() => setIsMyOrdersOpen(false)}
+        orders={myOrdersHistory}
+        onReorder={handleReorder}
       />
 
       {/* Feature 5: Entertainment & Table Lounge Modal (Matches User Screenshots) */}
