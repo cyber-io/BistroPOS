@@ -470,7 +470,7 @@ function TableSessionCard({ session, onDetails, onPay, onAddItems, onMarkDeliver
     }
   }, [session.hasNewItems, session.hasDeliveredItems, itemTab]);
 
-  const isDineIn = session.type === 'TABLE_SESSION' || session.source === 'DINE_IN_QR';
+  const isDineIn = session.type === 'TABLE_SESSION' || session.source === 'DINE_IN_QR' || Boolean(session.tableId) || Boolean(session.tableNumber);
   const tableChipText = isDineIn ? (session.tableNumber ? `A${session.tableNumber}` : 'T') : (session.source === 'DELIVERY' ? <Truck size={14} /> : <ShoppingBag size={14} />);
   const elapsedMinutes = Math.max(0, Math.floor((Date.now() - new Date(session.startedAt).getTime()) / 60000));
   const timeElapsedStr = elapsedMinutes < 1 ? 'Just now' : `${elapsedMinutes}m ago`;
@@ -573,7 +573,7 @@ function TableSessionCard({ session, onDetails, onPay, onAddItems, onMarkDeliver
                     </div>
                     <div className="pos-ticket-entry-actions">
                       <Badge status={ord.status} />
-                      {!isDineIn && (session.source === 'DELIVERY' || ord.source === 'DELIVERY') && (
+                      {!isDineIn && !ord.tableId && !ord.tableNumber && (session.source === 'DELIVERY' || ord.source === 'DELIVERY') && (
                         <button
                           type="button"
                           className="pos-mark-delivered-btn"
@@ -4050,7 +4050,7 @@ function OrderDetails({ order, paid, payments, restaurant, onClose, onPay, onUpd
                   <b style={{ fontSize: 10 }}>{ord.orderNumber} <span style={{ color: 'var(--p-muted)', fontWeight: 400 }}>· {time(ord.createdAt)}</span></b>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <Badge status={ord.status} />
-                    {(order?.source === 'DELIVERY' || ord?.source === 'DELIVERY') && !['DELIVERED', 'PICKED_UP', 'CANCELLED', 'CONFIRMATION_TIMEOUT'].includes(ord.status) && (
+                    {!isSession && !order?.tableId && !order?.tableNumber && !ord?.tableId && !ord?.tableNumber && (order?.source === 'DELIVERY' || ord?.source === 'DELIVERY') && !['DELIVERED', 'PICKED_UP', 'CANCELLED', 'CONFIRMATION_TIMEOUT'].includes(ord.status) && (
                       <button
                         type="button"
                         className="pos-mark-delivered-btn"
@@ -4135,7 +4135,7 @@ function OrderDetails({ order, paid, payments, restaurant, onClose, onPay, onUpd
             <Truck /> Dispatch delivery
           </button>
         )}
-        {order?.source === 'DELIVERY' && order?.status === 'OUT_FOR_DELIVERY' && (
+        {order?.source === 'DELIVERY' && !order?.tableId && !order?.tableNumber && order?.status === 'OUT_FOR_DELIVERY' && (
           <button className="pos-button primary full" disabled={busy} onClick={() => transition('DELIVERED')}>
             Mark delivered
           </button>
