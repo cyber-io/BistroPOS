@@ -72,7 +72,7 @@ export default function LoginPage() {
             </span>
             <p className="text-[11px] font-semibold tracking-[0.18em] uppercase text-[#4778f5] mb-3">Restaurant Workspace</p>
             <h1 className="text-[30px] font-semibold tracking-[-0.04em] leading-tight mb-2">Sign in</h1>
-            <p className="text-[13px] leading-relaxed text-[#8690a2] mb-8">Sign in with your administrator or staff credentials to access the workspace.</p>
+            {/* <p className="text-[13px] leading-relaxed text-[#8690a2] mb-8">Sign in with your administrator or staff credentials to access the workspace.</p> */}
 
             {currentUser && (
               <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 mb-5 text-xs flex items-center justify-between gap-3">
@@ -141,11 +141,11 @@ export default function LoginPage() {
               </button>
             </form>
 
-            <div className="mt-4 text-center">
+            {/* <div className="mt-4 text-center">
               <Link to="/" className="text-xs text-slate-400 hover:text-slate-700 transition-colors">
                 &larr; Return to Restaurant Website
               </Link>
-            </div>
+            </div> */}
           </div>
         </div>
 
