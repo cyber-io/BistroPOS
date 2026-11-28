@@ -108,6 +108,17 @@ public sealed class WorkflowExpiryService(IServiceScopeFactory scopes, ILogger<W
                         table.CurrentCustomerName = null;
                         table.AssignedWaiterId = null;
                         table.UpdatedAt = DateTime.UtcNow;
+
+                        // Close any lingering dining sessions so next guest gets a fresh table
+                        var lingering = await db.DiningSessions
+                            .Where(s => s.TableId == table.TableId && s.Status == "ACTIVE")
+                            .ToListAsync(stoppingToken);
+                        foreach (var ls in lingering)
+                        {
+                            ls.Status = "CLOSED";
+                            ls.ClosedAt = DateTime.UtcNow;
+                        }
+
                         logger.LogInformation("Table A{TableNumber} automatically marked AVAILABLE after 2 minutes of cleaning.", table.TableNumber);
 
                         var helpReqs = await db.HelpRequests

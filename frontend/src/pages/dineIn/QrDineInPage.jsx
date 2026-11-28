@@ -207,14 +207,19 @@ export default function QrDineInPage() {
       setRestaurant(rest); setTable(currentTable); setCategories(cats); setMenuItems(itemsList); setTableSession(session);
 
       const sessionOrders = Array.isArray(session?.orders) ? session.orders : [];
-      const orderMap = new Map();
-      sessionOrders.forEach(o => {
-        if (o && o.orderId && o.status !== 'CANCELLED') orderMap.set(o.orderId, o);
-      });
-      orders.filter(o => o.tableId === currentTable.tableId && o.status !== 'CANCELLED').forEach(o => {
-        if (o && o.orderId) orderMap.set(o.orderId, o);
-      });
-      const curTableOrders = Array.from(orderMap.values()).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      // Only keep orders that belong to the active dining session and are not cancelled
+      const activeSessionOrders = sessionOrders.filter(o => o && o.orderId && o.status !== 'CANCELLED');
+
+      // Check if there are active unpaid orders in this table session
+      const hasUnpaidSessionOrders = activeSessionOrders.some(o =>
+        o.paymentStatus !== 'PAID' && (Number(o.paidAmount) || 0) < (Number(o.total) || 0) - 0.05
+      );
+
+      // If table is AVAILABLE or has no active orders in current session, start completely fresh!
+      const curTableOrders = (currentTable.status === 'AVAILABLE' || (!hasUnpaidSessionOrders && activeSessionOrders.length === 0))
+        ? []
+        : activeSessionOrders;
+
       setTableOrders(curTableOrders);
 
       const context = { tableId: currentTable.tableId, tableNumber: currentTable.tableNumber, restaurantId: rest.restaurantId };
@@ -226,7 +231,7 @@ export default function QrDineInPage() {
         order.status !== 'CANCELLED' &&
         order.paymentStatus !== 'PAID' &&
         (Number(order.paidAmount) || 0) < (Number(order.total) || 0) - 0.05
-      ) || curTableOrders.find(order => !['CANCELLED'].includes(order.status)) || null;
+      ) || null;
       updateActiveOrder(activeTableOrder);
       if (!activeTableOrder) {
         try { localStorage.removeItem(`bistro_table_guest_${currentTable.tableId}`); } catch {}
@@ -251,18 +256,17 @@ export default function QrDineInPage() {
 
     const syncTableSession = async () => {
       try {
-        const [sess, localOrders] = await Promise.all([
-          api.getTableSession(table.tableId).catch(() => null),
-          api.getOrders().catch(() => [])
-        ]);
+        const sess = await api.getTableSession(table.tableId).catch(() => null);
         if (!active) return;
         if (sess) setTableSession(sess);
         const sessOrders = Array.isArray(sess?.orders) ? sess.orders : [];
-        const deviceOrders = localOrders.filter(o => o.tableId === table.tableId);
-        const map = new Map();
-        sessOrders.forEach(o => { if (o && o.orderId && o.status !== 'CANCELLED') map.set(o.orderId, o); });
-        deviceOrders.forEach(o => { if (o && o.orderId && o.status !== 'CANCELLED') map.set(o.orderId, o); });
-        const list = Array.from(map.values()).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        const activeOrders = sessOrders.filter(o => o && o.orderId && o.status !== 'CANCELLED');
+        const hasUnpaid = activeOrders.some(o =>
+          o.paymentStatus !== 'PAID' && (Number(o.paidAmount) || 0) < (Number(o.total) || 0) - 0.05
+        );
+        const list = (table.status === 'AVAILABLE' || (!hasUnpaid && activeOrders.length === 0))
+          ? []
+          : activeOrders;
         if (active) {
           setTableOrders(list);
           const current = activeOrderRef.current;
@@ -274,7 +278,7 @@ export default function QrDineInPage() {
               o.status !== 'CANCELLED' &&
               o.paymentStatus !== 'PAID' &&
               (Number(o.paidAmount) || 0) < (Number(o.total) || 0) - 0.05
-            ) || list.find(o => !['CANCELLED'].includes(o.status)) || null;
+            ) || null;
             if (pending) updateActiveOrder(pending);
           }
         }
@@ -820,16 +824,31 @@ export default function QrDineInPage() {
                       ₹{totalTableSpend.toFixed(2)}
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedOrderForFeedback(tableOrders[0]);
-                      setIsFeedbackReceiptOpen(true);
-                    }}
-                    className="w-full py-2.5 px-4 rounded-xl bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-700 font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all active:scale-95"
-                  >
-                    <Receipt size={14} /> Receipt & Review
-                  </button>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedOrderForFeedback(tableOrders[0]);
+                        setIsFeedbackReceiptOpen(true);
+                      }}
+                      className="w-full py-2.5 px-3 rounded-xl bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-700 font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all active:scale-95"
+                    >
+                      <Receipt size={14} /> Receipt & Review
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTableOrders([]);
+                        updateActiveOrder(null);
+                        try { localStorage.removeItem(`bistro_table_guest_${table?.tableId}`); } catch {}
+                        addToast('Table session reset! You can now place fresh orders.', 'success');
+                        setActiveTab('MENU');
+                      }}
+                      className="w-full py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all active:scale-95"
+                    >
+                      <Plus size={14} /> Start Fresh Order
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

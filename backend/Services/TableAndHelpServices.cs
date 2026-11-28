@@ -188,6 +188,17 @@ public class TableService : ITableService
         {
             table.CurrentCustomerName = null;
             table.AssignedWaiterId = null;
+
+            // Automatically close all active dining sessions when table becomes AVAILABLE
+            var activeSessions = await _db.DiningSessions
+                .Where(s => s.TableId == table.TableId && s.Status == "ACTIVE")
+                .ToListAsync();
+            foreach (var s in activeSessions)
+            {
+                s.Status = "CLOSED";
+                s.ClosedAt = DateTime.UtcNow;
+            }
+
             var activeRes = await _db.Reservations
                 .Where(r => r.TableId == table.TableId && (r.Status == ReservationStatuses.Seated || r.Status == ReservationStatuses.Arrived))
                 .ToListAsync();
@@ -364,6 +375,20 @@ public class TableService : ITableService
         var table = await _db.Tables.FindAsync(tableId);
         if (table == null) return null;
 
+        // 1. If table is already AVAILABLE, any lingering previous session is closed and finished
+        if (table.Status == TableStatuses.Available)
+        {
+            var lingeringSessions = await _db.DiningSessions
+                .Where(s => s.TableId == tableId && s.Status == "ACTIVE")
+                .ToListAsync();
+            foreach (var ls in lingeringSessions)
+            {
+                ls.Status = "CLOSED";
+                ls.ClosedAt = DateTime.UtcNow;
+            }
+            if (lingeringSessions.Any()) await _db.SaveChangesAsync();
+        }
+
         DiningSession? session = null;
         try
         {
@@ -372,20 +397,42 @@ public class TableService : ITableService
                 .OrderByDescending(s => s.CreatedAt)
                 .FirstOrDefaultAsync();
 
+            // Check if this existing active session's orders were already ALL paid and settled
+            if (session != null)
+            {
+                var sessionOrders = await _db.Orders
+                    .Where(o => o.TableId == tableId && o.SessionId == session.SessionId && o.Status != OrderStatuses.Cancelled)
+                    .ToListAsync();
+
+                if (sessionOrders.Any())
+                {
+                    var sIds = sessionOrders.Select(o => o.OrderId).ToList();
+                    var sPayments = await _db.Payments
+                        .Where(p => p.OrderId.HasValue && sIds.Contains(p.OrderId.Value) && p.Status == PaymentStatuses.Paid)
+                        .ToListAsync();
+                    var sPaidSum = sPayments.GroupBy(p => p.OrderId!.Value).ToDictionary(g => g.Key, g => g.Sum(p => p.Amount));
+
+                    bool allPaid = sessionOrders.All(o => (sPaidSum.TryGetValue(o.OrderId, out var pAmt) ? pAmt : 0m) >= (o.Total - 0.05m));
+                    if (allPaid)
+                    {
+                        // All orders for this session were settled! Close this session so next customer gets a clean table!
+                        session.Status = "CLOSED";
+                        session.ClosedAt = DateTime.UtcNow;
+                        await _db.SaveChangesAsync();
+                        session = null;
+                    }
+                }
+            }
+
             if (session == null)
             {
-                var earliestActiveOrder = await _db.Orders
-                    .Where(o => o.TableId == tableId && o.Status != OrderStatuses.Cancelled && o.CreatedAt >= DateTime.UtcNow.AddHours(-6))
-                    .OrderBy(o => o.CreatedAt)
-                    .FirstOrDefaultAsync();
-
                 session = new DiningSession
                 {
                     RestaurantId = table.RestaurantId,
                     TableId = tableId,
                     SessionCode = $"SES-{table.TableNumber}-{DateTime.UtcNow:MMddHHmm}",
                     Status = "ACTIVE",
-                    CreatedAt = earliestActiveOrder != null ? earliestActiveOrder.CreatedAt.AddSeconds(-1) : DateTime.UtcNow
+                    CreatedAt = DateTime.UtcNow
                 };
                 _db.DiningSessions.Add(session);
                 await _db.SaveChangesAsync();
@@ -408,9 +455,8 @@ public class TableService : ITableService
         var orders = await _db.Orders
             .Include(o => o.Items)
             .Where(o => o.TableId == tableId && 
-                       (o.SessionId == session.SessionId || 
-                        o.CreatedAt >= session.CreatedAt ||
-                        (o.Status != OrderStatuses.Cancelled && o.CreatedAt >= DateTime.UtcNow.AddHours(-6))))
+                        o.SessionId == session.SessionId && 
+                        o.Status != OrderStatuses.Cancelled)
             .OrderByDescending(o => o.CreatedAt)
             .ToListAsync();
 
@@ -504,14 +550,17 @@ public class TableService : ITableService
     {
         try
         {
-            var session = await _db.DiningSessions
+            var sessions = await _db.DiningSessions
                 .Where(s => s.TableId == tableId && s.Status == "ACTIVE")
-                .FirstOrDefaultAsync();
+                .ToListAsync();
 
-            if (session == null) return false;
+            if (!sessions.Any()) return false;
 
-            session.Status = "CLOSED";
-            session.ClosedAt = DateTime.UtcNow;
+            foreach (var session in sessions)
+            {
+                session.Status = "CLOSED";
+                session.ClosedAt = DateTime.UtcNow;
+            }
             await _db.SaveChangesAsync();
             return true;
         }

@@ -139,30 +139,44 @@ public class OrderService : IOrderService
         var customerPhone = request.CustomerPhone;
         if (request.Source == OrderSources.DineInQr && request.TableId.HasValue)
         {
-            var existingActiveOrder = await _db.Orders
-                .Include(o => o.Table)
-                .Where(o => o.RestaurantId == request.RestaurantId
-                         && o.TableId == request.TableId.Value
-                         && o.Source == OrderSources.DineInQr
-                         && o.Status != OrderStatuses.Cancelled
-                         && o.Status != OrderStatuses.ConfirmationTimeout)
-                .OrderByDescending(o => o.CreatedAt)
+            var activeSession = await _db.DiningSessions
+                .Where(s => s.TableId == request.TableId.Value && s.Status == "ACTIVE")
+                .OrderByDescending(s => s.CreatedAt)
                 .FirstOrDefaultAsync();
 
-            if (existingActiveOrder != null)
+            if (activeSession != null)
             {
-                isAddOnOrder = true;
-                if (!existingSessionId.HasValue && existingActiveOrder.SessionId.HasValue)
+                var existingActiveOrder = await _db.Orders
+                    .Include(o => o.Table)
+                    .Where(o => o.RestaurantId == request.RestaurantId
+                             && o.TableId == request.TableId.Value
+                             && o.SessionId == activeSession.SessionId
+                             && o.Source == OrderSources.DineInQr
+                             && o.Status != OrderStatuses.Cancelled
+                             && o.Status != OrderStatuses.ConfirmationTimeout)
+                    .OrderByDescending(o => o.CreatedAt)
+                    .FirstOrDefaultAsync();
+
+                if (existingActiveOrder != null)
                 {
-                    existingSessionId = existingActiveOrder.SessionId;
-                }
-                if (string.IsNullOrWhiteSpace(customerName))
-                {
-                    customerName = existingActiveOrder.CustomerName;
-                }
-                if (string.IsNullOrWhiteSpace(customerPhone))
-                {
-                    customerPhone = existingActiveOrder.CustomerPhone;
+                    var paidSum = await _db.Payments
+                        .Where(p => p.OrderId == existingActiveOrder.OrderId && p.Status == PaymentStatuses.Paid)
+                        .SumAsync(p => (decimal?)(p.Amount - p.TipAmount)) ?? 0;
+
+                    // Only treat as an add-on if the existing order in this session is unpaid or actively being prepared
+                    if (paidSum < existingActiveOrder.Total - 0.05m || existingActiveOrder.Status != OrderStatuses.Delivered)
+                    {
+                        isAddOnOrder = true;
+                        existingSessionId = activeSession.SessionId;
+                        if (string.IsNullOrWhiteSpace(customerName))
+                        {
+                            customerName = existingActiveOrder.CustomerName;
+                        }
+                        if (string.IsNullOrWhiteSpace(customerPhone))
+                        {
+                            customerPhone = existingActiveOrder.CustomerPhone;
+                        }
+                    }
                 }
             }
         }
