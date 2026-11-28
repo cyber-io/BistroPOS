@@ -481,25 +481,18 @@ export default function QrDineInPage() {
       {/* 1. Mobile-First Dedicated QR Menu Header matching screenshot */}
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-xs">
         <div className="max-w-2xl mx-auto px-3 sm:px-4 py-3 flex items-center justify-between gap-2">
-          {/* Left: Restaurant Logo & Table Title */}
-          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
-            <img
-              src={restaurant.logo || '/favicon.svg'}
-              alt={restaurant?.name}
-              className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl object-cover shadow-sm ring-1 ring-slate-200 shrink-0"
-            />
-            <div className="min-w-0 flex-1">
-              <h1 className="text-sm font-black text-slate-900 leading-tight truncate">
-                {restaurant.name}
-              </h1>
-              <div className="flex items-center gap-1.5 sm:gap-2 mt-0.5 min-w-0">
-                <span className="inline-flex items-center px-2 sm:px-2.5 py-0.5 rounded-full text-[11px] font-black bg-[#1a382b] text-white shadow-xs shrink-0 whitespace-nowrap">
-                  {tableTitle(table)}
-                </span>
-                <span className="text-[11px] sm:text-xs text-slate-500 font-medium truncate">
-                  Dine-In Menu
-                </span>
-              </div>
+          {/* Left: Restaurant Name & Table Title */}
+          <div className="min-w-0 flex-1">
+            <h1 className="text-sm font-black text-slate-900 leading-tight truncate">
+              {restaurant.name}
+            </h1>
+            <div className="flex items-center gap-1.5 sm:gap-2 mt-0.5 min-w-0">
+              <span className="inline-flex items-center px-2 sm:px-2.5 py-0.5 rounded-full text-[11px] font-black bg-[#1a382b] text-white shadow-xs shrink-0 whitespace-nowrap">
+                {tableTitle(table)}
+              </span>
+              <span className="text-[11px] sm:text-xs text-slate-500 font-medium truncate">
+                Dine-In Menu
+              </span>
             </div>
           </div>
 
