@@ -1760,18 +1760,37 @@ export default function PosWorkspace() {
                         </footer>
                       </article>
                     ))}
-                    {openHelp.map(h => (
-                      <article className="pos-issue-card" key={h.requestId}>
-                        <div><b>{tableTitle(h)} needs assistance</b><Badge status={h.status} /></div>
-                        <p>{h.message}</p>
-                        <footer>
-                          <span>{h.assignedWaiterName ? `Assigned to ${h.assignedWaiterName}` : `Requested at ${time(h.createdAt)}`}</span>
-                          {h.status === 'PENDING' && (
-                            <button className="pos-button small primary" disabled={busy} onClick={() => run(() => api.acceptHelpRequest(h.requestId, currentUser.name), 'Assistance assigned')}>Accept request</button>
-                          )}
-                        </footer>
-                      </article>
-                    ))}
+                    {openHelp.map(h => {
+                      const isCleaning = h.message?.toLowerCase().includes('cleaning') || h.message?.toLowerCase().includes('auto-release');
+                      const isPayment = h.message?.toLowerCase().includes('payment');
+                      const titleText = isCleaning
+                        ? `${tableTitle(h)} · Cleaning update`
+                        : isPayment
+                        ? `${tableTitle(h)} · Payment completed`
+                        : `${tableTitle(h)} · Assistance requested`;
+
+                      return (
+                        <article className="pos-issue-card" key={h.requestId}>
+                          <div>
+                            <b>
+                              <Bell size={14} style={{ display: 'inline', marginRight: 6, color: isCleaning ? '#0284c7' : '#f59e0b' }} />
+                              {titleText}
+                            </b>
+                            {isCleaning ? (
+                              <span style={{ fontSize: 9.5, padding: '2px 7px', borderRadius: 4, background: 'rgba(56, 189, 248, 0.12)', color: '#0284c7', fontWeight: 650 }}>
+                                Auto-cleaning
+                              </span>
+                            ) : (
+                              <Badge status={h.status} />
+                            )}
+                          </div>
+                          <p>{h.message}</p>
+                          <footer>
+                            <span>{h.assignedWaiterName ? `Assigned to ${h.assignedWaiterName}` : `Notified at ${time(h.createdAt)}`}</span>
+                          </footer>
+                        </article>
+                      );
+                    })}
                     {!openIssues.length && !openHelp.length && (
                       <section className="pos-panel"><Empty icon={Bell} title="You're all caught up">Customer requests and order issues will appear here.</Empty></section>
                     )}
