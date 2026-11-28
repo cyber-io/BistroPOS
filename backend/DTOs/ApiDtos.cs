@@ -499,7 +499,8 @@ public record UpdateStaffDto(
     string? Phone,
     string? Status,
     Guid? RestaurantId = null,
-    string? Password = null
+    string? Password = null,
+    string? Role = null
 );
 
 public record ResetStaffPasswordDto(
