@@ -17,8 +17,13 @@
         };
         const _origWarn = console.warn;
         console.warn = function (...args) {
-          if (args.some(a => typeof a === 'string' && (a.includes('Permissions-Policy') || a.includes('browsing-topics')))) return;
+          if (args.some(a => typeof a === 'string' && (a.includes('Permissions-Policy') || a.includes('browsing-topics') || a.includes('private-state-token')))) return;
           _origWarn.apply(console, args);
+        };
+        const _origError = console.error;
+        console.error = function (...args) {
+          if (args.some(a => typeof a === 'string' && (a.includes('Permissions-Policy') || a.includes('browsing-topics') || a.includes('private-state-token')))) return;
+          _origError.apply(console, args);
         };
       }
     </script>
