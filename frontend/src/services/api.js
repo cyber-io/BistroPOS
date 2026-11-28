@@ -378,7 +378,7 @@ export const api = {
     try {
       const data = await request(`/tables/${encodeURIComponent(tableId)}/session`);
       if (data && Array.isArray(data.orders)) {
-        data.orders = data.orders.map(normalizeOrder);
+        data.orders = data.orders.map(rememberOrder);
       }
       return data;
     } catch {
@@ -393,8 +393,7 @@ export const api = {
       return [];
     }
   },
-  getTableSession: async () => null,
-  closeTableSession: async () => ({ success: true }),
+  closeTableSession: async (tableId) => request(`/tables/${encodeURIComponent(tableId)}/session/close`, { method: 'POST' }).catch(() => ({ success: true })),
   updateTableStatus: (tableId, status, customerName = null, assignedWaiterId = null) => request(`/tables/${tableId}/status`, { method: 'PUT', body: { status, customerName, assignedWaiterId } }).then(result => {
     broadcastEvent('TABLE_STATUS_UPDATED', { tableId, status, customerName });
     return result;

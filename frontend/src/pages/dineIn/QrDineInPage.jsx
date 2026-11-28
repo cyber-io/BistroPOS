@@ -223,17 +223,24 @@ export default function QrDineInPage() {
       if (switchOrderContext) switchOrderContext('DINE_IN_QR', context);
       else { setOrderSource('DINE_IN_QR'); setTableInfo(context); }
       // Match active UNPAID order for this table
-      const activeTableOrder = (orders || []).find(order =>
-        order.source === 'DINE_IN_QR' &&
+      const activeTableOrder = curTableOrders.find(order =>
         order.tableId === currentTable.tableId &&
-        order.restaurantId === rest.restaurantId &&
         order.status !== 'CANCELLED' &&
         order.paymentStatus !== 'PAID' &&
         (Number(order.paidAmount) || 0) < (Number(order.total) || 0) - 0.05
-      );
-      updateActiveOrder(activeTableOrder || curTableOrders.find(order => !['DELIVERED', 'CANCELLED'].includes(order.status)) || null);
+      ) || curTableOrders.find(order => !['CANCELLED'].includes(order.status)) || null;
+      updateActiveOrder(activeTableOrder);
       if (!activeTableOrder) {
         try { localStorage.removeItem(`bistro_table_guest_${currentTable.tableId}`); } catch {}
+      } else {
+        try {
+          if (activeTableOrder.customerName) {
+            localStorage.setItem(`bistro_table_guest_${currentTable.tableId}`, JSON.stringify({
+              name: activeTableOrder.customerName,
+              phone: activeTableOrder.customerPhone || ''
+            }));
+          }
+        } catch {}
       }
     } catch (err) { if (sequence === loadSequence.current) setLoadError(err.message || 'Unable to open the table menu. Please try again.'); }
     finally { if (sequence === loadSequence.current) setIsLoading(false); }
@@ -265,7 +272,11 @@ export default function QrDineInPage() {
             const updated = list.find(o => o.orderId === current.orderId);
             if (updated) updateActiveOrder(updated);
           } else {
-            const pending = list.find(o => !['DELIVERED'].includes(o.status));
+            const pending = list.find(o =>
+              o.status !== 'CANCELLED' &&
+              o.paymentStatus !== 'PAID' &&
+              (Number(o.paidAmount) || 0) < (Number(o.total) || 0) - 0.05
+            ) || list.find(o => !['CANCELLED'].includes(o.status)) || null;
             if (pending) updateActiveOrder(pending);
           }
         }
@@ -282,7 +293,7 @@ export default function QrDineInPage() {
       if (type === 'HELP_REQUEST_RESOLVED' && payload.tableId === table.tableId) setWaiterArrivingMsg(null);
       if (type === 'FOOD_AVAILABILITY_CHANGED') setMenuItems(previous => previous.map(item => item.menuItemId === payload.menuItemId ? { ...item, availability: payload.availability } : item));
     });
-    const timer = setInterval(syncTableSession, 30000);
+    const timer = setInterval(syncTableSession, 5000);
     return () => { active = false; unsub(); clearInterval(timer); };
   }, [table, updateActiveOrder]);
 
