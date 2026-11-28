@@ -708,7 +708,7 @@ function TableSessionCard({ session, onDetails, onPay, onAddItems, onMarkDeliver
           title="Toggle kitchen and item details"
         >
           {expanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
-          {expanded ? 'Collapse' : 'View details'}
+          {expanded ? 'Collapse' : 'View items'}
         </button>
 
         {isDineIn && !session.isPaid && !session.isCancelled && (
