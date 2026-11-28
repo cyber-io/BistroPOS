@@ -383,8 +383,30 @@ export default function KitchenDashboard() {
 
     {error && <div className="pos-info-box" role="alert" style={{ color: '#ce626a', marginBottom: 18 }}><AlertCircle size={16} /><span>{error}</span><button className="pos-button small" style={{ marginLeft: 'auto' }} onClick={() => load()}>Try again</button></div>}
     {loading ? <Spinner /> : tab === 'AVAILABILITY' ? <div className="pos-panel"><div className="pos-panel-header"><h2>Menu availability</h2><span className="pos-count">{menu.filter(item => !item.availability).length} sold out</span></div>{!visibleMenu.length ? <Empty icon={ChefHat} title="No dishes found">Try a different dish name.</Empty> : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(270px,1fr))' }}>{visibleMenu.map(item => <div className="pos-stock-item" key={item.menuItemId} style={{ padding: 16 }}><img src={item.image} alt="" /><div style={{ minWidth: 0 }}><b>{item.name}</b><small>{item.categoryName}</small></div><button className={`pos-button small ${item.availability ? '' : 'danger'}`} disabled={Boolean(busy)} aria-label={`${item.availability ? 'Mark sold out' : 'Mark available'}: ${item.name}`} onClick={() => toggle(item)} style={{ marginLeft: 'auto' }}>{item.availability ? <Check size={13} /> : <Ban size={13} />}{busy === item.menuItemId ? 'Saving…' : item.availability ? 'Available' : 'Sold out'}</button></div>)}</div>}</div> : !tickets.length ? <div className="pos-panel"><Empty icon={ChefHat} title={error ? 'Orders could not be loaded' : 'The pass is clear'}>{error ? 'Retry when your connection is restored.' : search || source !== 'ALL' ? 'No orders match these filters.' : `No ${tabs.find(([key]) => key === tab)?.[1].toLowerCase()} orders right now.`}</Empty></div> : <div className="pos-orders-grid">
-      {tickets.map(order => <article className="pos-panel" key={order.orderId} style={{ display: 'flex', flexDirection: 'column' }}>
-        <header className="pos-panel-header" style={{ alignItems: 'flex-start' }}><div><strong style={{ fontSize: 12 }}>{order.orderNumber}</strong><p style={{ color: 'var(--p-muted)', fontSize: 9, marginTop: 7 }}>{order.source === 'DINE_IN_QR' ? tableTitle(order) : label(order.source)} · {time(order.createdAt)}</p></div><Badge status={order.status} /></header>
+      {tickets.map(order => {
+        const isAddOn = Boolean(
+          order.tableId &&
+          orders.some(o => o.orderId !== order.orderId && o.tableId === order.tableId && o.status !== 'CANCELLED' && new Date(o.createdAt) < new Date(order.createdAt))
+        );
+
+        return (
+          <article className="pos-panel" key={order.orderId} style={{ display: 'flex', flexDirection: 'column' }}>
+            <header className="pos-panel-header" style={{ alignItems: 'flex-start' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <strong style={{ fontSize: 12 }}>{order.orderNumber}</strong>
+                  {isAddOn && (
+                    <span style={{ fontSize: 9, background: 'rgba(99, 102, 241, 0.12)', color: '#4f46e5', border: '1px solid rgba(99, 102, 241, 0.25)', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
+                      + Add-on Ticket
+                    </span>
+                  )}
+                </div>
+                <p style={{ color: 'var(--p-muted)', fontSize: 9, marginTop: 7 }}>
+                  {order.source === 'DINE_IN_QR' ? tableTitle(order) : label(order.source)} · {time(order.createdAt)}
+                </p>
+              </div>
+              <Badge status={order.status} />
+            </header>
         <div style={{ padding: 15, flex: 1 }}><div style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--p-muted)', fontSize: 9, marginBottom: 13 }}><Clock size={12} />{Math.max(0, Math.floor((Date.now() - new Date(order.createdAt).getTime()) / 60000))} min ago{order.customerName && !order.customerName.startsWith('Table ') && <span style={{ marginLeft: 'auto' }}>{order.customerName}</span>}</div>
           {order.items.map((item, index) => <div key={item.orderItemId || index} className="pos-line-item" style={{ padding: '10px 0', alignItems: 'flex-start' }}><div><b>{item.name}</b>{item.customization && Object.keys(item.customization).length > 0 && <small>{Object.entries(item.customization).map(([key, value]) => `${label(key)}: ${Array.isArray(value) ? value.join(', ') : value}`).join(' · ')}</small>}{item.specialInstruction && <small style={{ color: '#d59b37' }}>Note: {item.specialInstruction}</small>}</div><b style={{ color: 'var(--p-blue)' }}>×{item.quantity}</b></div>)}
           {order.specialInstructions && <div className="pos-info-box" style={{ color: '#b58b3e' }}>{order.specialInstructions}</div>}{(order.rejectionReason || order.cancellationReason) && <div className="pos-info-box" style={{ color: '#ce626a' }}>{order.rejectionReason || order.cancellationReason}</div>}
@@ -403,7 +425,9 @@ export default function KitchenDashboard() {
             </p>
           )}
         </footer>
-      </article>)}
+          </article>
+        );
+      })}
     </div>}
     {rejectOrder && <Modal title={`Reject ${rejectOrder.orderNumber}`} onClose={() => { if (!busy) setRejectOrder(null); }}><div className="pos-modal-body"><p style={{ color: 'var(--p-muted)', fontSize: 11, lineHeight: 1.8, marginBottom: 18 }}>Let the customer know why their order cannot be prepared.</p><label className="pos-field"><span>Reason</span><select className="pos-select" style={{ width: '100%' }} value={reason} onChange={event => setReason(event.target.value)}><option>Ingredients out of stock</option><option>Kitchen at maximum capacity</option><option>Special request cannot be fulfilled</option><option>Kitchen closing shortly</option></select></label><button className="pos-button danger full" style={{ marginTop: 20 }} disabled={Boolean(busy)} onClick={() => transition(rejectOrder, 'CANCELLED', reason)}>{busy ? 'Saving…' : 'Confirm rejection'}</button></div></Modal>}
   </section>;

@@ -249,6 +249,16 @@ export default function ReceptionistDashboard() {
     }
   };
 
+  const handleMarkOrderDelivered = async (orderId) => {
+    try {
+      await api.updateOrderStatus(orderId, 'DELIVERED');
+      addToast('Order marked as DELIVERED.', 'success');
+      loadData(true);
+    } catch (err) {
+      addToast(err?.message || 'Failed to update order status.', 'error');
+    }
+  };
+
   // Feature 4: Table Selection with active dining session fetch
   const handleSelectTable = async (t) => {
     setSelectedTable(t);
@@ -534,6 +544,8 @@ export default function ReceptionistDashboard() {
       (orderFilter === 'DINE_IN' && o.source === 'DINE_IN_QR') ||
       (orderFilter === 'DELIVERY' && o.source === 'DELIVERY') ||
       (orderFilter === 'TAKEAWAY' && o.source === 'TAKEAWAY') ||
+      (orderFilter === 'NEW_IN_PREP' && ['NEW', 'ACCEPTED', 'PREPARING', 'READY'].includes(o.status)) ||
+      (orderFilter === 'DELIVERED' && ['DELIVERED', 'PICKED_UP'].includes(o.status)) ||
       (orderFilter === 'ACTIVE' && o.status !== 'DELIVERED' && o.status !== 'CANCELLED') ||
       (orderFilter === 'COMPLETED' && o.status === 'DELIVERED');
 
@@ -1169,45 +1181,103 @@ export default function ReceptionistDashboard() {
                       );
                     })()}
 
-                    {/* Kitchen Progress & Order Items */}
+                    {/* Kitchen Progress, Delivered Orders & Table Session Status */}
                     {(() => {
                       const tableOrders = orders.filter(o => (o.tableId === selectedTable.tableId || o.tableNumber === selectedTable.tableNumber) && o.status !== 'CANCELLED');
                       const activeTableOrders = tableOrders.filter(o => o.status !== 'DELIVERED');
+                      const deliveredTableOrders = tableOrders.filter(o => o.status === 'DELIVERED');
                       const pendingBillAmount = tableOrders.filter(o => o.paymentStatus !== 'PAID').reduce((sum, o) => sum + (o.total || 0), 0);
+                      const totalBillAmount = tableOrders.reduce((sum, o) => sum + (o.total || 0), 0);
 
                       return (
-                        <div className="space-y-2 pt-1 border-t border-slate-100">
+                        <div className="space-y-3 pt-2 border-t border-slate-100">
                           <div className="flex items-center justify-between font-bold text-slate-700">
-                            <span className="flex items-center gap-1.5">
+                            <span className="flex items-center gap-1.5 text-xs">
                               <ChefHat size={14} className="text-amber-600" />
-                              Kitchen Tickets & Progress ({activeTableOrders.length})
+                              Table Orders ({tableOrders.length})
                             </span>
-                            <span className="text-slate-900 font-black">Due: ₹{pendingBillAmount}</span>
+                            <div className="text-right">
+                              <span className="text-slate-900 font-black text-xs">Total: ₹{totalBillAmount.toFixed(2)}</span>
+                              {pendingBillAmount > 0 ? (
+                                <span className="text-[10px] text-amber-600 block font-bold">Due: ₹{pendingBillAmount.toFixed(2)}</span>
+                              ) : (
+                                <span className="text-[10px] text-emerald-600 block font-bold">All Paid ✓</span>
+                              )}
+                            </div>
                           </div>
 
-                          {activeTableOrders.length === 0 ? (
-                            <p className="text-[11px] text-slate-400 italic">No active food orders in preparation.</p>
-                          ) : (
-                            <div className="space-y-2 max-h-36 overflow-y-auto pr-1">
-                              {activeTableOrders.map(ord => (
-                                <div key={ord.orderId} className="bg-slate-50 p-2 rounded-lg border border-slate-200 space-y-1">
-                                  <div className="flex items-center justify-between text-[11px]">
-                                    <span className="font-bold text-slate-800">{ord.orderNumber}</span>
-                                    <span className={`px-1.5 py-0.5 rounded font-black text-[9px] ${
-                                      ord.status === 'READY' ? 'bg-emerald-100 text-emerald-800' :
-                                      ord.status === 'PREPARING' ? 'bg-amber-100 text-amber-800' :
-                                      'bg-slate-200 text-slate-700'
-                                    }`}>
-                                      {ord.status}
-                                    </span>
-                                  </div>
-                                  <div className="text-[10px] text-slate-600">
-                                    {(ord.items || []).map(i => `${i.name} (x${i.quantity})`).join(', ')}
-                                  </div>
-                                </div>
-                              ))}
+                          {/* 1. New & In-Kitchen Orders */}
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between text-[11px] font-bold text-amber-900">
+                              <span className="flex items-center gap-1">
+                                <Clock size={12} className="text-amber-600" />
+                                New & In-Kitchen Tickets ({activeTableOrders.length})
+                              </span>
                             </div>
-                          )}
+                            {activeTableOrders.length === 0 ? (
+                              <p className="text-[11px] text-slate-400 italic bg-slate-50 p-2 rounded-lg">No tickets currently in kitchen preparation.</p>
+                            ) : (
+                              <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                                {activeTableOrders.map(ord => (
+                                  <div key={ord.orderId} className="bg-amber-50/60 p-2.5 rounded-lg border border-amber-200 space-y-1">
+                                    <div className="flex items-center justify-between text-[11px]">
+                                      <span className="font-bold text-slate-900 font-mono">#{ord.orderNumber}</span>
+                                      <div className="flex items-center gap-1.5">
+                                        <span className={`px-1.5 py-0.5 rounded font-black text-[9px] ${
+                                          ord.status === 'READY' ? 'bg-sky-100 text-sky-800' :
+                                          ord.status === 'PREPARING' ? 'bg-amber-200 text-amber-900' :
+                                          'bg-purple-100 text-purple-800'
+                                        }`}>
+                                          {ord.status}
+                                        </span>
+                                        {['READY', 'PREPARING'].includes(ord.status) && (
+                                          <button
+                                            onClick={() => handleMarkOrderDelivered(ord.orderId)}
+                                            className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[9px] flex items-center gap-0.5 shadow-2xs"
+                                            title="Mark as served to table"
+                                          >
+                                            <Check size={10} /> Delivered
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <div className="text-[10px] text-slate-600">
+                                      {(ord.items || []).map(i => `${i.name} (×${i.quantity})`).join(', ')}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* 2. Delivered Orders */}
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between text-[11px] font-bold text-emerald-900">
+                              <span className="flex items-center gap-1">
+                                <CheckCircle2 size={12} className="text-emerald-600" />
+                                Delivered Orders ({deliveredTableOrders.length})
+                              </span>
+                            </div>
+                            {deliveredTableOrders.length === 0 ? (
+                              <p className="text-[11px] text-slate-400 italic bg-slate-50 p-2 rounded-lg">No orders delivered yet.</p>
+                            ) : (
+                              <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                                {deliveredTableOrders.map(ord => (
+                                  <div key={ord.orderId} className="bg-emerald-50/60 p-2.5 rounded-lg border border-emerald-200 space-y-1">
+                                    <div className="flex items-center justify-between text-[11px]">
+                                      <span className="font-bold text-slate-900 font-mono">#{ord.orderNumber}</span>
+                                      <span className="px-1.5 py-0.5 rounded font-black text-[9px] bg-emerald-100 text-emerald-800">
+                                        DELIVERED ✓
+                                      </span>
+                                    </div>
+                                    <div className="text-[10px] text-slate-600">
+                                      {(ord.items || []).map(i => `${i.name} (×${i.quantity})`).join(', ')}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       );
                     })()}
@@ -1542,15 +1612,22 @@ export default function ReceptionistDashboard() {
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center space-x-1.5 overflow-x-auto pb-1">
-                  {['ALL', 'DINE_IN', 'DELIVERY', 'TAKEAWAY', 'ACTIVE', 'COMPLETED'].map(f => (
+                  {[
+                    { id: 'ALL', label: 'All Orders' },
+                    { id: 'DINE_IN', label: 'Dine In' },
+                    { id: 'NEW_IN_PREP', label: '🟡 New & In Kitchen' },
+                    { id: 'DELIVERED', label: '🟢 Delivered' },
+                    { id: 'DELIVERY', label: 'Delivery' },
+                    { id: 'TAKEAWAY', label: 'Takeaway' }
+                  ].map(tab => (
                     <button
-                      key={f}
-                      onClick={() => setOrderFilter(f)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                        orderFilter === f ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      key={tab.id}
+                      onClick={() => setOrderFilter(tab.id)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                        orderFilter === tab.id ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                       }`}
                     >
-                      {f.replace('_', ' ')}
+                      {tab.label}
                     </button>
                   ))}
                 </div>
@@ -1576,32 +1653,101 @@ export default function ReceptionistDashboard() {
                       <th className="p-3">Table / Customer</th>
                       <th className="p-3">Items</th>
                       <th className="p-3">Amount</th>
-                      <th className="p-3">Status</th>
+                      <th className="p-3">Order Status</th>
+                      <th className="p-3">Payment</th>
+                      <th className="p-3">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {filteredOrders.map(o => (
-                      <tr key={o.orderId} className="hover:bg-slate-50">
-                        <td className="p-3 font-mono font-bold text-slate-900">#{o.orderNumber}</td>
-                        <td className="p-3 font-bold uppercase text-slate-600">{o.source.replace('_', ' ')}</td>
-                        <td className="p-3">
-                          {o.tableNumber ? (
-                            <strong className="text-brand-600 font-bold">{tableTitle(o)}</strong>
-                          ) : (
-                            <span>{o.customerName}</span>
-                          )}
-                        </td>
-                        <td className="p-3 text-slate-600">
-                          {o.items.map(i => `${i.name} (×${i.quantity})`).join(', ')}
-                        </td>
-                        <td className="p-3 font-black text-slate-900">₹{o.total.toFixed(2)}</td>
-                        <td className="p-3">
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-slate-100 text-slate-800">
-                            {o.status}
-                          </span>
+                    {filteredOrders.length === 0 ? (
+                      <tr>
+                        <td colSpan="8" className="p-8 text-center text-slate-400">
+                          No orders match the selected filter.
                         </td>
                       </tr>
-                    ))}
+                    ) : (
+                      filteredOrders.map(o => {
+                        const tableOrdersList = o.tableId || o.tableNumber
+                          ? orders.filter(x => (x.tableId === o.tableId || x.tableNumber === o.tableNumber) && x.status !== 'CANCELLED')
+                          : [];
+                        const isMultiOrderTable = tableOrdersList.length > 1;
+                        const ticketIndex = isMultiOrderTable ? tableOrdersList.findIndex(x => x.orderId === o.orderId) : -1;
+
+                        return (
+                          <tr key={o.orderId} className="hover:bg-slate-50">
+                            <td className="p-3 font-mono font-bold text-slate-900">#{o.orderNumber}</td>
+                            <td className="p-3 font-bold uppercase text-slate-600">{o.source.replace('_', ' ')}</td>
+                            <td className="p-3">
+                              {o.tableNumber ? (
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <strong className="text-brand-600 font-bold">{tableTitle(o)}</strong>
+                                  {isMultiOrderTable && ticketIndex >= 0 && (
+                                    <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200" title="Order under this table session">
+                                      Ticket {ticketIndex + 1}/{tableOrdersList.length}
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span>{o.customerName || 'Walk-in Guest'}</span>
+                              )}
+                            </td>
+                            <td className="p-3 text-slate-600">
+                              {o.items.map(i => `${i.name} (×${i.quantity})`).join(', ')}
+                            </td>
+                            <td className="p-3 font-black text-slate-900">₹{o.total.toFixed(2)}</td>
+                            <td className="p-3">
+                              {o.status === 'DELIVERED' ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-600" /> DELIVERED
+                                </span>
+                              ) : o.status === 'NEW' ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-purple-100 text-purple-800 border border-purple-300">
+                                  <Clock className="w-3 h-3 text-purple-600" /> NEW ORDER
+                                </span>
+                              ) : o.status === 'PREPARING' || o.status === 'ACCEPTED' ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-300">
+                                  <ChefHat className="w-3 h-3 text-amber-600" /> PREPARING
+                                </span>
+                              ) : o.status === 'READY' ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-sky-100 text-sky-800 border border-sky-300">
+                                  <Bell className="w-3 h-3 text-sky-600" /> READY
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-slate-100 text-slate-800">
+                                  {o.status}
+                                </span>
+                              )}
+                            </td>
+                            <td className="p-3">
+                              {o.paymentStatus === 'PAID' ? (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                  Paid ✓
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                                  Unpaid
+                                </span>
+                              )}
+                            </td>
+                            <td className="p-3">
+                              {['READY', 'PREPARING', 'ACCEPTED'].includes(o.status) ? (
+                                <button
+                                  onClick={() => handleMarkOrderDelivered(o.orderId)}
+                                  className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] flex items-center gap-1 shadow-2xs transition-all active:scale-95"
+                                  title="Mark order delivered to table"
+                                >
+                                  <Check className="w-3 h-3" /> Mark Delivered
+                                </button>
+                              ) : o.status === 'DELIVERED' ? (
+                                <span className="text-[11px] text-emerald-600 font-bold">Served ✓</span>
+                              ) : (
+                                <span className="text-[11px] text-slate-400 font-medium">-</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
                   </tbody>
                 </table>
               </div>

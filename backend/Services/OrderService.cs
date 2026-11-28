@@ -132,12 +132,14 @@ public class OrderService : IOrderService
         var deliveryFee = request.Source == OrderSources.Delivery ? _rules.StandardDeliveryFee : 0m;
         var total = subtotal + tax + deliveryFee;
 
-        // Check for an active unpaid dine-in order on this table (running table session)
-        Order? existingActiveOrder = null;
+        // Check for an active running dining session / previous orders on this table
+        bool isAddOnOrder = false;
+        Guid? existingSessionId = request.SessionId;
+        var customerName = request.CustomerName;
+        var customerPhone = request.CustomerPhone;
         if (request.Source == OrderSources.DineInQr && request.TableId.HasValue)
         {
-            var candidates = await _db.Orders
-                .Include(o => o.Items)
+            var existingActiveOrder = await _db.Orders
                 .Include(o => o.Table)
                 .Where(o => o.RestaurantId == request.RestaurantId
                          && o.TableId == request.TableId.Value
@@ -145,100 +147,24 @@ public class OrderService : IOrderService
                          && o.Status != OrderStatuses.Cancelled
                          && o.Status != OrderStatuses.ConfirmationTimeout)
                 .OrderByDescending(o => o.CreatedAt)
-                .ToListAsync();
+                .FirstOrDefaultAsync();
 
-            foreach (var cand in candidates)
+            if (existingActiveOrder != null)
             {
-                var paidSum = await _db.Payments
-                    .Where(p => p.OrderId == cand.OrderId && p.Status == PaymentStatuses.Paid)
-                    .SumAsync(p => (decimal?)(p.Amount - p.TipAmount)) ?? 0;
-
-                if (paidSum < cand.Total - 0.05m)
+                isAddOnOrder = true;
+                if (!existingSessionId.HasValue && existingActiveOrder.SessionId.HasValue)
                 {
-                    existingActiveOrder = cand;
-                    break;
+                    existingSessionId = existingActiveOrder.SessionId;
+                }
+                if (string.IsNullOrWhiteSpace(customerName))
+                {
+                    customerName = existingActiveOrder.CustomerName;
+                }
+                if (string.IsNullOrWhiteSpace(customerPhone))
+                {
+                    customerPhone = existingActiveOrder.CustomerPhone;
                 }
             }
-        }
-
-        if (existingActiveOrder != null)
-        {
-            // Append new items to the existing running order for this table
-            foreach (var item in orderItems)
-            {
-                item.OrderId = existingActiveOrder.OrderId;
-                _db.OrderItems.Add(item);
-                existingActiveOrder.Items.Add(item);
-            }
-
-            existingActiveOrder.Subtotal += subtotal;
-            existingActiveOrder.Tax = Math.Round(existingActiveOrder.Subtotal * _rules.TaxRate, 2);
-            existingActiveOrder.Total = existingActiveOrder.Subtotal + existingActiveOrder.Tax + existingActiveOrder.DeliveryFee;
-
-            if (!string.IsNullOrWhiteSpace(request.CustomerName))
-            {
-                existingActiveOrder.CustomerName = request.CustomerName;
-            }
-            if (!string.IsNullOrWhiteSpace(request.CustomerPhone))
-            {
-                existingActiveOrder.CustomerPhone = request.CustomerPhone;
-            }
-            if (!string.IsNullOrWhiteSpace(request.SpecialInstructions))
-            {
-                existingActiveOrder.SpecialInstructions = string.IsNullOrWhiteSpace(existingActiveOrder.SpecialInstructions)
-                    ? request.SpecialInstructions
-                    : $"{existingActiveOrder.SpecialInstructions} | Extra note: {request.SpecialInstructions}";
-            }
-
-            // Reset status so Kitchen receives and prepares the new items
-            existingActiveOrder.Status = OrderStatuses.New;
-            existingActiveOrder.UpdatedAt = DateTime.UtcNow;
-
-            var tableToUpdate = request.TableId.HasValue ? await _db.Tables.FindAsync(request.TableId.Value) : null;
-            if (tableToUpdate != null)
-            {
-                tableToUpdate.Status = TableStatuses.Occupied;
-                if (!string.IsNullOrWhiteSpace(request.CustomerName))
-                {
-                    tableToUpdate.CurrentCustomerName = request.CustomerName;
-                }
-                tableToUpdate.UpdatedAt = DateTime.UtcNow;
-            }
-
-            await _db.SaveChangesAsync();
-            await transaction.CommitAsync();
-
-            var activeTableNum = tableToUpdate?.TableNumber;
-
-            // Trigger notification to kitchen and receptionist
-            await _notifications.NotifyRoleAsync(
-                request.RestaurantId,
-                UserRoles.Kitchen,
-                "ORDER_UPDATED",
-                $"Additional Items for Table #{activeTableNum}",
-                $"New items added to Order #{existingActiveOrder.OrderNumber}. Total: ₹{existingActiveOrder.Total}",
-                new { existingActiveOrder.OrderId, existingActiveOrder.OrderNumber, existingActiveOrder.Source, TableNumber = activeTableNum }
-            );
-
-            await _notifications.NotifyRoleAsync(
-                request.RestaurantId,
-                UserRoles.Receptionist,
-                "ORDER_UPDATED",
-                $"Table #{activeTableNum} Order Updated",
-                $"New items added to Order #{existingActiveOrder.OrderNumber}.",
-                new { existingActiveOrder.OrderId, existingActiveOrder.OrderNumber, existingActiveOrder.Source, TableNumber = activeTableNum }
-            );
-
-            await _audit.LogAsync(
-                existingActiveOrder.RestaurantId,
-                existingActiveOrder.CustomerId,
-                "CUSTOMER",
-                "ORDER_ITEMS_ADDED",
-                "orders",
-                new { existingActiveOrder.OrderId, existingActiveOrder.OrderNumber, existingActiveOrder.Total, existingActiveOrder.Source }
-            );
-
-            return await MapWithPaymentAsync(existingActiveOrder, activeTableNum);
         }
 
         // 3. Generate unique order number (New Table Session)
@@ -252,7 +178,7 @@ public class OrderService : IOrderService
         var readyAt = DateTime.UtcNow.AddMinutes(prepMinutes);
 
         // Associate with active shared dining session for dine-in orders
-        Guid? activeSessionId = request.SessionId;
+        Guid? activeSessionId = request.SessionId ?? existingSessionId;
         if (request.TableId.HasValue && request.Source == OrderSources.DineInQr && !activeSessionId.HasValue)
         {
             try
@@ -302,8 +228,8 @@ public class OrderService : IOrderService
             EstimatedPrepTimeMinutes = prepMinutes,
             EstimatedReadyAt = readyAt,
             DeliveryAddress = request.DeliveryAddressJson,
-            CustomerName = request.CustomerName,
-            CustomerPhone = request.CustomerPhone,
+            CustomerName = customerName,
+            CustomerPhone = customerPhone,
             IdempotencyKey = request.IdempotencyKey,
             TakeawayPickupTime = request.TakeawayPickupTime,
             SpecialInstructions = request.SpecialInstructions,
@@ -321,9 +247,9 @@ public class OrderService : IOrderService
             if (table != null)
             {
                 table.Status = TableStatuses.Occupied;
-                if (!string.IsNullOrWhiteSpace(request.CustomerName))
+                if (!string.IsNullOrWhiteSpace(customerName))
                 {
-                    table.CurrentCustomerName = request.CustomerName;
+                    table.CurrentCustomerName = customerName;
                 }
                 table.UpdatedAt = DateTime.UtcNow;
             }
@@ -340,18 +266,18 @@ public class OrderService : IOrderService
             request.RestaurantId,
             UserRoles.Kitchen,
             "NEW_ORDER",
-            $"New Order #{order.OrderNumber}",
-            tableNum.HasValue ? $"New dine-in order #{order.OrderNumber} for Table {tableNum}. Total: ₹{order.Total}" : $"New {order.Source} order #{order.OrderNumber} received. Total: ₹{order.Total}",
-            new { order.OrderId, order.OrderNumber, order.Source, TableNumber = tableNum }
+            isAddOnOrder && tableNum.HasValue ? $"New Add-on Ticket #{order.OrderNumber} (Table {tableNum})" : $"New Order #{order.OrderNumber}",
+            tableNum.HasValue ? (isAddOnOrder ? $"Additional items ticket #{order.OrderNumber} for Table {tableNum} ({order.Items.Count} item(s)). Total: ₹{order.Total}" : $"New dine-in order #{order.OrderNumber} for Table {tableNum}. Total: ₹{order.Total}") : $"New {order.Source} order #{order.OrderNumber} received. Total: ₹{order.Total}",
+            new { order.OrderId, order.OrderNumber, order.Source, TableNumber = tableNum, IsAddOn = isAddOnOrder }
         );
 
         await _notifications.NotifyRoleAsync(
             request.RestaurantId,
             UserRoles.Receptionist,
             "NEW_ORDER",
-            $"New Order #{order.OrderNumber}",
-            tableNum.HasValue ? $"New dine-in order #{order.OrderNumber} for Table {tableNum}." : $"New {order.Source} order #{order.OrderNumber}.",
-            new { order.OrderId, order.OrderNumber, order.Source, TableNumber = tableNum }
+            isAddOnOrder && tableNum.HasValue ? $"Table {tableNum} Add-on Order #{order.OrderNumber}" : $"New Order #{order.OrderNumber}",
+            tableNum.HasValue ? (isAddOnOrder ? $"New add-on order #{order.OrderNumber} placed for Table {tableNum}." : $"New dine-in order #{order.OrderNumber} for Table {tableNum}.") : $"New {order.Source} order #{order.OrderNumber}.",
+            new { order.OrderId, order.OrderNumber, order.Source, TableNumber = tableNum, IsAddOn = isAddOnOrder }
         );
 
         if (!string.IsNullOrWhiteSpace(order.CustomerPhone))

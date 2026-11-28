@@ -239,39 +239,73 @@ public class PaymentService(
             {
                 try
                 {
-                    tableToClean = await db.Tables.FindAsync(order.TableId.Value);
-                    if (tableToClean != null && tableToClean.Status != TableStatuses.OutOfService)
-                    {
-                        tableToClean.Status = TableStatuses.WaitingForCleaning;
-                        tableToClean.CurrentCustomerName = null;
-                        tableToClean.AssignedWaiterId = null;
-                        tableToClean.UpdatedAt = DateTime.UtcNow;
-
-                        cleaningReq = new HelpRequest
-                        {
-                            RestaurantId = restaurantId,
-                            TableId = tableToClean.TableId,
-                            Message = $"Payment completed for Table A{tableToClean.TableNumber} (Order {order.OrderNumber}). Table automatically marked for cleaning (2-min auto-release).",
-                            Status = "PENDING",
-                            CreatedAt = DateTime.UtcNow
-                        };
-                        db.HelpRequests.Add(cleaningReq);
-                    }
-
-                    // Preserve tomorrow's booking! Auto-complete only TODAY's active reservation for this table (SEATED or ARRIVED)
-                    var today = DateOnly.FromDateTime(DateTime.UtcNow);
-                    var activeReservations = await db.Reservations
-                        .Where(r => r.RestaurantId == restaurantId 
-                                 && r.TableId == order.TableId.Value 
-                                 && r.ReservationDate == today
-                                 && (r.Status == ReservationStatuses.Seated || r.Status == ReservationStatuses.Arrived))
+                    // Check if other active orders for this table remain unpaid in the current session
+                    var otherOrders = await db.Orders
+                        .Where(o => o.TableId == order.TableId.Value 
+                                 && o.OrderId != order.OrderId 
+                                 && o.Status != OrderStatuses.Cancelled 
+                                 && o.Status != OrderStatuses.ConfirmationTimeout)
                         .ToListAsync();
 
-                    foreach (var res in activeReservations)
+                    bool hasOtherUnpaid = false;
+                    foreach (var other in otherOrders)
                     {
-                        res.Status = ReservationStatuses.Completed;
-                        res.UpdatedAt = DateTime.UtcNow;
-                        autoCompletedReservations.Add(res);
+                        var otherPaid = await db.Payments
+                            .Where(p => p.OrderId == other.OrderId && p.Status == PaymentStatuses.Paid)
+                            .SumAsync(p => (decimal?)(p.Amount - p.TipAmount)) ?? 0;
+                        if (otherPaid < other.Total - 0.05m)
+                        {
+                            hasOtherUnpaid = true;
+                            break;
+                        }
+                    }
+
+                    if (!hasOtherUnpaid)
+                    {
+                        tableToClean = await db.Tables.FindAsync(order.TableId.Value);
+                        if (tableToClean != null && tableToClean.Status != TableStatuses.OutOfService)
+                        {
+                            tableToClean.Status = TableStatuses.WaitingForCleaning;
+                            tableToClean.CurrentCustomerName = null;
+                            tableToClean.AssignedWaiterId = null;
+                            tableToClean.UpdatedAt = DateTime.UtcNow;
+
+                            cleaningReq = new HelpRequest
+                            {
+                                RestaurantId = restaurantId,
+                                TableId = tableToClean.TableId,
+                                Message = $"Payment completed for Table A{tableToClean.TableNumber} (Order {order.OrderNumber}). Table automatically marked for cleaning (2-min auto-release).",
+                                Status = "PENDING",
+                                CreatedAt = DateTime.UtcNow
+                            };
+                            db.HelpRequests.Add(cleaningReq);
+                        }
+
+                        // Close active dining session
+                        var activeSession = await db.DiningSessions
+                            .Where(s => s.TableId == order.TableId.Value && s.Status == "ACTIVE")
+                            .FirstOrDefaultAsync();
+                        if (activeSession != null)
+                        {
+                            activeSession.Status = "CLOSED";
+                            activeSession.ClosedAt = DateTime.UtcNow;
+                        }
+
+                        // Preserve tomorrow's booking! Auto-complete only TODAY's active reservation for this table (SEATED or ARRIVED)
+                        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+                        var activeReservations = await db.Reservations
+                            .Where(r => r.RestaurantId == restaurantId 
+                                     && r.TableId == order.TableId.Value 
+                                     && r.ReservationDate == today
+                                     && (r.Status == ReservationStatuses.Seated || r.Status == ReservationStatuses.Arrived))
+                            .ToListAsync();
+
+                        foreach (var res in activeReservations)
+                        {
+                            res.Status = ReservationStatuses.Completed;
+                            res.UpdatedAt = DateTime.UtcNow;
+                            autoCompletedReservations.Add(res);
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -714,81 +748,115 @@ public class PaymentService(
         {
             try
             {
-                var tableToClean = await db.Tables.FindAsync(order.TableId.Value);
-                if (tableToClean != null && tableToClean.Status != TableStatuses.OutOfService)
+                // Check if other active orders for this table remain unpaid in the current session
+                var otherOrders = await db.Orders
+                    .Where(o => o.TableId == order.TableId.Value 
+                             && o.OrderId != order.OrderId 
+                             && o.Status != OrderStatuses.Cancelled 
+                             && o.Status != OrderStatuses.ConfirmationTimeout)
+                    .ToListAsync();
+
+                bool hasOtherUnpaid = false;
+                foreach (var other in otherOrders)
                 {
-                    tableToClean.Status = TableStatuses.WaitingForCleaning;
-                    tableToClean.CurrentCustomerName = null;
-                    tableToClean.AssignedWaiterId = null;
-                    tableToClean.UpdatedAt = DateTime.UtcNow;
-
-                    var existingCleaning = await db.HelpRequests.AnyAsync(h =>
-                        h.RestaurantId == restaurantId &&
-                        h.TableId == tableToClean.TableId &&
-                        h.Status == "PENDING" &&
-                        h.Message.Contains("cleaning"));
-
-                    if (!existingCleaning)
+                    var otherPaid = await db.Payments
+                        .Where(p => p.OrderId == other.OrderId && p.Status == PaymentStatuses.Paid)
+                        .SumAsync(p => (decimal?)(p.Amount - p.TipAmount)) ?? 0;
+                    if (otherPaid < other.Total - 0.05m)
                     {
-                        var cleaningReq = new HelpRequest
+                        hasOtherUnpaid = true;
+                        break;
+                    }
+                }
+
+                if (!hasOtherUnpaid)
+                {
+                    var tableToClean = await db.Tables.FindAsync(order.TableId.Value);
+                    if (tableToClean != null && tableToClean.Status != TableStatuses.OutOfService)
+                    {
+                        tableToClean.Status = TableStatuses.WaitingForCleaning;
+                        tableToClean.CurrentCustomerName = null;
+                        tableToClean.AssignedWaiterId = null;
+                        tableToClean.UpdatedAt = DateTime.UtcNow;
+
+                        // Close active dining session
+                        var activeSession = await db.DiningSessions
+                            .Where(s => s.TableId == order.TableId.Value && s.Status == "ACTIVE")
+                            .FirstOrDefaultAsync();
+                        if (activeSession != null)
                         {
-                            RestaurantId = restaurantId,
-                            TableId = tableToClean.TableId,
-                            Message = $"Payment completed for Table A{tableToClean.TableNumber} (Order {order.OrderNumber}). Table automatically marked for cleaning (2-min auto-release).",
-                            Status = "PENDING",
-                            CreatedAt = DateTime.UtcNow
-                        };
-                        db.HelpRequests.Add(cleaningReq);
-                        await db.SaveChangesAsync();
+                            activeSession.Status = "CLOSED";
+                            activeSession.ClosedAt = DateTime.UtcNow;
+                        }
+
+                        var existingCleaning = await db.HelpRequests.AnyAsync(h =>
+                            h.RestaurantId == restaurantId &&
+                            h.TableId == tableToClean.TableId &&
+                            h.Status == "PENDING" &&
+                            h.Message.Contains("cleaning"));
+
+                        if (!existingCleaning)
+                        {
+                            var cleaningReq = new HelpRequest
+                            {
+                                RestaurantId = restaurantId,
+                                TableId = tableToClean.TableId,
+                                Message = $"Payment completed for Table A{tableToClean.TableNumber} (Order {order.OrderNumber}). Table automatically marked for cleaning (2-min auto-release).",
+                                Status = "PENDING",
+                                CreatedAt = DateTime.UtcNow
+                            };
+                            db.HelpRequests.Add(cleaningReq);
+                            await db.SaveChangesAsync();
+
+                            await notifications.NotifyRoleAsync(
+                                restaurantId,
+                                UserRoles.Waiter,
+                                "CUSTOMER_HELP_REQUEST",
+                                $"Table A{tableToClean.TableNumber} needs cleaning",
+                                $"Payment completed for Table A{tableToClean.TableNumber}. Table marked for cleaning.",
+                                new { cleaningReq.RequestId, TableNumber = tableToClean.TableNumber, TableId = tableToClean.TableId, IsCleaning = true, Status = TableStatuses.WaitingForCleaning }
+                            );
+                        }
+                        else
+                        {
+                            await db.SaveChangesAsync();
+                        }
 
                         await notifications.NotifyRoleAsync(
                             restaurantId,
-                            UserRoles.Waiter,
-                            "CUSTOMER_HELP_REQUEST",
-                            $"Table A{tableToClean.TableNumber} needs cleaning",
-                            $"Payment completed for Table A{tableToClean.TableNumber}. Table marked for cleaning.",
-                            new { cleaningReq.RequestId, TableNumber = tableToClean.TableNumber, TableId = tableToClean.TableId, IsCleaning = true, Status = TableStatuses.WaitingForCleaning }
+                            UserRoles.Receptionist,
+                            "TABLE_STATUS_CHANGED",
+                            $"Table A{tableToClean.TableNumber} waiting for cleaning",
+                            $"Payment recorded. Table A{tableToClean.TableNumber} is waiting for cleaning.",
+                            new { TableId = tableToClean.TableId, Status = TableStatuses.WaitingForCleaning, TableNumber = tableToClean.TableNumber }
                         );
                     }
-                    else
+
+                    // Preserve tomorrow's booking! Only complete today's Seated / Arrived reservations
+                    var today = DateOnly.FromDateTime(DateTime.UtcNow);
+                    var activeReservations = await db.Reservations
+                        .Where(r => r.RestaurantId == restaurantId 
+                                 && r.TableId == order.TableId.Value 
+                                 && r.ReservationDate == today
+                                 && (r.Status == ReservationStatuses.Seated || r.Status == ReservationStatuses.Arrived))
+                        .ToListAsync();
+
+                    foreach (var res in activeReservations)
                     {
-                        await db.SaveChangesAsync();
+                        res.Status = ReservationStatuses.Completed;
+                        res.UpdatedAt = DateTime.UtcNow;
+                        await notifications.NotifyRoleAsync(
+                            restaurantId,
+                            UserRoles.Receptionist,
+                            "RESERVATION_STATUS_CHANGED",
+                            $"Reservation Completed: {res.CustomerName}",
+                            $"Reservation {res.BookingId} for {res.CustomerName} automatically completed after bill payment.",
+                            new { ReservationId = res.ReservationId, Status = ReservationStatuses.Completed, BookingId = res.BookingId }
+                        );
                     }
 
-                    await notifications.NotifyRoleAsync(
-                        restaurantId,
-                        UserRoles.Receptionist,
-                        "TABLE_STATUS_CHANGED",
-                        $"Table A{tableToClean.TableNumber} waiting for cleaning",
-                        $"Payment recorded. Table A{tableToClean.TableNumber} is waiting for cleaning.",
-                        new { TableId = tableToClean.TableId, Status = TableStatuses.WaitingForCleaning, TableNumber = tableToClean.TableNumber }
-                    );
+                    await db.SaveChangesAsync();
                 }
-
-                // Preserve tomorrow's booking! Only complete today's Seated / Arrived reservations
-                var today = DateOnly.FromDateTime(DateTime.UtcNow);
-                var activeReservations = await db.Reservations
-                    .Where(r => r.RestaurantId == restaurantId 
-                             && r.TableId == order.TableId.Value 
-                             && r.ReservationDate == today
-                             && (r.Status == ReservationStatuses.Seated || r.Status == ReservationStatuses.Arrived))
-                    .ToListAsync();
-
-                foreach (var res in activeReservations)
-                {
-                    res.Status = ReservationStatuses.Completed;
-                    res.UpdatedAt = DateTime.UtcNow;
-                    await notifications.NotifyRoleAsync(
-                        restaurantId,
-                        UserRoles.Receptionist,
-                        "RESERVATION_STATUS_CHANGED",
-                        $"Reservation Completed: {res.CustomerName}",
-                        $"Reservation {res.BookingId} for {res.CustomerName} automatically completed after bill payment.",
-                        new { ReservationId = res.ReservationId, Status = ReservationStatuses.Completed, BookingId = res.BookingId }
-                    );
-                }
-
-                await db.SaveChangesAsync();
             }
             catch (Exception ex)
             {
