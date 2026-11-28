@@ -422,6 +422,19 @@ public class OrderService : IOrderService
                     new { order.OrderId, order.OrderNumber, TableNumber = order.Table.TableNumber }
                 );
             }
+
+            // Realtime confirmation to customer screen
+            if (order.TableId.HasValue)
+            {
+                await _notifications.NotifyTableAsync(
+                    order.RestaurantId,
+                    order.TableId.Value,
+                    "TABLE_ORDER_READY",
+                    "Food is Ready!",
+                    $"Your order #{order.OrderNumber} is ready and is being served to your table.",
+                    new { order.OrderId, order.OrderNumber, TableId = order.TableId.Value, TableNumber = order.Table?.TableNumber, Status = OrderStatuses.Ready }
+                );
+            }
         }
         else if (newStatus == OrderStatuses.PendingConfirmation)
         {
@@ -952,6 +965,18 @@ public class OrderService : IOrderService
                         $"All items for Order #{order.OrderNumber} are ready.",
                         new { order.OrderId, order.OrderNumber }
                     );
+
+                    if (order.TableId.HasValue)
+                    {
+                        await _notifications.NotifyTableAsync(
+                            order.RestaurantId,
+                            order.TableId.Value,
+                            "TABLE_ORDER_READY",
+                            "Food is Ready!",
+                            $"Your order #{order.OrderNumber} is ready and is being served to your table.",
+                            new { order.OrderId, order.OrderNumber, TableId = order.TableId.Value, Status = OrderStatuses.Ready }
+                        );
+                    }
                 }
             }
         }

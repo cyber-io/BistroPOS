@@ -12,6 +12,7 @@ import DigitalReceiptAndFeedbackModal from '../../components/billing/DigitalRece
 import WifiAndEntertainmentCard from '../../components/entertainment/WifiAndEntertainmentCard';
 import AiRecommendationsRail from '../../components/common/AiRecommendationsRail';
 import { translations, getCategoryTranslation } from '../../services/menuTranslations';
+import { soundEffects } from '../../services/soundEffects';
 import {
   Utensils,
   ShoppingBag,
@@ -21,6 +22,7 @@ import {
   AlertCircle,
   XCircle,
   ChefHat,
+  Bell,
   Search,
   Flame,
   Candy,
@@ -115,6 +117,7 @@ export default function QrDineInPage() {
   const [cancelSecondsRemaining, setCancelSecondsRemaining] = useState(0);
   const [isCancelling, setIsCancelling] = useState(false);
   const [waiterArrivingMsg, setWaiterArrivingMsg] = useState(null);
+  const [foodReadyAlert, setFoodReadyAlert] = useState(null);
 
   useEffect(() => { activeOrderRef.current = activeOrder; }, [activeOrder]);
   const updateActiveOrder = useCallback(order => {
@@ -210,17 +213,13 @@ export default function QrDineInPage() {
       // Only keep orders that belong to the active dining session and are not cancelled
       const activeSessionOrders = sessionOrders.filter(o => o && o.orderId && o.status !== 'CANCELLED');
 
-      // Check if there are active unpaid orders in this table session
-      const hasUnpaidSessionOrders = activeSessionOrders.some(o =>
-        o.paymentStatus !== 'PAID' && (Number(o.paidAmount) || 0) < (Number(o.total) || 0) - 0.05
-      );
-
-      // If table is AVAILABLE or has no active orders in current session, start completely fresh!
-      const curTableOrders = (currentTable.status === 'AVAILABLE' || (!hasUnpaidSessionOrders && activeSessionOrders.length === 0))
-        ? []
-        : activeSessionOrders;
+      // Keep active dining session orders intact
+      const curTableOrders = activeSessionOrders;
 
       setTableOrders(curTableOrders);
+      if (curTableOrders.length > 0) {
+        setTable(prev => prev ? { ...prev, status: 'OCCUPIED' } : prev);
+      }
 
       const context = { tableId: currentTable.tableId, tableNumber: currentTable.tableNumber, restaurantId: rest.restaurantId };
       if (switchOrderContext) switchOrderContext('DINE_IN_QR', context);
@@ -231,7 +230,7 @@ export default function QrDineInPage() {
         order.status !== 'CANCELLED' &&
         order.paymentStatus !== 'PAID' &&
         (Number(order.paidAmount) || 0) < (Number(order.total) || 0) - 0.05
-      ) || null;
+      ) || curTableOrders[0] || null;
       updateActiveOrder(activeTableOrder);
       if (!activeTableOrder) {
         try { localStorage.removeItem(`bistro_table_guest_${currentTable.tableId}`); } catch {}
@@ -261,14 +260,12 @@ export default function QrDineInPage() {
         if (sess) setTableSession(sess);
         const sessOrders = Array.isArray(sess?.orders) ? sess.orders : [];
         const activeOrders = sessOrders.filter(o => o && o.orderId && o.status !== 'CANCELLED');
-        const hasUnpaid = activeOrders.some(o =>
-          o.paymentStatus !== 'PAID' && (Number(o.paidAmount) || 0) < (Number(o.total) || 0) - 0.05
-        );
-        const list = (table.status === 'AVAILABLE' || (!hasUnpaid && activeOrders.length === 0))
-          ? []
-          : activeOrders;
+        const list = activeOrders;
         if (active) {
           setTableOrders(list);
+          if (list.length > 0) {
+            setTable(prev => prev ? { ...prev, status: 'OCCUPIED' } : prev);
+          }
           const current = activeOrderRef.current;
           if (current) {
             const updated = list.find(o => o.orderId === current.orderId);
@@ -278,7 +275,7 @@ export default function QrDineInPage() {
               o.status !== 'CANCELLED' &&
               o.paymentStatus !== 'PAID' &&
               (Number(o.paidAmount) || 0) < (Number(o.total) || 0) - 0.05
-            ) || null;
+            ) || list[0] || null;
             if (pending) updateActiveOrder(pending);
           }
         }
@@ -291,6 +288,30 @@ export default function QrDineInPage() {
       if (type === 'ORDER_STATUS_CHANGED' || type === 'NEW_ORDER' || type === 'TABLE_ORDER_READY' || type === 'TABLE_STATUS_UPDATED') {
         syncTableSession();
       }
+
+      const status = payload?.newStatus || payload?.status || payload?.order?.status;
+      const orderNum = payload?.orderNumber || payload?.order?.orderNumber || '';
+
+      // Realtime Food Ready Notification for customer
+      if (type === 'TABLE_ORDER_READY' || status === 'READY') {
+        try { soundEffects.playOrderReady(); } catch {}
+        setFoodReadyAlert({
+          orderNumber: orderNum,
+          orderId: payload?.orderId || payload?.order?.orderId,
+          at: new Date()
+        });
+        addToast(
+          `🎉 Food is Ready! Chef has prepared your order #${orderNum}. Floor staff is serving it to your table.`,
+          'success'
+        );
+      }
+
+      // Realtime Confirmation Prompt when order is delivered or needs confirmation
+      if (type === 'ORDER_CONFIRMATION_PROMPT' || status === 'PENDING_CONFIRMATION') {
+        setIsReceiptModalOpen(true);
+        addToast(`Order #${orderNum} delivered! Please confirm receipt.`, 'info');
+      }
+
       if (type === 'WAITER_HELP_ACCEPTED' && payload.tableId === table.tableId) setWaiterArrivingMsg(`The waiter ${payload.waiterName || payload.assignedWaiterName || ''} is coming.`);
       if (type === 'HELP_REQUEST_RESOLVED' && payload.tableId === table.tableId) setWaiterArrivingMsg(null);
       if (type === 'FOOD_AVAILABILITY_CHANGED') setMenuItems(previous => previous.map(item => item.menuItemId === payload.menuItemId ? { ...item, availability: payload.availability } : item));
@@ -389,6 +410,7 @@ export default function QrDineInPage() {
         customerPhone: phone || null,
         items
       });
+      setTable(prev => prev ? { ...prev, status: 'OCCUPIED' } : prev);
       const isExistingOrder = activeOrder && activeOrder.orderId === order.orderId;
       updateActiveOrder(order);
       setTableOrders(prev => [order, ...prev.filter(o => o.orderId !== order.orderId)]);
@@ -594,6 +616,38 @@ export default function QrDineInPage() {
 
       {/* Main Content Area */}
       <main className="max-w-2xl mx-auto px-4 pt-3 space-y-3">
+        {/* Realtime Food Ready Notification Banner (visible across all tabs) */}
+        {foodReadyAlert && (
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white shadow-lg shadow-emerald-600/20 border border-emerald-400/40 flex items-center justify-between gap-3 animate-pulse">
+            <div className="flex items-center space-x-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-md flex items-center justify-center shrink-0">
+                <Bell className="w-5 h-5 text-white animate-bounce" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-black tracking-wide">🎉 Food is Ready!</span>
+                  {foodReadyAlert.orderNumber && (
+                    <span className="text-[10px] bg-white/25 px-2 py-0.5 rounded-full font-bold uppercase">
+                      Order #{foodReadyAlert.orderNumber}
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-emerald-100 font-medium mt-0.5 leading-snug">
+                  The kitchen has completed cooking your dishes! Floor staff is serving them to {table ? `Table ${table.tableNumber}` : 'your table'}.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setFoodReadyAlert(null)}
+              className="p-1.5 rounded-xl bg-white/10 hover:bg-white/25 text-white transition-colors shrink-0"
+              aria-label="Dismiss alert"
+            >
+              <X size={15} />
+            </button>
+          </div>
+        )}
+
         {/* Table Orders Active Notification Strip when dining session has placed orders */}
         {tableOrders.length > 0 && activeTab === 'MENU' && (
           <div className="flex items-center justify-between gap-2 p-2.5 px-3.5 rounded-2xl bg-gradient-to-r from-slate-900 to-indigo-950 text-white shadow-xs">
@@ -660,8 +714,10 @@ export default function QrDineInPage() {
               }`}>
                 2. Cooking
               </div>
-              <div className={`p-1.5 rounded-lg border ${
-                activeOrder.status === 'READY' ? 'bg-purple-50 border-purple-300 text-purple-700 font-bold' : 'border-slate-200 text-slate-500'
+              <div className={`p-1.5 rounded-lg border transition-all ${
+                activeOrder.status === 'READY'
+                  ? 'bg-purple-600 border-purple-500 text-white font-black shadow-sm ring-2 ring-purple-300 animate-pulse'
+                  : 'border-slate-200 text-slate-500'
               }`}>
                 3. Ready
               </div>
@@ -691,6 +747,14 @@ export default function QrDineInPage() {
                     Estimated ready by: <strong>{activeOrder.estimatedReadyAt ? new Date(activeOrder.estimatedReadyAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Soon'}</strong>
                   </p>
                 )}
+              </div>
+            )}
+
+            {/* Food Ready Alert Box */}
+            {activeOrder.status === 'READY' && (
+              <div className="p-3 rounded-xl bg-purple-50 border border-purple-200 text-xs flex items-center space-x-2.5 text-purple-950 font-semibold shadow-xs">
+                <CheckCircle2 className="w-4 h-4 text-purple-600 shrink-0" />
+                <span>🎉 Chef has prepared your dishes! Your food is ready and floor staff is serving it to {table ? `Table ${table.tableNumber}` : 'your table'}.</span>
               </div>
             )}
 
