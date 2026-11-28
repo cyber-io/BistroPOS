@@ -51,7 +51,6 @@ export function FamilyDiningTable({ table, layout, children, onClick, ...props }
           {children}
         </span>
       </span>
-      <span className="pos-plan-caption">{layout.caption}</span>
     </button>
   );
 }

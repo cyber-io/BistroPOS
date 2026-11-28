@@ -216,7 +216,7 @@ export default function ReceptionistDashboard() {
 
     const heartbeat = setInterval(() => {
       loadData(true);
-    }, 4000);
+    }, 30000);
 
     return () => {
       unsub();

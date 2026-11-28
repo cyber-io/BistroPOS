@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { customizationCharge } from '../../context/CartContext';
-import { Plus, Minus, X, Flame, Candy, ShoppingBag, AlertTriangle, Sparkles } from 'lucide-react';
+import { Plus, Minus, X, Flame, Candy, ShoppingBag } from 'lucide-react';
 
 export default function ItemCustomizationModal({ isOpen, onClose, item, onAddToCart }) {
   const [quantity, setQuantity] = useState(1);
   const [selectedChoices, setSelectedChoices] = useState({});
   const [selectedAddOns, setSelectedAddOns] = useState([]);
-  const [selectedPortion, setSelectedPortion] = useState(null);
   const [specialInstruction, setSpecialInstruction] = useState('');
 
   useEffect(() => {
@@ -15,11 +14,6 @@ export default function ItemCustomizationModal({ isOpen, onClose, item, onAddToC
     setSelectedChoices(Object.fromEntries((item.customizationOptions || []).filter(option => option.choices?.length).map(option => [option.name, option.choices[0]])));
     setSelectedAddOns([]);
     setSpecialInstruction('');
-    if (item.portions && item.portions.length > 0) {
-      setSelectedPortion(item.portions[0]);
-    } else {
-      setSelectedPortion(null);
-    }
   }, [isOpen, item?.menuItemId]);
   useEffect(() => {
     if (!isOpen) return;
@@ -27,36 +21,6 @@ export default function ItemCustomizationModal({ isOpen, onClose, item, onAddToC
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [isOpen, onClose]);
-
-  const formattedIngredients = React.useMemo(() => {
-    if (!item?.ingredients) return '';
-    if (Array.isArray(item.ingredients)) return item.ingredients.join(', ');
-    if (typeof item.ingredients === 'string') {
-      const trimmed = item.ingredients.trim();
-      if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-        try {
-          const parsed = JSON.parse(trimmed);
-          if (Array.isArray(parsed)) return parsed.join(', ');
-        } catch {}
-      }
-      return item.ingredients;
-    }
-    return String(item.ingredients);
-  }, [item?.ingredients]);
-
-  const formattedAllergens = React.useMemo(() => {
-    if (!item?.allergens) return [];
-    if (Array.isArray(item.allergens)) return item.allergens;
-    if (typeof item.allergens === 'string') {
-      try {
-        const parsed = JSON.parse(item.allergens);
-        if (Array.isArray(parsed)) return parsed;
-      } catch {}
-      return [item.allergens];
-    }
-    return [];
-  }, [item?.allergens]);
-
   if (!isOpen || !item) return null;
 
   const toggleAddOn = (addon) => {
@@ -71,12 +35,11 @@ export default function ItemCustomizationModal({ isOpen, onClose, item, onAddToC
   };
 
   const addOnsTotal = selectedAddOns.reduce((sum, a) => sum + (a.price || 0), 0);
-  const effectiveBasePrice = selectedPortion ? Number(selectedPortion.price) : Number(item.price);
-  const unitPrice = effectiveBasePrice + addOnsTotal + customizationCharge(selectedChoices);
+  const unitPrice = Number(item.price) + addOnsTotal + customizationCharge(selectedChoices);
   const totalPrice = unitPrice * quantity;
 
   const handleAdd = () => {
-    onAddToCart(item, quantity, selectedChoices, selectedAddOns, specialInstruction.trim(), selectedPortion);
+    onAddToCart(item, quantity, selectedChoices, selectedAddOns, specialInstruction.trim());
     onClose();
   };
 
@@ -112,14 +75,14 @@ export default function ItemCustomizationModal({ isOpen, onClose, item, onAddToC
               <span className="text-xs font-semibold uppercase tracking-wider text-slate-300">
                 {item.categoryName || 'Chef Special'}
               </span>
-              {item.isSpecial && (
-                <span className="inline-flex items-center text-[10px] bg-amber-500/90 px-1.5 py-0.5 rounded text-white font-bold">
-                  ⭐ Special
-                </span>
-              )}
               {item.isSweet && (
                 <span className="inline-flex items-center text-[10px] bg-pink-500/80 px-1.5 py-0.5 rounded text-white font-bold">
                   <Candy className="w-3 h-3 mr-0.5" /> Sweet
+                </span>
+              )}
+              {item.spiceLevel !== 'NONE' && (
+                <span className="inline-flex items-center text-[10px] bg-red-500/80 px-1.5 py-0.5 rounded text-white font-bold">
+                  <Flame className="w-3 h-3 mr-0.5" /> {item.spiceLevel}
                 </span>
               )}
             </div>
@@ -130,65 +93,6 @@ export default function ItemCustomizationModal({ isOpen, onClose, item, onAddToC
 
         {/* Scrollable Customization Content */}
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
-          {/* Ingredients & Allergens Information */}
-          {(formattedIngredients || formattedAllergens.length > 0) && (
-            <div className="p-3.5 bg-amber-50 rounded-2xl border border-amber-300 shadow-xs space-y-2.5 text-xs text-slate-900">
-              {formattedIngredients && (
-                <div className="flex items-start gap-2 leading-relaxed">
-                  <span className="font-extrabold text-amber-950 uppercase text-[11px] tracking-wide shrink-0">Ingredients:</span>
-                  <span className="font-bold text-slate-900 text-xs">{formattedIngredients}</span>
-                </div>
-              )}
-              {formattedAllergens.length > 0 && (
-                <div className="flex items-center gap-2 pt-1 border-t border-amber-200">
-                  <span className="font-extrabold text-amber-950 uppercase text-[11px] tracking-wide shrink-0 flex items-center gap-1">
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-700 shrink-0" /> Allergens:
-                  </span>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {formattedAllergens.map((alg, i) => (
-                      <span
-                        key={i}
-                        className="inline-block px-2.5 py-0.5 rounded-lg bg-amber-200 border border-amber-400 font-black text-[11px] text-amber-950 shadow-2xs"
-                      >
-                        {alg}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Portion Size Selector */}
-          {item.portions && item.portions.length > 0 && (
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Portion Size</h4>
-                <span className="text-[11px] text-brand-600 font-semibold">Select size</span>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                {item.portions.map(p => {
-                  const isSelected = selectedPortion?.name === p.name;
-                  return (
-                    <button
-                      key={p.name}
-                      type="button"
-                      onClick={() => setSelectedPortion(p)}
-                      className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-between transition-all ${
-                        isSelected
-                          ? 'border-brand-500 bg-brand-50 text-brand-700 ring-1 ring-brand-500 font-bold'
-                          : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-                      }`}
-                    >
-                      <span>{p.name}</span>
-                      <span className="font-bold text-slate-900">₹{p.price}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
           {/* Options / Choices */}
           {item.customizationOptions && item.customizationOptions.length > 0 && (
             <div className="space-y-3">

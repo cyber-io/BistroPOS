@@ -141,7 +141,7 @@ export default function WaiterDashboard() {
         load(true);
       }
     });
-    const heartbeat = setInterval(() => load(true), 5000);
+    const heartbeat = setInterval(() => load(true), 30000);
     return () => { unsubscribe(); clearInterval(heartbeat); };
   }, [load]);
 

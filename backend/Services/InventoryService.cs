@@ -10,12 +10,14 @@ public class InventoryService : IInventoryService
     private readonly RestaurantDbContext _db;
     private readonly INotificationService _notifications;
     private readonly IAuditLogService _audit;
+    private readonly ISmsService _sms;
 
-    public InventoryService(RestaurantDbContext db, INotificationService notifications, IAuditLogService audit)
+    public InventoryService(RestaurantDbContext db, INotificationService notifications, IAuditLogService audit, ISmsService sms)
     {
         _db = db;
         _notifications = notifications;
         _audit = audit;
+        _sms = sms;
     }
 
     public async Task<List<InventoryItemDto>> GetInventoryAsync(Guid restaurantId)
@@ -106,6 +108,14 @@ public class InventoryService : IInventoryService
                 $"{item.Name} stock has fallen to {item.CurrentStock} {item.Unit}.",
                 new { ItemId = item.ItemId, Name = item.Name, CurrentStock = item.CurrentStock, Status = item.Status }
             );
+
+            await _sms.EnqueueEventSmsAsync(item.RestaurantId, "INVENTORY_LOW_STOCK", null, new Dictionary<string, string>
+            {
+                ["itemName"] = item.Name,
+                ["status"] = item.Status,
+                ["currentStock"] = item.CurrentStock.ToString("0.##"),
+                ["unit"] = item.Unit
+            }, $"{item.ItemId}:{item.Status}");
         }
 
         await _audit.LogAsync(

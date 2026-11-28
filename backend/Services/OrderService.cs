@@ -18,12 +18,14 @@ public class OrderService : IOrderService
     private readonly IAuditLogService _audit;
     private readonly ResourceTokens _tokens;
     private readonly IHttpContextAccessor _http;
+    private readonly ITextBeeSmsService _sms;
 
     public OrderService(
         RestaurantDbContext db,
         IOptions<BusinessRulesOptions> rules,
         INotificationService notifications,
-        IAuditLogService audit, ResourceTokens tokens, IHttpContextAccessor http)
+        IAuditLogService audit, ResourceTokens tokens, IHttpContextAccessor http,
+        ITextBeeSmsService sms)
     {
         _db = db;
         _rules = rules.Value;
@@ -31,6 +33,7 @@ public class OrderService : IOrderService
         _audit = audit;
         _tokens = tokens;
         _http = http;
+        _sms = sms;
     }
 
     public async Task<OrderDto> CreateOrderAsync(CreateOrderRequest request)
@@ -351,6 +354,15 @@ public class OrderService : IOrderService
             new { order.OrderId, order.OrderNumber, order.Source, TableNumber = tableNum }
         );
 
+        if (!string.IsNullOrWhiteSpace(order.CustomerPhone))
+        {
+            await _sms.EnqueueEventSmsAsync(order.RestaurantId, "ORDER_CONFIRMED", order.CustomerPhone, new Dictionary<string, string>
+            {
+                ["orderNumber"] = order.OrderNumber,
+                ["total"] = order.Total.ToString("F2")
+            }, order.OrderId.ToString());
+        }
+
         if (request.TableId.HasValue)
         {
             await _notifications.NotifyTableAsync(
@@ -523,6 +535,26 @@ public class OrderService : IOrderService
                 $"Order #{order.OrderNumber} status changed to {newStatus}.",
                 new { order.OrderId, order.OrderNumber, TableId = order.TableId.Value, Status = newStatus }
             );
+        }
+
+        if (!string.IsNullOrWhiteSpace(order.CustomerPhone) && newStatus is (OrderStatuses.Ready or OrderStatuses.ReadyForPickup or OrderStatuses.OutForDelivery or OrderStatuses.Cancelled))
+        {
+            var evt = newStatus switch
+            {
+                OrderStatuses.ReadyForPickup => "ORDER_READY_FOR_PICKUP",
+                OrderStatuses.Ready => "ORDER_READY",
+                OrderStatuses.OutForDelivery => "ORDER_OUT_FOR_DELIVERY",
+                OrderStatuses.Cancelled => "ORDER_CANCELLED",
+                _ => null
+            };
+            if (evt != null)
+            {
+                await _sms.EnqueueEventSmsAsync(order.RestaurantId, evt, order.CustomerPhone, new Dictionary<string, string>
+                {
+                    ["orderNumber"] = order.OrderNumber,
+                    ["reason"] = order.CancellationReason ?? "Cancelled by restaurant"
+                }, $"{order.OrderId}:{newStatus}");
+            }
         }
 
         await _audit.LogAsync(

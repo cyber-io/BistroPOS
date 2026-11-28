@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import { subscribeRealtimeEvents } from '../services/api';
 import { soundEffects } from '../services/soundEffects';
 import { useAuth } from './AuthContext';
@@ -7,6 +8,7 @@ const NotificationContext = createContext(null);
 
 export function NotificationProvider({ children }) {
   const { role } = useAuth();
+  const location = useLocation();
   const [toasts, setToasts] = useState([]);
   const [unreadAlerts, setUnreadAlerts] = useState([]);
 
@@ -26,6 +28,7 @@ export function NotificationProvider({ children }) {
   }, []);
 
   useEffect(() => {
+    if (!role || role === 'GUEST' || location.pathname.startsWith('/admin')) return;
     const unsubscribe = subscribeRealtimeEvents((type, payload) => {
       // 1. Kitchen Alert: New incoming order
       if (type === 'NEW_ORDER') {
@@ -121,7 +124,7 @@ export function NotificationProvider({ children }) {
     });
 
     return () => unsubscribe();
-  }, [role, addToast]);
+  }, [role, location.pathname, addToast]);
 
   return (
     <NotificationContext.Provider value={{

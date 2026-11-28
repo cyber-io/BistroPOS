@@ -282,7 +282,7 @@ export default function QrDineInPage() {
       if (type === 'HELP_REQUEST_RESOLVED' && payload.tableId === table.tableId) setWaiterArrivingMsg(null);
       if (type === 'FOOD_AVAILABILITY_CHANGED') setMenuItems(previous => previous.map(item => item.menuItemId === payload.menuItemId ? { ...item, availability: payload.availability } : item));
     });
-    const timer = setInterval(syncTableSession, 3000);
+    const timer = setInterval(syncTableSession, 30000);
     return () => { active = false; unsub(); clearInterval(timer); };
   }, [table, updateActiveOrder]);
 

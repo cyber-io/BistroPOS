@@ -157,7 +157,7 @@ export default function KitchenDashboard() {
         load(true);
       }
     });
-    const heartbeat = setInterval(() => load(true), 3000);
+    const heartbeat = setInterval(() => load(true), 30000);
     return () => { unsubscribe(); clearInterval(heartbeat); };
   }, [load]);
   const transition = async (order, status, rejectionReason) => {

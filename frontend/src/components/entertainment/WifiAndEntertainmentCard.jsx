@@ -71,32 +71,8 @@ export default function WifiAndEntertainmentCard({
   // Tabs: 'WIFI' | 'LUDO' | 'MEMORY' | 'TRIVIA' | 'LEADERBOARD'
   const [activeSubTab, setActiveSubTab] = useState('WIFI');
 
-  // Theme state: automatically synchronizes with phone's system preference
-  const [isDarkMode, setIsDarkMode] = useState(() => {
-    if (typeof window !== 'undefined' && window.matchMedia) {
-      return window.matchMedia('(prefers-color-scheme: dark)').matches;
-    }
-    return false;
-  });
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || !window.matchMedia) return;
-    const media = window.matchMedia('(prefers-color-scheme: dark)');
-    setIsDarkMode(media.matches);
-    const handler = (e) => setIsDarkMode(e.matches);
-    if (media.addEventListener) {
-      media.addEventListener('change', handler);
-    } else if (media.addListener) {
-      media.addListener(handler);
-    }
-    return () => {
-      if (media.removeEventListener) {
-        media.removeEventListener('change', handler);
-      } else if (media.removeListener) {
-        media.removeListener(handler);
-      }
-    };
-  }, []);
+  // Match QR Dine-In Menu light theme
+  const isDarkMode = false;
 
   // Wi-Fi State
   const [wifiData, setWifiData] = useState({
@@ -275,103 +251,43 @@ export default function WifiAndEntertainmentCard({
         </div>
 
         {/* Tabs Row */}
-        <div 
-          className={`px-4 sm:px-5 border-b flex items-center gap-5 sm:gap-6 overflow-x-auto no-scrollbar text-xs font-semibold ${
-            isDarkMode ? 'border-white/10' : 'border-slate-200'
-          }`}
+        <div
+          className="px-4 sm:px-5 py-2.5 border-b border-slate-200 flex items-center gap-1.5 overflow-x-auto no-scrollbar text-xs font-semibold bg-slate-50/70"
           style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
         >
-          {/* Tab 1: Restaurant Wi-Fi */}
-          <button
-            type="button"
-            onClick={() => setActiveSubTab('WIFI')}
-            className={`pb-2.5 flex items-center gap-1.5 whitespace-nowrap transition-colors relative ${
-              activeSubTab === 'WIFI' 
-                ? (isDarkMode ? 'text-white font-bold' : 'text-slate-900 font-bold') 
-                : (isDarkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800')
-            }`}
-          >
-            <Wifi size={14} />
-            <span>Restaurant Wi-Fi</span>
-            {activeSubTab === 'WIFI' && (
-              <span className={`absolute bottom-0 left-0 right-0 h-0.5 rounded-full ${isDarkMode ? 'bg-white' : 'bg-slate-900'}`} />
-            )}
-          </button>
-
-          {/* Tab 2: Table Ludo (NEW) */}
-          <button
-            type="button"
-            onClick={() => setActiveSubTab('LUDO')}
-            className={`pb-2.5 flex items-center gap-1.5 whitespace-nowrap transition-colors relative ${
-              activeSubTab === 'LUDO' 
-                ? (isDarkMode ? 'text-white font-bold' : 'text-slate-900 font-bold') 
-                : (isDarkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800')
-            }`}
-          >
-            <Dices size={14} className={activeSubTab === 'LUDO' ? (isDarkMode ? 'text-amber-400' : 'text-amber-600') : (isDarkMode ? 'text-slate-400' : 'text-slate-500')} />
-            <span>Table Ludo</span>
-            <span className={`px-1.5 py-0.2 rounded-md text-[9px] font-black uppercase border ${
-              isDarkMode 
-                ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' 
-                : 'bg-amber-100 text-amber-800 border-amber-200'
-            }`}>
-              New
-            </span>
-            {activeSubTab === 'LUDO' && (
-              <span className={`absolute bottom-0 left-0 right-0 h-0.5 rounded-full ${isDarkMode ? 'bg-white' : 'bg-slate-900'}`} />
-            )}
-          </button>
-
-          {/* Tab 3: Culinary Memory */}
-          <button
-            type="button"
-            onClick={() => setActiveSubTab('MEMORY')}
-            className={`pb-2.5 flex items-center gap-1.5 whitespace-nowrap transition-colors relative ${
-              activeSubTab === 'MEMORY' 
-                ? (isDarkMode ? 'text-white font-bold' : 'text-slate-900 font-bold') 
-                : (isDarkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800')
-            }`}
-          >
-            <Timer size={14} />
-            <span>Culinary Memory</span>
-            {activeSubTab === 'MEMORY' && (
-              <span className={`absolute bottom-0 left-0 right-0 h-0.5 rounded-full ${isDarkMode ? 'bg-white' : 'bg-slate-900'}`} />
-            )}
-          </button>
-
-          {/* Tab 4: Food Trivia Quiz */}
-          <button
-            type="button"
-            onClick={() => setActiveSubTab('TRIVIA')}
-            className={`pb-2.5 flex items-center gap-1.5 whitespace-nowrap transition-colors relative ${
-              activeSubTab === 'TRIVIA' 
-                ? (isDarkMode ? 'text-white font-bold' : 'text-slate-900 font-bold') 
-                : (isDarkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800')
-            }`}
-          >
-            <Sparkles size={14} />
-            <span>Food Trivia</span>
-            {activeSubTab === 'TRIVIA' && (
-              <span className={`absolute bottom-0 left-0 right-0 h-0.5 rounded-full ${isDarkMode ? 'bg-white' : 'bg-slate-900'}`} />
-            )}
-          </button>
-
-          {/* Tab 5: Leaderboard */}
-          <button
-            type="button"
-            onClick={() => setActiveSubTab('LEADERBOARD')}
-            className={`pb-2.5 flex items-center gap-1.5 whitespace-nowrap transition-colors relative ${
-              activeSubTab === 'LEADERBOARD' 
-                ? (isDarkMode ? 'text-white font-bold' : 'text-slate-900 font-bold') 
-                : (isDarkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800')
-            }`}
-          >
-            <Trophy size={14} />
-            <span>Leaderboard</span>
-            {activeSubTab === 'LEADERBOARD' && (
-              <span className={`absolute bottom-0 left-0 right-0 h-0.5 rounded-full ${isDarkMode ? 'bg-white' : 'bg-slate-900'}`} />
-            )}
-          </button>
+          {[
+            { id: 'WIFI', label: 'Wi-Fi', Icon: Wifi },
+            { id: 'LUDO', label: 'Table Ludo', Icon: Dices, badge: 'NEW' },
+            { id: 'MEMORY', label: 'Memory', Icon: Timer },
+            { id: 'TRIVIA', label: 'Food Trivia', Icon: Sparkles },
+            { id: 'LEADERBOARD', label: 'Leaderboard', Icon: Trophy },
+          ].map(({ id, label, Icon, badge }) => {
+            const isActive = activeSubTab === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setActiveSubTab(id)}
+                className={`px-3 py-1.5 rounded-xl flex items-center gap-1.5 whitespace-nowrap transition-all shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 ${
+                  isActive
+                    ? 'bg-slate-900 text-white shadow-xs font-bold'
+                    : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100 hover:text-slate-900'
+                }`}
+              >
+                <Icon size={13} className={isActive && id === 'LUDO' ? 'text-amber-400' : ''} />
+                <span>{label}</span>
+                {badge && (
+                  <span className={`px-1.5 py-0.2 rounded-md text-[9px] font-black uppercase ${
+                    isActive
+                      ? 'bg-amber-400 text-slate-950'
+                      : 'bg-amber-100 text-amber-800 border border-amber-200'
+                  }`}>
+                    {badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
 
         {/* Tab Body Contents */}
@@ -520,24 +436,31 @@ export default function WifiAndEntertainmentCard({
           {/* TAB 2: FOOD TRIVIA QUIZ */}
           {activeSubTab === 'TRIVIA' && (
             <div className="space-y-4 animate-fadeIn">
-              <div className={`flex items-center justify-between border-b pb-3 ${isDarkMode ? 'border-white/10' : 'border-slate-200'}`}>
-                <div className="flex items-center gap-2">
-                  <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${
-                    isDarkMode ? 'bg-amber-500/20 text-amber-400' : 'bg-amber-100 text-amber-600'
-                  }`}>
-                    <Sparkles size={14} />
+              <div className="space-y-2.5 border-b border-slate-200 pb-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-amber-100 text-amber-600">
+                      <Sparkles size={14} />
+                    </div>
+                    <span className="text-xs font-bold text-slate-800">
+                      {lang === 'hi' ? 'पाक-कला ट्रिविया' : 'Culinary Food Trivia'}
+                    </span>
                   </div>
-                  <span className={`text-xs font-bold ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>
-                    {lang === 'hi' ? 'पाक-कला ट्रिविया' : 'Culinary Food Trivia'}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                      {triviaScore * 30} pts
+                    </span>
+                    <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full border bg-purple-100 text-purple-700 border-purple-200">
+                      {quizFinished ? `Score: ${triviaScore}/${triviaQuestions.length}` : `Q ${currentQuestionIndex + 1} of ${triviaQuestions.length}`}
+                    </span>
+                  </div>
                 </div>
-                <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${
-                  isDarkMode 
-                    ? 'bg-purple-500/20 text-purple-300 border-purple-500/30' 
-                    : 'bg-purple-100 text-purple-700 border-purple-200'
-                }`}>
-                  {quizFinished ? `Score: ${triviaScore}/${triviaQuestions.length}` : `Q ${currentQuestionIndex + 1} of ${triviaQuestions.length}`}
-                </span>
+                <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-amber-500 to-purple-600 rounded-full transition-all duration-300"
+                    style={{ width: `${quizFinished ? 100 : ((currentQuestionIndex + 1) / triviaQuestions.length) * 100}%` }}
+                  />
+                </div>
               </div>
 
               {quizFinished ? (
@@ -599,7 +522,12 @@ export default function WifiAndEntertainmentCard({
                           disabled={isAnswered}
                           className={`p-3 rounded-xl border text-left text-xs font-semibold transition-all flex items-center justify-between min-h-[44px] ${btnStyle}`}
                         >
-                          <span>{opt}</span>
+                          <span className="flex items-center gap-2.5">
+                            <span className="w-5 h-5 rounded-md bg-white border border-slate-200 text-slate-600 text-[10px] font-black flex items-center justify-center shrink-0">
+                              {String.fromCharCode(65 + idx)}
+                            </span>
+                            <span>{opt}</span>
+                          </span>
                           {isAnswered && idx === currentQ.answer && <Check size={14} className="text-emerald-500 shrink-0 ml-1.5" />}
                         </button>
                       );
@@ -634,15 +562,22 @@ export default function WifiAndEntertainmentCard({
             </div>
           )}
 
-          {/* TAB 3: CULINARY MEMORY (Screenshot 1) */}
+          {/* TAB 3: CULINARY MEMORY */}
           {activeSubTab === 'MEMORY' && (
             <div className="space-y-3 animate-fadeIn">
-              {/* Moves & Matches row matching Screenshot 1 */}
-              <div className={`flex items-center justify-between px-1 text-xs sm:text-sm font-semibold ${
-                isDarkMode ? 'text-slate-300' : 'text-slate-700'
-              }`}>
-                <span>Moves: {memoryMoves}</span>
-                <span>Matches: {matchedPairsCount} / 6</span>
+              <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700">
+                <div className="flex items-center gap-3">
+                  <span>Moves: <strong className="text-slate-900">{memoryMoves}</strong></span>
+                  <span className="text-slate-300">•</span>
+                  <span>Matches: <strong className="text-emerald-700">{matchedPairsCount} / 6</strong></span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRestartMemory}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 text-[11px] font-bold transition-all active:scale-95"
+                >
+                  <RotateCcw size={12} /> Restart
+                </button>
               </div>
 
               {/* 3x4 Grid (12 Cards with red ? unflipped) */}
@@ -681,20 +616,16 @@ export default function WifiAndEntertainmentCard({
                     );
                   }
 
-                  // Unflipped Card matching Screenshot 1: Red '?'
+                  // Unflipped Card
                   return (
                     <button
                       key={card.id}
                       type="button"
                       onClick={() => handleCardClick(card)}
-                      className={`active:scale-95 border rounded-2xl aspect-square flex items-center justify-center transition-all shadow-sm ${
-                        isDarkMode 
-                          ? 'bg-[#282c35] hover:bg-[#323742] border-slate-700/60' 
-                          : 'bg-slate-100 hover:bg-slate-200 border-slate-200'
-                      }`}
+                      className="active:scale-95 border border-amber-200/90 bg-gradient-to-br from-amber-50 via-orange-50/70 to-rose-50/70 hover:border-amber-300 hover:shadow-md rounded-2xl aspect-square flex flex-col items-center justify-center transition-all shadow-xs"
                       aria-label="Memory Card"
                     >
-                      <span className="text-rose-500 font-extrabold text-2xl sm:text-3xl select-none leading-none">
+                      <span className="w-9 h-9 rounded-xl bg-white/90 border border-amber-200/80 shadow-2xs flex items-center justify-center text-rose-500 font-black text-xl select-none leading-none">
                         ?
                       </span>
                     </button>
@@ -754,92 +685,61 @@ export default function WifiAndEntertainmentCard({
                 </p>
               </div>
 
-              {/* Standings List */}
+              {/* Standings List (sorted by score descending) */}
               <div className="space-y-2 text-xs">
-                {/* 1st */}
-                <div className={`p-3 rounded-xl border flex items-center justify-between ${
-                  isDarkMode 
-                    ? 'bg-[#232834] border-amber-500/30' 
-                    : 'bg-amber-50/50 border-amber-200 shadow-xs'
-                }`}>
-                  <div className="flex items-center gap-3">
-                    <span className="text-lg">🥇</span>
-                    <div>
-                      <span className={`font-bold block ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Table B2</span>
-                      <span className={`text-[10px] font-semibold ${isDarkMode ? 'text-amber-400' : 'text-amber-700'}`}>Grand Master</span>
-                    </div>
-                  </div>
-                  <span className={`font-mono font-bold ${isDarkMode ? 'text-amber-300' : 'text-amber-700'}`}>420 pts</span>
-                </div>
+                {(() => {
+                  const rawLabel = String(tableNumber || 'A1').trim();
+                  const currentTableLabel = /^table\b/i.test(rawLabel) ? rawLabel : `Table ${rawLabel}`;
+                  const standings = [
+                    { id: 'B2', name: 'Table B2', title: 'Grand Master', points: 420, isYou: false },
+                    { id: 'YOU', name: currentTableLabel, title: 'Foodie Connoisseur', points: totalUserPoints, isYou: true },
+                    { id: 'C1', name: 'Table C1', title: 'Trivia Enthusiast', points: 280, isYou: false },
+                    { id: 'T3', name: 'Table 3', title: 'Appetizer Explorer', points: 190, isYou: false },
+                    { id: 'D4', name: 'Table D4', title: 'Snack Tactician', points: 140, isYou: false },
+                  ].sort((a, b) => b.points - a.points);
 
-                {/* 2nd - Current User Table */}
-                <div className={`p-3 rounded-xl border-2 shadow-md flex items-center justify-between ${
-                  isDarkMode 
-                    ? 'bg-[#1e2436] border-purple-500/70' 
-                    : 'bg-purple-50/60 border-purple-400 shadow-xs'
-                }`}>
-                  <div className="flex items-center gap-3">
-                    <span className="text-lg">🥈</span>
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <span className={`font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Table {tableNumber || 'A9'}</span>
-                        <span className="px-1.5 py-0.2 rounded-md bg-purple-600 text-[9px] font-black uppercase text-white">
-                          You
-                        </span>
+                  const rankIcons = ['🥇', '🥈', '🥉'];
+                  return standings.map((entry, idx) => (
+                    <div
+                      key={entry.id}
+                      className={`p-3 rounded-xl flex items-center justify-between ${
+                        entry.isYou
+                          ? 'border-2 bg-purple-50/70 border-purple-400 shadow-sm'
+                          : idx === 0
+                          ? 'border bg-amber-50/60 border-amber-200 shadow-xs'
+                          : 'border bg-white border-slate-200 shadow-xs'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        {idx < 3 ? (
+                          <span className="text-lg">{rankIcons[idx]}</span>
+                        ) : (
+                          <span className="font-bold w-5 text-center text-slate-400">{idx + 1}</span>
+                        )}
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-slate-900">{entry.name}</span>
+                            {entry.isYou && (
+                              <span className="px-1.5 py-0.2 rounded-md bg-purple-600 text-[9px] font-black uppercase text-white">
+                                You
+                              </span>
+                            )}
+                          </div>
+                          <span className={`text-[10px] font-semibold ${
+                            entry.isYou ? 'text-purple-700' : idx === 0 ? 'text-amber-700' : 'text-slate-500'
+                          }`}>
+                            {entry.title}
+                          </span>
+                        </div>
                       </div>
-                      <span className={`text-[10px] font-semibold ${isDarkMode ? 'text-purple-300' : 'text-purple-700'}`}>Foodie Connoisseur</span>
+                      <span className={`font-mono font-bold ${
+                        entry.isYou ? 'text-purple-700' : idx === 0 ? 'text-amber-700' : 'text-slate-700'
+                      }`}>
+                        {entry.points} pts
+                      </span>
                     </div>
-                  </div>
-                  <span className={`font-mono font-bold ${isDarkMode ? 'text-purple-300' : 'text-purple-700'}`}>{totalUserPoints} pts</span>
-                </div>
-
-                {/* 3rd */}
-                <div className={`p-3 rounded-xl border flex items-center justify-between ${
-                  isDarkMode 
-                    ? 'bg-[#232834] border-slate-700/60' 
-                    : 'bg-white border-slate-200 shadow-xs'
-                }`}>
-                  <div className="flex items-center gap-3">
-                    <span className="text-lg">🥉</span>
-                    <div>
-                      <span className={`font-bold block ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>Table C1</span>
-                      <span className={`text-[10px] font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Trivia Enthusiast</span>
-                    </div>
-                  </div>
-                  <span className={`font-mono font-bold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>280 pts</span>
-                </div>
-
-                {/* 4th */}
-                <div className={`p-3 rounded-xl border flex items-center justify-between ${
-                  isDarkMode 
-                    ? 'bg-[#232834] border-slate-700/40 text-slate-400' 
-                    : 'bg-white border-slate-200 text-slate-500 shadow-xs'
-                }`}>
-                  <div className="flex items-center gap-3">
-                    <span className="font-bold pl-1.5 text-slate-400">4</span>
-                    <div>
-                      <span className={`font-bold block ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>Table 3</span>
-                      <span className="text-[10px] text-slate-400 font-semibold">Appetizer Explorer</span>
-                    </div>
-                  </div>
-                  <span className="font-mono font-bold">190 pts</span>
-                </div>
-
-                {/* 5th */}
-                <div className={`p-3 rounded-xl border flex items-center justify-between ${
-                  isDarkMode 
-                    ? 'bg-[#232834] border-slate-700/40 text-slate-400' 
-                    : 'bg-white border-slate-200 text-slate-500 shadow-xs'
-                }`}>
-                  <div className="flex items-center gap-3">
-                    <span className="font-bold pl-1.5 text-slate-400">5</span>
-                    <div>
-                      <span className={`font-bold block ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>Table D4</span>
-                      <span className="text-[10px] text-slate-400 font-semibold">Snack Tactician</span>
-                    </div>
-                  </div>
-                  <span className="font-mono font-bold">140 pts</span>
-                </div>
+                  ));
+                })()}
               </div>
             </div>
           )}

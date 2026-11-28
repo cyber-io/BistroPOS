@@ -26,9 +26,9 @@ if (string.IsNullOrEmpty(builder.Configuration["urls"])) builder.WebHost.UseUrls
 builder.Services.Configure<SupabaseOptions>(builder.Configuration.GetSection(SupabaseOptions.SectionName));
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
 builder.Services.Configure<SecurityOptions>(builder.Configuration.GetSection(SecurityOptions.SectionName));
-builder.Services.Configure<FeaturesOptions>(builder.Configuration.GetSection(FeaturesOptions.SectionName));
 builder.Services.Configure<BusinessRulesOptions>(builder.Configuration.GetSection(BusinessRulesOptions.SectionName));
 builder.Services.Configure<PaymentGatewayOptions>(builder.Configuration.GetSection(PaymentGatewayOptions.SectionName));
+builder.Services.Configure<TextBeeOptions>(builder.Configuration.GetSection(TextBeeOptions.SectionName));
 
 var jwtOptions = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>() ?? new JwtOptions();
 if (string.IsNullOrWhiteSpace(jwtOptions.SecretKey) || jwtOptions.SecretKey.Length < 32)
@@ -105,7 +105,9 @@ builder.Services.AddAuthorization(options =>
 
 // 4. SignalR Real-Time Communications
 builder.Services.AddSignalR();
+builder.Services.AddSingleton<SmsQueue>();
 builder.Services.AddHostedService<WorkflowExpiryService>();
+builder.Services.AddHostedService<SmsBackgroundWorker>();
 
 // 5. Application Services Dependency Injection
 builder.Services.AddHttpClient();
@@ -125,6 +127,9 @@ builder.Services.AddScoped<IPaymentService, PaymentService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<IAuditLogService, AuditLogService>();
 builder.Services.AddScoped<IEmailReceiptService, EmailReceiptService>();
+builder.Services.AddScoped<TextBeeSmsService>();
+builder.Services.AddScoped<ITextBeeSmsService>(sp => sp.GetRequiredService<TextBeeSmsService>());
+builder.Services.AddScoped<ISmsService>(sp => sp.GetRequiredService<TextBeeSmsService>());
 builder.Services.AddScoped<IWaitlistService, WaitlistService>();
 
 // 6. Controllers and OpenAPI Documentation
@@ -263,6 +268,15 @@ try
     var db = scope.ServiceProvider.GetRequiredService<RestaurantDbContext>();
     await UserProvisioning.EnsureDefaultDataAsync(db, allowDevSeedCredentials: app.Environment.IsDevelopment());
     await DiningAreaProvisioning.EnsureDefaultDiningAreasAsync(db);
+    var smsMigrationPath = Path.Combine(app.Environment.ContentRootPath, "scripts", "20261126_add_textbee_sms.sql");
+    if (db.Database.IsRelational() && File.Exists(smsMigrationPath))
+    {
+        var conn = db.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = await File.ReadAllTextAsync(smsMigrationPath);
+        await cmd.ExecuteNonQueryAsync();
+    }
 }
 catch (Exception exception)
 {

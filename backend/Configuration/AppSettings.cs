@@ -25,12 +25,6 @@ public class SecurityOptions
     public string[] CorsAllowedOrigins { get; set; } = [];
 }
 
-public class FeaturesOptions
-{
-    public const string SectionName = "Features";
-    public bool EnableDemoLogin { get; set; } = false;
-}
-
 public class BusinessRulesOptions
 {
     public const string SectionName = "BusinessRules";
@@ -49,4 +43,17 @@ public class PaymentGatewayOptions
     public string ApiKey { get; set; } = string.Empty;
     public string SecretKey { get; set; } = string.Empty;
     public string WebhookSecret { get; set; } = string.Empty;
+}
+
+public class TextBeeOptions
+{
+    public const string SectionName = "TextBee";
+    public bool Enabled { get; set; } = false;
+    public string BaseUrl { get; set; } = "https://api.textbee.dev/api/v1";
+    public string ApiKey { get; set; } = string.Empty;
+    public string DeviceId { get; set; } = string.Empty;
+    public string WebhookSecret { get; set; } = string.Empty;
+    public string DefaultCountryCode { get; set; } = "+91";
+    public int? SimSlotIndex { get; set; }
+    public int MaxPerMinutePerRestaurant { get; set; } = 30;
 }
