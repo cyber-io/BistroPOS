@@ -1,8 +1,9 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation, Link } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate, useParams, Link } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { CartProvider } from './context/CartContext';
 import { NotificationProvider } from './context/NotificationContext';
+import { api, setActiveRestaurantId } from './services/api';
 
 // Common Components
 import Navbar from './components/common/Navbar';
@@ -147,6 +148,57 @@ function SmartPortalRedirect() {
   }
 }
 
+function RestaurantRouteHandler() {
+  const { code } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!code) return;
+    let active = true;
+    api.getRestaurant(code).then(rest => {
+      if (!active) return;
+      if (rest?.restaurantId) {
+        setActiveRestaurantId(rest.restaurantId);
+        const prefix = `/r/${code}`;
+        const subPath = location.pathname.startsWith(prefix) ? location.pathname.slice(prefix.length) : '';
+        const target = subPath || '/';
+        navigate(`${target}?r=${encodeURIComponent(rest.restaurantCode || code)}`, { replace: true });
+      } else {
+        navigate('/', { replace: true });
+      }
+    }).catch(() => {
+      if (active) navigate('/', { replace: true });
+    });
+    return () => { active = false; };
+  }, [code, location.pathname, navigate]);
+
+  return (
+    <div className="min-h-[50vh] flex flex-col items-center justify-center gap-3">
+      <Spinner />
+      <p style={{ color: 'var(--p-muted, #64748b)', fontSize: 13, fontWeight: 500 }}>
+        Loading restaurant website...
+      </p>
+    </div>
+  );
+}
+
+function RestaurantUrlSync() {
+  const location = useLocation();
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const r = params.get('r') || params.get('restaurant') || params.get('rst') || params.get('code');
+    if (r) {
+      api.getRestaurant(r).then(rest => {
+        if (rest?.restaurantId) {
+          setActiveRestaurantId(rest.restaurantId);
+        }
+      }).catch(() => {});
+    }
+  }, [location.search]);
+  return null;
+}
+
 function MainApp() {
   const [isCartOpen, setIsCartOpen] = useState(false);
   const location = useLocation();
@@ -157,6 +209,9 @@ function MainApp() {
 
   return (
     <div className={`min-h-screen flex flex-col font-sans ${isPublicWebsite ? 'bg-slate-50 website-shell' : 'bg-[#f4f7fb] pos-portal-shell'}`}>
+      {/* 0. Outlet URL Sync */}
+      <RestaurantUrlSync />
+
       {/* 1. Global Website Navbar (Public Website Only) */}
       {isPublicWebsite && <Navbar onOpenCart={() => setIsCartOpen(true)} />}
 
@@ -175,8 +230,13 @@ function MainApp() {
           <Route path="/pos/login" element={<LoginPage />} />
           <Route path="/staff/login" element={<Navigate to="/pos/login" replace />} />
 
+          {/* Restaurant-specific Direct Website Routes */}
+          <Route path="/r/:code/*" element={<RestaurantRouteHandler />} />
+          <Route path="/r/:code" element={<RestaurantRouteHandler />} />
+
           {/* Public Website Routes (Part 5) */}
           <Route path="/" element={<HomePage onOpenCart={() => setIsCartOpen(true)} />} />
+          <Route path="/home" element={<HomePage onOpenCart={() => setIsCartOpen(true)} />} />
           <Route path="/menu" element={<PublicMenuPage onOpenCart={() => setIsCartOpen(true)} />} />
           <Route path="/delivery" element={<DeliveryPage />} />
           <Route path="/takeaway" element={<TakeawayPage />} />

@@ -4,25 +4,27 @@ import { api, subscribeRealtimeEvents } from '../../services/api';
 import { useCart } from '../../context/CartContext';
 import { useNotification } from '../../context/NotificationContext';
 import ItemCustomizationModal from '../../components/common/ItemCustomizationModal';
-import { Search, Flame, Candy, Utensils, ShoppingBag, Plus, ChevronDown, Check } from 'lucide-react';
+import { translations, getCategoryTranslation } from '../../services/menuTranslations';
+import { Flame, Candy, Utensils, ShoppingBag, Plus, Sparkles, ChevronDown, Check, SlidersHorizontal, X } from 'lucide-react';
 
 export default function PublicMenuPage({ onOpenCart }) {
   const [searchParams] = useSearchParams();
   const [categories, setCategories] = useState([]);
   const [menuItems, setMenuItems] = useState([]);
   const [activeCategory, setActiveCategory] = useState(searchParams.get('category') || 'ALL');
-  const [vegFilter, setVegFilter] = useState('ALL'); // ALL, VEG, NON_VEG
-  const [searchQuery, setSearchQuery] = useState('');
+  const [dietaryFilter, setDietaryFilter] = useState('ALL'); // ALL, VEG, NON_VEG, VEGAN, GLUTEN_FREE, SPECIAL
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const filterPanelRef = useRef(null);
+  const [isCategoryOpen, setIsCategoryOpen] = useState(false);
+  const categoryPanelRef = useRef(null);
   const [selectedItemForModal, setSelectedItemForModal] = useState(null);
+  const [lang, setLang] = useState('en');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
-  const [isFilterOpen, setIsFilterOpen] = useState(false);
-  const [isCategoryOpen, setIsCategoryOpen] = useState(false);
-  const filterPanelRef = useRef(null);
-  const categoryPanelRef = useRef(null);
 
-  const { addItem, itemCount, orderSource, setOrderSource } = useCart();
+  const t = translations[lang] || translations.en;
+  const { addItem, items, itemCount, orderSource, setOrderSource } = useCart();
   const { addToast } = useNotification();
 
   useEffect(() => {
@@ -44,30 +46,47 @@ export default function PublicMenuPage({ onOpenCart }) {
     if (requestedSource === 'TAKEAWAY' || requestedSource === 'DELIVERY') setOrderSource(requestedSource);
     else if (orderSource === 'DINE_IN_QR') setOrderSource('DELIVERY');
   }, [setOrderSource, searchParams, orderSource]);
+
   useEffect(() => {
     let active = true;
     const load = async (silent = false) => {
       if (!silent) { setLoading(true); setError(''); }
       try {
-        const [cats, items] = await Promise.all([api.getCategories(), api.getMenuItems()]);
-        if (active) { setCategories(cats); setMenuItems(items); }
+        const [rest, cats, items] = await Promise.all([
+          api.getRestaurant().catch(() => null),
+          api.getCategories(),
+          api.getMenuItems()
+        ]);
+        if (active) {
+          if (rest?.name) {
+            document.title = `${rest.name} — Menu`;
+          }
+          setCategories(cats);
+          setMenuItems(items);
+        }
       } catch (err) { if (active && !silent) setError(err.message || 'Unable to load the menu. Please try again.'); }
       finally { if (active && !silent) setLoading(false); }
     };
     load();
     const unsubscribe = subscribeRealtimeEvents(type => { if (type === 'FOOD_AVAILABILITY_CHANGED') load(true); });
-    const timer = setInterval(() => load(true), 30000);
-    return () => { active = false; unsubscribe(); clearInterval(timer); };
-  }, [retry]);
+    const onOutletChanged = () => { load(true); };
+    window.addEventListener('rs_outlet_changed', onOutletChanged);
+    const timer = setInterval(() => load(true), 15000);
+    return () => { active = false; unsubscribe(); clearInterval(timer); window.removeEventListener('rs_outlet_changed', onOutletChanged); };
+  }, [retry, searchParams]);
 
   useEffect(() => { setActiveCategory(searchParams.get('category') || 'ALL'); }, [searchParams]);
 
   const filteredItems = menuItems.filter(item => {
     const matchesCat = activeCategory === 'ALL' || item.categoryId === activeCategory;
-    const matchesVeg = vegFilter === 'ALL' || item.vegNonveg === vegFilter;
-    const matchesSearch = !searchQuery || item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          (item.description || '').toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesCat && matchesVeg && matchesSearch;
+    const matchesDietary =
+      dietaryFilter === 'ALL' ||
+      (dietaryFilter === 'VEG' && item.vegNonveg === 'VEG') ||
+      (dietaryFilter === 'NON_VEG' && item.vegNonveg === 'NON_VEG') ||
+      (dietaryFilter === 'VEGAN' && (item.dietaryTags || []).some(t => /vegan/i.test(t))) ||
+      (dietaryFilter === 'GLUTEN_FREE' && (item.dietaryTags || []).some(t => /gluten/i.test(t))) ||
+      (dietaryFilter === 'SPECIAL' && Boolean(item.isSpecial));
+    return matchesCat && matchesDietary;
   });
 
   return (
@@ -80,64 +99,119 @@ export default function PublicMenuPage({ onOpenCart }) {
         <h1 className="font-serif text-3xl sm:text-4xl lg:text-5xl font-bold text-[#11164B] tracking-tight">
           Explore Our Menu
         </h1>
-        <p className="text-xs sm:text-sm text-[#75666B] max-w-md mx-auto">
-          Fresh, wholesome delicacies handcrafted to order with seasonal ingredients.
-        </p>
       </div>
 
-      <div className="flex flex-wrap justify-center gap-2">
-        <a href="/delivery" className="rounded-full border border-[#E8D1CE] bg-white px-4 py-2 text-xs text-[#75666B] hover:border-[#11164B]">Delivery to your door</a>
-        <a href="/takeaway" className="rounded-full border border-[#E8D1CE] bg-white px-4 py-2 text-xs text-[#75666B] hover:border-[#11164B]">Collect at the bistro</a>
-        <button onClick={onOpenCart} className="btn-3d-crimson rounded-full px-4 py-2 text-xs font-semibold text-white">View basket ({itemCount})</button>
-      </div>
       {loading && <p role="status" className="py-8 text-center text-sm text-[#75666B]">Loading today’s menu…</p>}
       {error && <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-center text-sm text-amber-900">{error}<button onClick={() => setRetry(n=>n+1)} className="ml-3 underline">Try again</button></div>}
       {!loading && !error && !filteredItems.length && <p className="rounded-xl border border-[#E8D1CE] bg-white py-10 text-center text-sm text-[#75666B]">No dishes match your selection. Try another category or filter.</p>}
 
-      {/* Filter and Search Bar */}
-      <div className="bg-white p-4 sm:p-5 rounded-2xl border border-[#E8D1CE] shadow-xs space-y-4">
-        <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
-          <div className="relative flex-1 w-full">
-            <Search className="w-4 h-4 absolute left-3.5 top-3 text-[#A48A8D]" />
-            <input
-              type="text"
-              aria-label="Search menu"
-              placeholder="Search by dish name, ingredients..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              className="w-full text-xs pl-9 pr-4 py-2.5 rounded-xl border border-[#E8D1CE] focus:border-[#11164B] focus:ring-1 focus:ring-[#11164B] outline-none transition-colors"
-            />
-          </div>
+      {/* Filter Bar (No search bar, just Filters and Category dropdowns) */}
+      <div className="flex flex-wrap items-center gap-2">
+        {/* Filters Dropdown */}
+        {(() => {
+          const isDietaryActive = dietaryFilter !== 'ALL';
+          const dietaryLabel = {
+            ALL: 'All',
+            VEG: '🟢 Pure Veg',
+            NON_VEG: '🔴 Non-Veg',
+            VEGAN: '🌱 Vegan',
+            GLUTEN_FREE: '🌾 Gluten-Free',
+            SPECIAL: '⭐ Daily Specials',
+          }[dietaryFilter] || 'All';
 
-          <div className="flex items-center space-x-1.5 bg-[#FAF1F0] p-1 rounded-xl w-full sm:w-auto justify-center border border-[#E8D1CE]">
-            <button
-              onClick={() => setVegFilter('ALL')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                vegFilter === 'ALL' ? 'bg-[#11164B] text-[#FAF1F0] shadow-xs' : 'text-[#75666B] hover:text-[#11164B]'
-              }`}
-            >
-              All
-            </button>
-            <button
-              onClick={() => setVegFilter('VEG')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center space-x-1 transition-all ${
-                vegFilter === 'VEG' ? 'bg-emerald-700 text-white shadow-xs' : 'text-emerald-800 hover:text-emerald-950'
-              }`}
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-              <span>Veg Only</span>
-            </button>
-            <button
-              onClick={() => setVegFilter('NON_VEG')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center space-x-1 transition-all ${
-                vegFilter === 'NON_VEG' ? 'bg-rose-700 text-white shadow-xs' : 'text-rose-800 hover:text-rose-950'
-              }`}
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
-              <span>Non-Veg</span>
-            </button>
-          </div>
-        </div>
+          return (
+            <div className="relative shrink-0" ref={filterPanelRef}>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsFilterOpen(o => !o);
+                  setIsCategoryOpen(false);
+                }}
+                className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold border transition-all shadow-xs ${
+                  isDietaryActive
+                    ? 'bg-[#11164B] text-[#FAF1F0] border-[#11164B]'
+                    : 'bg-white text-[#11164B] border-[#E8D1CE] hover:bg-[#FAF1F0]'
+                }`}
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5" />
+                <span>Filters</span>
+                {isDietaryActive && (
+                  <span className="bg-white/20 text-[#FAF1F0] text-[10px] font-semibold px-1.5 py-0.5 rounded-md">
+                    {dietaryLabel}
+                  </span>
+                )}
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isFilterOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {isFilterOpen && (
+                <div className="absolute top-full left-0 mt-1.5 z-50 bg-white rounded-2xl border border-[#E8D1CE] shadow-xl p-4 w-72">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-bold text-[#11164B] flex items-center gap-1.5">
+                      <SlidersHorizontal className="w-3.5 h-3.5" /> Filters
+                    </span>
+                    {isDietaryActive && (
+                      <button
+                        type="button"
+                        onClick={() => setDietaryFilter('ALL')}
+                        className="text-[10px] text-rose-600 font-bold hover:text-rose-800 flex items-center gap-0.5"
+                      >
+                        <X className="w-3 h-3" /> Clear
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="mb-3">
+                    <p className="text-[10px] font-bold text-[#75666B] uppercase tracking-wider mb-1.5">Type</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        { val: 'ALL', label: 'All' },
+                        { val: 'VEG', label: '🟢 Pure Veg' },
+                        { val: 'NON_VEG', label: '🔴 Non-Veg' },
+                      ].map(opt => (
+                        <button
+                          key={opt.val}
+                          type="button"
+                          onClick={() => setDietaryFilter(opt.val)}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all ${
+                            dietaryFilter === opt.val
+                              ? 'bg-[#11164B] text-[#FAF1F0] border-[#11164B]'
+                              : 'bg-[#FAF1F0] text-[#11164B] border-[#E8D1CE] hover:bg-white'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-[10px] font-bold text-[#75666B] uppercase tracking-wider mb-1.5">Dietary</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        { val: 'SPECIAL', label: '⭐ Daily Specials' },
+                        { val: 'VEGAN', label: '🌱 Vegan' },
+                        { val: 'GLUTEN_FREE', label: '🌾 Gluten-Free' },
+                      ].map(opt => (
+                        <button
+                          key={opt.val}
+                          type="button"
+                          onClick={() => setDietaryFilter(dietaryFilter === opt.val ? 'ALL' : opt.val)}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all ${
+                            dietaryFilter === opt.val
+                              ? 'bg-[#11164B] text-[#FAF1F0] border-[#11164B]'
+                              : 'bg-[#FAF1F0] text-[#11164B] border-[#E8D1CE] hover:bg-white'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Category Dropdown */}
         {(() => {
@@ -234,7 +308,7 @@ export default function PublicMenuPage({ onOpenCart }) {
                   loading="lazy"
                   decoding="async"
                 />
-                <div className="absolute top-2.5 left-2.5 flex items-center space-x-1.5">
+                <div className="absolute top-2.5 left-2.5 flex items-center space-x-1.5 flex-wrap gap-1">
                   <span className={`w-4 h-4 rounded-sm border bg-white/95 flex items-center justify-center ${
                     item.vegNonveg === 'VEG' ? 'border-emerald-600' : 'border-rose-600'
                   }`}>
@@ -245,6 +319,11 @@ export default function PublicMenuPage({ onOpenCart }) {
                   <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#11164B]/80 text-[#FAF1F0] backdrop-blur-xs">
                     {item.categoryName}
                   </span>
+                  {item.isSpecial && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500 text-white shadow-xs">
+                      ⭐ Chef Special
+                    </span>
+                  )}
                 </div>
                 {!item.availability && (
                   <div className="absolute inset-0 bg-[#11164B]/70 flex items-center justify-center text-[#FAF1F0] font-medium text-xs">
@@ -260,27 +339,26 @@ export default function PublicMenuPage({ onOpenCart }) {
                 <p className="text-xs text-[#75666B] line-clamp-2 mt-1 leading-relaxed">
                   {item.description}
                 </p>
-                <div className="flex items-center space-x-2 mt-2">
-                  {item.isSweet && (
+                {item.isSweet && (
+                  <div className="flex flex-wrap items-center gap-1.5 mt-2">
                     <span className="text-[10px] text-pink-700 bg-pink-50 border border-pink-200 px-2 py-0.5 rounded font-medium">Sweet</span>
-                  )}
-                  {item.spiceLevel !== 'NONE' && (
-                    <span className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded font-medium">{item.spiceLevel}</span>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             </div>
 
             <div className="flex items-center justify-between pt-3 mt-3 border-t border-[#E8D1CE]">
               <div>
                 <span className="text-[10px] uppercase font-bold tracking-wider text-[#75666B]">Price</span>
-                <p className="text-base font-bold text-[#11164B]">₹{item.price}</p>
+                <p className="text-base font-bold text-[#11164B]">
+                  ₹{item.portions && item.portions.length > 0 ? item.portions[0].price : item.price}
+                </p>
               </div>
 
               {item.availability ? (
                 <button
                   onClick={() => setSelectedItemForModal(item)}
-                  className="btn-3d-crimson px-4 py-2 rounded-lg text-white text-xs font-medium inline-flex items-center gap-1.5 transition-all"
+                  className="btn-3d-menu-add px-4 py-2 rounded-lg text-[#FAF1F0] text-xs font-medium inline-flex items-center gap-1.5 transition-all"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>Add to Order</span>
@@ -298,9 +376,9 @@ export default function PublicMenuPage({ onOpenCart }) {
         isOpen={Boolean(selectedItemForModal)}
         onClose={() => setSelectedItemForModal(null)}
         item={selectedItemForModal}
-        onAddToCart={(item, qty, cust, addons, note) => {
-          addItem(item, qty, cust, addons, note);
-          addToast(`Added ${item.name} to cart.`, 'success');
+        onAddToCart={(item, qty, cust, addons, note, portion) => {
+          addItem(item, qty, cust, addons, note, portion);
+          addToast(`Added ${item.name}${portion ? ` (${portion.name})` : ''} to cart.`, 'success');
         }}
       />
     </div>

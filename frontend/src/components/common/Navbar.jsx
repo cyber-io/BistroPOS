@@ -3,18 +3,38 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ShoppingBag, User, ArrowUpRight, Menu, X, Truck, PackageCheck, Compass, LogOut, Shield } from 'lucide-react';
 import { useCart } from '../../context/CartContext';
 import { useAuth } from '../../context/AuthContext';
+import { api } from '../../services/api';
 
 export default function Navbar({ onOpenCart }) {
   const { itemCount } = useCart();
   const { currentUser, role, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  const [restaurant, setRestaurant] = useState(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const userMenuRef = useRef(null);
   const accountButtonRef = useRef(null);
   const mobileButtonRef = useRef(null);
   const isHome = location.pathname === '/';
+
+  useEffect(() => {
+    let active = true;
+    api.getRestaurant().then(data => {
+      if (active) setRestaurant(data);
+    }).catch(() => {});
+
+    const onOutletChanged = () => {
+      api.getRestaurant().then(data => {
+        if (active) setRestaurant(data);
+      }).catch(() => {});
+    };
+    window.addEventListener('rs_outlet_changed', onOutletChanged);
+    return () => {
+      active = false;
+      window.removeEventListener('rs_outlet_changed', onOutletChanged);
+    };
+  }, []);
 
   useEffect(() => {
     setMobileMenuOpen(false);
@@ -88,11 +108,13 @@ export default function Navbar({ onOpenCart }) {
   const menuActive = location.pathname.startsWith('/menu') || location.pathname === '/delivery' || location.pathname === '/takeaway';
   const storyActive = isHome && location.hash === '#our-story';
   const visitActive = isHome && location.hash === '#visit';
+  const rQuery = location.search.includes('r=') ? location.search : (restaurant?.restaurantCode ? `?r=${encodeURIComponent(restaurant.restaurantCode)}` : (restaurant?.restaurantId ? `?r=${encodeURIComponent(restaurant.restaurantId)}` : ''));
+  const homePath = rQuery ? `/${rQuery}` : '/home';
 
   const navigation = (
     <>
       <Link
-        to="/"
+        to={homePath}
         className={navClass(homeActive)}
         aria-current={homeActive ? 'page' : undefined}
         onClick={handleHomeClick}
@@ -100,7 +122,7 @@ export default function Navbar({ onOpenCart }) {
         Home
       </Link>
       <Link
-        to="/menu"
+        to={`/menu${rQuery}`}
         className={navClass(menuActive)}
         aria-current={menuActive ? 'page' : undefined}
         onClick={handleMenuClick}
@@ -130,9 +152,9 @@ export default function Navbar({ onOpenCart }) {
     <header className="website-header">
       <div className="website-header-inner">
         <Link
-          to="/"
+          to={homePath}
           className="website-brand"
-          aria-label="Bistro and Bloom home"
+          aria-label={`${restaurant?.name || 'BistroPOS'} home`}
           onClick={handleHomeClick}
         >
           <svg className="website-brand-mark" width="40" height="40" viewBox="0 0 44 44" fill="none" aria-hidden="true">
@@ -142,7 +164,7 @@ export default function Navbar({ onOpenCart }) {
             <circle cx="30" cy="22" r="5.5" stroke="#AF905C" strokeWidth="1.6" />
             <circle cx="22" cy="22" r="2.2" fill="#AF905C" />
           </svg>
-          <span className="website-brand-name">Bistro &amp; Bloom</span>
+          <span className="website-brand-name">{restaurant?.name || 'BistroPOS'}</span>
         </Link>
 
         <nav aria-label="Main navigation" className="website-nav">{navigation}</nav>

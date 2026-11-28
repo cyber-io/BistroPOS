@@ -773,6 +773,7 @@ export default function PosWorkspace() {
   const [reservationEdit, setReservationEdit] = useState(null);
   const [staffRoleFilter, setStaffRoleFilter] = useState('ALL');
   const [passwordTargetUser, setPasswordTargetUser] = useState(null);
+  const [editingStaff, setEditingStaff] = useState(null);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -836,6 +837,12 @@ export default function PosWorkspace() {
   }, [load, addToast, section]);
 
   useEffect(() => { setFilter('ALL'); setQuery(''); setCategory('ALL'); }, [section]);
+
+  useEffect(() => {
+    if (section === 'staff' && currentUser && !canManageStaff) {
+      navigate('/pos', { replace: true });
+    }
+  }, [section, currentUser, canManageStaff, navigate]);
 
   const paidIds = useMemo(() => new Set(data.orders.filter(o => o.paymentStatus === 'PAID' || data.payments.filter(p => p.orderId === o.orderId && p.status === 'PAID').reduce((n, p) => n + Number(p.amount), 0) >= Number(o.total)).map(o => o.orderId)), [data.orders, data.payments]);
   const active = data.orders.filter(o => !DONE.includes(o.status));
@@ -1989,15 +1996,26 @@ export default function PosWorkspace() {
 
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                                   {(isSelf || currentUser?.role === 'SUPER_ADMIN' || (currentUser?.role === 'MANAGER' && !['SUPER_ADMIN', 'MANAGER'].includes(member.role))) && (
-                                    <button
-                                      type="button"
-                                      className="pos-button small"
-                                      onClick={() => setPasswordTargetUser(member)}
-                                      title={`Change password for ${member.name}`}
-                                      style={{ height: 26, fontSize: 10, padding: '0 8px', gap: 4 }}
-                                    >
-                                      <KeyRound size={11} /> Password
-                                    </button>
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="pos-button small"
+                                        onClick={() => setEditingStaff(member)}
+                                        title={`Edit details for ${member.name}`}
+                                        style={{ height: 26, fontSize: 10, padding: '0 8px', gap: 4 }}
+                                      >
+                                        <Pencil size={11} /> Edit
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="pos-button small"
+                                        onClick={() => setPasswordTargetUser(member)}
+                                        title={`Change password for ${member.name}`}
+                                        style={{ height: 26, fontSize: 10, padding: '0 8px', gap: 4 }}
+                                      >
+                                        <KeyRound size={11} /> Password
+                                      </button>
+                                    </>
                                   )}
                                   {!isSelf && (currentUser?.role === 'SUPER_ADMIN' || (currentUser?.role === 'MANAGER' && !['SUPER_ADMIN', 'MANAGER'].includes(member.role))) && (
                                     <button
@@ -2203,6 +2221,20 @@ export default function PosWorkspace() {
             onSuccess={(msg) => {
               setPasswordTargetUser(null);
               addToast(msg, 'success');
+            }}
+          />
+        )}
+
+        {editingStaff && (
+          <EditStaffModal
+            staff={editingStaff}
+            currentUser={currentUser}
+            restaurants={data.allRestaurants.length ? data.allRestaurants : (data.restaurant ? [data.restaurant] : [])}
+            onClose={() => setEditingStaff(null)}
+            onSuccess={async (msg) => {
+              setEditingStaff(null);
+              addToast(msg, 'success');
+              await load(true);
             }}
           />
         )}
@@ -5552,7 +5584,7 @@ function StaffPasswordModal({ user, isSelf, currentUser, onClose, onSuccess }) {
 
   return (
     <Modal onClose={onClose} title={isSelf ? 'Change My Password' : `Change Password: ${user.name}`}>
-      <form onSubmit={handleSubmit} style={{ padding: '0 4px' }}>
+      <form onSubmit={handleSubmit} style={{ padding: '20px 24px 24px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: 'var(--p-surface-subtle, #f8fafc)', borderRadius: 10, marginBottom: 16, border: '1px solid var(--p-border)' }}>
           <div style={{ width: 32, height: 32, borderRadius: 8, background: '#e0e7ff', color: '#4338ca', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <KeyRound size={16} />
@@ -5629,7 +5661,7 @@ function StaffPasswordModal({ user, isSelf, currentUser, onClose, onSuccess }) {
           />
         </div>
 
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 10, borderTop: '1px solid var(--p-border)' }}>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 16, marginTop: 20, borderTop: '1px solid var(--p-border)' }}>
           <button type="button" onClick={onClose} className="pos-button" disabled={busy}>
             Cancel
           </button>
@@ -5641,6 +5673,246 @@ function StaffPasswordModal({ user, isSelf, currentUser, onClose, onSuccess }) {
           >
             {busy ? <RefreshCw size={14} className="pos-spin" /> : <KeyRound size={14} />}
             <span>Save Password</span>
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function EditStaffModal({ staff, currentUser, restaurants = [], onClose, onSuccess }) {
+  const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
+  const isSelf = staff?.userId === currentUser?.userId;
+  const canChangeRole = !isSelf && (isSuperAdmin || (currentUser?.role === 'MANAGER' && !['SUPER_ADMIN', 'MANAGER'].includes(staff?.role)));
+
+  const [form, setForm] = useState({
+    name: staff?.name || '',
+    email: staff?.email || '',
+    phone: staff?.phone || '',
+    role: staff?.role || 'WAITER',
+    status: staff?.status || 'ACTIVE',
+    restaurantId: staff?.restaurantId || (restaurants[0]?.restaurantId || '')
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const roleDefinitions = [
+    {
+      id: 'RECEPTIONIST',
+      title: 'Receptionist',
+      desc: 'Front desk, table assignment, reservations & customer billing',
+      icon: <UserCheck size={18} />
+    },
+    {
+      id: 'KITCHEN',
+      title: 'Kitchen Staff',
+      desc: 'Live KDS ticket display, order prep & menu availability pass',
+      icon: <ChefHat size={18} />
+    },
+    {
+      id: 'WAITER',
+      title: 'Floor Waiter',
+      desc: 'Dine-in table orders, ready food alerts & customer assistance',
+      icon: <HandPlatter size={18} />
+    },
+    ...(isSuperAdmin ? [{
+      id: 'MANAGER',
+      title: 'Hotel Manager',
+      desc: 'Full operational control over menus, orders, tables & staffing',
+      icon: <ShieldCheck size={18} />
+    }] : [])
+  ];
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!form.name.trim() || !form.email.trim()) {
+      setError('Name and email are required.');
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+    try {
+      await api.updateStaffUser(staff.userId, {
+        name: form.name.trim(),
+        email: form.email.trim(),
+        phone: form.phone.trim() || null,
+        role: canChangeRole ? form.role : staff.role,
+        status: form.status,
+        restaurantId: isSuperAdmin && form.restaurantId ? form.restaurantId : undefined
+      });
+      onSuccess(`Staff member "${form.name}" updated successfully!`);
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Failed to update staff member.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title={`Edit Staff: ${staff.name}`} wide={true} onClose={onClose}>
+      <form onSubmit={handleSubmit} style={{ padding: '24px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 16, borderBottom: '1px solid var(--p-border)', marginBottom: 18 }}>
+          <div style={{ width: 44, height: 44, borderRadius: 12, background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <Pencil size={20} />
+          </div>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>
+              Edit Profile & Station Credentials {staff.employeeCode && <span style={{ fontFamily: 'monospace', fontSize: 11, background: '#0f172a', color: '#38bdf8', padding: '2px 6px', borderRadius: 4, marginLeft: 6 }}>{staff.employeeCode}</span>}
+            </h3>
+            <p style={{ margin: '3px 0 0', fontSize: 11, color: 'var(--p-muted)', lineHeight: 1.4 }}>
+              Update name, email contact, station assignment, or account status.
+            </p>
+          </div>
+        </div>
+
+        {error && (
+          <div className="pos-error" style={{ marginBottom: 16 }} role="alert">
+            <AlertCircle size={15} /> {error}
+          </div>
+        )}
+
+        {isSuperAdmin && restaurants.length > 1 && (
+          <label className="pos-field" style={{ marginBottom: 14 }}>
+            <span>Target Hotel Outlet</span>
+            <div style={{ position: 'relative' }}>
+              <Building2 size={15} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--p-muted)', pointerEvents: 'none' }} />
+              <select
+                className="pos-select"
+                value={form.restaurantId}
+                onChange={e => setForm({ ...form, restaurantId: e.target.value })}
+                style={{ width: '100%', height: 40, paddingLeft: 34, fontWeight: 600 }}
+              >
+                {restaurants.map(r => (
+                  <option key={r.restaurantId} value={r.restaurantId}>
+                    🏨 {r.name} [{r.restaurantCode || 'RST-100'}] {r.address ? `— ${r.address.split(',')[0]}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </label>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14, marginBottom: 14 }}>
+          <label className="pos-field">
+            <span>Full Name *</span>
+            <div style={{ position: 'relative' }}>
+              <User size={15} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--p-muted)', pointerEvents: 'none' }} />
+              <input
+                className="pos-input"
+                style={{ paddingLeft: 34 }}
+                value={form.name}
+                onChange={e => setForm({ ...form, name: e.target.value })}
+                placeholder="e.g. Vishal Verma"
+                required
+                maxLength={150}
+              />
+            </div>
+          </label>
+
+          <label className="pos-field">
+            <span>Login Email Address *</span>
+            <div style={{ position: 'relative' }}>
+              <Mail size={15} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--p-muted)', pointerEvents: 'none' }} />
+              <input
+                type="email"
+                className="pos-input"
+                style={{ paddingLeft: 34 }}
+                value={form.email}
+                onChange={e => setForm({ ...form, email: e.target.value })}
+                placeholder="e.g. vishal@bistrobloom.com"
+                required
+                maxLength={255}
+              />
+            </div>
+          </label>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14, marginBottom: 18 }}>
+          <label className="pos-field">
+            <span>Mobile Phone Number <small style={{ color: 'var(--p-muted)' }}>(Optional)</small></span>
+            <div style={{ position: 'relative' }}>
+              <Phone size={15} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--p-muted)', pointerEvents: 'none' }} />
+              <input
+                type="tel"
+                className="pos-input"
+                style={{ paddingLeft: 34 }}
+                value={form.phone}
+                onChange={e => setForm({ ...form, phone: e.target.value })}
+                placeholder="+91 98765 43210"
+                maxLength={30}
+              />
+            </div>
+          </label>
+
+          <label className="pos-field">
+            <span>Account Status</span>
+            <select
+              className="pos-select"
+              value={form.status}
+              onChange={e => setForm({ ...form, status: e.target.value })}
+              style={{ width: '100%', height: 40, fontWeight: 600 }}
+            >
+              <option value="ACTIVE">🟢 ACTIVE (Access Enabled)</option>
+              <option value="INACTIVE">🔴 INACTIVE (Access Suspended)</option>
+            </select>
+          </label>
+        </div>
+
+        {canChangeRole && (
+          <div style={{ marginBottom: 20 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--p-muted)', display: 'block', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              Station / Role Assignment *
+            </span>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+              {roleDefinitions.map(r => {
+                const isSelected = form.role === r.id;
+                return (
+                  <div
+                    key={r.id}
+                    onClick={() => setForm({ ...form, role: r.id })}
+                    style={{
+                      border: `1.5px solid ${isSelected ? '#3b82f6' : 'var(--p-border)'}`,
+                      background: isSelected ? 'rgba(59, 130, 246, 0.05)' : 'var(--p-card)',
+                      borderRadius: 10,
+                      padding: '12px 14px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                      position: 'relative'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <div style={{ color: isSelected ? '#2563eb' : 'var(--p-muted)' }}>
+                        {r.icon}
+                      </div>
+                      {isSelected && <Check size={14} style={{ color: '#2563eb', strokeWidth: 3 }} />}
+                    </div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--p-text)' }}>
+                      {r.title}
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--p-muted)', marginTop: 2, lineHeight: 1.3 }}>
+                      {r.desc}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div className="pos-modal-footer" style={{ padding: '16px 0 0', display: 'flex', gap: 10, justifyContent: 'flex-end', borderTop: '1px solid var(--p-border)', marginTop: 20 }}>
+          <button type="button" className="pos-button" onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="pos-button primary"
+            disabled={busy || !form.name.trim() || !form.email.trim()}
+            style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%)', color: '#fff', border: 0, minWidth: 140, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            {busy ? <RefreshCw className="pos-spin" size={14} /> : <Pencil size={14} />}
+            {busy ? 'Saving…' : 'Save Changes'}
           </button>
         </div>
       </form>

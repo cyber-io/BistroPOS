@@ -238,7 +238,7 @@ export default function PosShell({ children, alertCount = 0, onAlerts, menuDots 
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100/90 border border-slate-200 text-slate-700 text-xs font-semibold shadow-xs">
             <Store size={14} className="text-slate-500" />
             <span className="truncate max-w-[150px] font-bold text-slate-800">
-              {currentRestaurant?.name || 'Bistro & Bloom'}
+              {currentRestaurant?.name || 'BistroPOS'}
             </span>
           </div>
         )}
