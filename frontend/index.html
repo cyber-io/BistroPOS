@@ -7,45 +7,6 @@
     <meta name="referrer" content="strict-origin-when-cross-origin" />
     <meta name="theme-color" content="#162821" />
     <title>BistroPOS</title>
-    <script>
-      // Silence React DevTools prompt and Permissions-Policy console noise
-      if (typeof window !== 'undefined') {
-        window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
-          isDisabled: true,
-          supportsFiber: true,
-          inject: function() {},
-          onCommitFiberRoot: function() {},
-          onCommitFiberUnmount: function() {}
-        };
-
-        const _origWarn = console.warn;
-        const _origError = console.error;
-        const _origInfo = console.info;
-        const isNoise = (arg) => {
-          if (!arg) return false;
-          const s = typeof arg === 'string' ? arg : (arg.message || String(arg));
-          return s.includes('Permissions-Policy') ||
-                 s.includes('private-state-token') ||
-                 s.includes('browsing-topics') ||
-                 s.includes('run-ad-auction') ||
-                 s.includes('join-ad-interest-group') ||
-                 s.includes('React DevTools');
-        };
-
-        console.info = function (...args) {
-          if (args.some(isNoise)) return;
-          _origInfo.apply(console, args);
-        };
-        console.warn = function (...args) {
-          if (args.some(isNoise)) return;
-          _origWarn.apply(console, args);
-        };
-        console.error = function (...args) {
-          if (args.some(isNoise)) return;
-          _origError.apply(console, args);
-        };
-      }
-    </script>
     <!-- Google Fonts for Bistro & Bloom editorial serif and refined modern sans -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

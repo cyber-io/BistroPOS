@@ -68,29 +68,15 @@ export default function HomePage() {
     async function loadData(silent = false) {
       if (!silent) { setLoading(true); setError(''); }
       try {
-        const rest = await api.getRestaurant().catch(() => null);
-        if (active && rest) {
-          setRestaurant(rest);
-          if (rest.name) {
-            document.title = `${rest.name} — Gourmet Dining & Online Ordering`;
-          }
-        }
-
-        const [items, cats] = await Promise.all([api.getMenuItems().catch(() => []), api.getCategories().catch(() => [])]);
-        if (active) { setPopularItems(items.slice(0, 6)); setCategories(cats); }
+        const [rest, items, cats] = await Promise.all([api.getRestaurant(), api.getMenuItems(), api.getCategories()]);
+        if (active) { setRestaurant(rest); setPopularItems(items.slice(0, 6)); setCategories(cats); }
       } catch (err) {
         if (active && !silent) setError(err.message || 'Our menu is temporarily unavailable. Please try again.');
       } finally { if (active && !silent) setLoading(false); }
     }
     loadData();
-    const onOutletChanged = () => { loadData(true); };
-    window.addEventListener('rs_outlet_changed', onOutletChanged);
     const unsubscribe = subscribeRealtimeEvents(type => { if (type === 'FOOD_AVAILABILITY_CHANGED') loadData(true); });
-    return () => {
-      active = false;
-      window.removeEventListener('rs_outlet_changed', onOutletChanged);
-      unsubscribe();
-    };
+    return () => { active = false; unsubscribe(); };
   }, [retry]);
 
   const rawHours = (restaurant?.openingHours && typeof restaurant.openingHours === 'object')
@@ -166,14 +152,14 @@ export default function HomePage() {
           <img
             className="website-hero-dish"
             src={HERO_DISH_IMAGE}
-            alt={`${restaurant?.name || 'BistroPOS'} Signature Plate`}
+            alt="Bistro & Bloom Signature Salad"
             fetchpriority="high"
           />
         </div>
 
         {/* Right Column: Hero Copy & CTA */}
         <div className="website-hero-copy">
-          <p className="website-script">{restaurant?.name || 'BistroPOS'}</p>
+          <p className="website-script">Bistro &amp; Bloom</p>
           <p className="website-eyebrow">A fresh take on the everyday</p>
           <h1 id="website-hero-title">Good food.<br />Beautiful moments.</h1>
           <p className="website-hero-description">
@@ -187,9 +173,6 @@ export default function HomePage() {
               <MapPin size={17} />Find your way here
             </a>
           </div>
-          <Link to="/menu" className="website-explore-link">
-            Explore our menu<ArrowRight size={16} />
-          </Link>
         </div>
       </section>
 
@@ -259,7 +242,7 @@ export default function HomePage() {
         <div className="website-story-copy">
           <p className="website-eyebrow">The heart of the bistro</p>
           <h2>A seat at the table.<br />A moment of your own.</h2>
-          <p>Some of the best moments happen over a meal. A long overdue catch-up, a quiet lunch, an evening with your favourite people. At BistroPOS, there’s room for all of them.</p>
+          <p>Some of the best moments happen over a meal. A long overdue catch-up, a quiet lunch, an evening with your favourite people. At Bistro &amp; Bloom, there’s room for all of them.</p>
           <p>Choose something you love, settle into your seat, and let the conversation take its time. We’ll take care of the good food.</p>
           <Link to="/book-table" className="website-button website-button--red">Make a little time<ArrowUpRight size={17} /></Link>
         </div>
@@ -316,13 +299,13 @@ export default function HomePage() {
 
       {/* Footer */}
       <footer className="website-footer">
-        <Link to="/" className="website-footer-brand">BistroPOS<span>Good food. Beautiful moments.</span></Link>
+        <Link to="/" className="website-footer-brand">Bistro &amp; Bloom<span>Good food. Beautiful moments.</span></Link>
         <nav aria-label="Footer navigation">
           <Link to="/menu">Our menu</Link>
           <Link to="/book-table">Reservations</Link>
           <Link to="/track-order">Track your order</Link>
         </nav>
-        <p>© {new Date().getFullYear()} BistroPOS</p>
+        <p>© {new Date().getFullYear()} Bistro &amp; Bloom</p>
       </footer>
 
       {/* Customization Modal */}

@@ -52,7 +52,7 @@ export default function CheckoutPage({ source }) {
         <div className="space-y-5 rounded-2xl border border-[#E8D1CE] bg-white p-6 sm:p-10 text-center">
           <h2 className="font-serif text-2xl text-[#11164B]">Sign in or Sign up to place your order</h2>
           <p className="mx-auto max-w-md text-sm text-[#75666B]">
-            New to BistroPOS? Create an account in seconds. Returning guest? Sign in to continue to checkout.
+            New to Bistro &amp; Bloom? Create an account in seconds. Returning guest? Sign in to continue to checkout.
           </p>
           <div className="flex flex-wrap justify-center gap-3 pt-2">
             <Link to={`/login?redirect=${encodeURIComponent(redirectPath)}`} className="btn-3d-crimson rounded-xl px-6 py-3 text-sm font-semibold text-white">

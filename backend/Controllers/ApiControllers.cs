@@ -1398,21 +1398,6 @@ public class UsersController : ControllerBase
             var nextStatus = dto.Status.Trim().ToUpperInvariant();
             if (nextStatus is "ACTIVE" or "INACTIVE") user.Status = nextStatus;
         }
-        if (!string.IsNullOrWhiteSpace(dto.Role))
-        {
-            var nextRole = dto.Role.Trim().ToUpperInvariant();
-            if (nextRole is UserRoles.Manager or UserRoles.Receptionist or UserRoles.Kitchen or UserRoles.Waiter)
-            {
-                if (nextRole == UserRoles.Manager && !User.IsInRole(UserRoles.SuperAdmin))
-                {
-                    // Manager cannot promote to Manager
-                }
-                else
-                {
-                    user.Role = nextRole;
-                }
-            }
-        }
         if (User.IsInRole(UserRoles.SuperAdmin) && dto.RestaurantId.HasValue && dto.RestaurantId.Value != Guid.Empty)
         {
             user.RestaurantId = dto.RestaurantId.Value;

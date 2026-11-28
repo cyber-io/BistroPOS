@@ -43,40 +43,10 @@ export function Modal({title, children, onClose, wide = false, className = ''}) 
       }}
     >
       <div className="pos-modal-inner">
-        <header style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '16px 24px',
-          background: 'var(--p-card)',
-          borderBottom: '1px solid var(--p-border)',
-          position: 'sticky',
-          top: 0,
-          zIndex: 10
-        }}>
-          <h2 style={{ fontSize: '15px', fontWeight: 700, margin: 0, lineHeight: 1, color: 'var(--p-text)' }}>{title}</h2>
-          <button
-            type="button"
-            className="pos-icon-button"
-            onClick={onClose}
-            aria-label="Close dialog"
-            style={{
-              width: 32,
-              height: 32,
-              padding: 0,
-              margin: 0,
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderRadius: 8,
-              border: '1px solid var(--p-border)',
-              background: 'var(--p-card)',
-              color: 'var(--p-text)',
-              cursor: 'pointer',
-              flexShrink: 0
-            }}
-          >
-            <X size={16} />
+        <header>
+          <h2>{title}</h2>
+          <button className="pos-icon-button" onClick={onClose} aria-label="Close dialog">
+            <X size={18} />
           </button>
         </header>
         {children}

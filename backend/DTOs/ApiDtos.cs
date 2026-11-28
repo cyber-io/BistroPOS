@@ -14,7 +14,7 @@ public record RegisterRequest(
 );
 
 public record LoginRequest(
-    [Required] string Email,
+    [Required, EmailAddress] string Email,
     [Required] string Password
 );
 
@@ -498,8 +498,7 @@ public record UpdateStaffDto(
     string? Phone,
     string? Status,
     Guid? RestaurantId = null,
-    string? Password = null,
-    string? Role = null
+    string? Password = null
 );
 
 public record ResetStaffPasswordDto(
