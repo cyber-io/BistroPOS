@@ -40,13 +40,24 @@ function Summary({ summary, restaurants, managers }) {
   );
 }
 
-function OutletCard({ outlet, managers, featured, onInspect, onAssign, onEdit, onDelete, onRemoveManager, onOpen, onToggle, updating, headingRef }) {
+function OutletCard({ outlet, managers, featured, onInspect, onAssign, onEdit, onDelete, onRemoveManager, onOpen, onToggle, updating, headingRef, onNotify }) {
+  const [copied, setCopied] = useState(false);
   const { name, status, address, phone, email } = outlet;
   const contacts = [
     ['Address', address, MapPin],
     ['Phone', phone, Phone],
     ['Email', email, Mail],
   ].filter(([, value]) => value);
+
+  const handleCopyLink = () => {
+    const url = `${window.location.origin}/?r=${encodeURIComponent(outlet.restaurantCode || outlet.restaurantId)}`;
+    navigator.clipboard.writeText(url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+    if (onNotify) {
+      onNotify({ message: `Website link for "${name}" copied to clipboard!` });
+    }
+  };
 
   return (
     <article className={`admin-outlet${featured ? ' admin-outlet--detail' : ''}`} aria-label={name}>
@@ -66,28 +77,6 @@ function OutletCard({ outlet, managers, featured, onInspect, onAssign, onEdit, o
             <Status value={status} outlet />
           </div>
           <div className="admin-head-actions">
-            <a
-              href={`/?r=${encodeURIComponent(outlet.restaurantCode || outlet.restaurantId)}`}
-              target="_blank"
-              rel="noreferrer"
-              className="admin-status-action"
-              style={{ textDecoration: 'none', color: '#10b981', borderColor: 'rgba(16, 185, 129, 0.28)' }}
-              title="Open Customer Website"
-            >
-              <Globe size={12} /> Website ↗
-            </a>
-            <button
-              type="button"
-              className="admin-status-action"
-              onClick={() => {
-                const url = `${window.location.origin}/?r=${encodeURIComponent(outlet.restaurantCode || outlet.restaurantId)}`;
-                navigator.clipboard.writeText(url);
-                alert(`Website URL copied: ${url}`);
-              }}
-              title="Copy Website Link"
-            >
-              <Copy size={12} /> Copy Link
-            </button>
             <button type="button" className="admin-status-action" onClick={() => onDelete(outlet)}
               disabled={updating} aria-label={`Delete ${name}`} title="Delete restaurant"
               style={{ color: '#e11d48', borderColor: 'rgba(225, 29, 72, 0.28)' }}>
@@ -133,6 +122,45 @@ function OutletCard({ outlet, managers, featured, onInspect, onAssign, onEdit, o
               </li>
             ))}</ul>
           ) : <p>{managers ? 'Unassigned' : 'Manager details unavailable'}</p>}
+        </div>
+
+        <div className="admin-outlet-web-links" style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+          <a
+            href={`/?r=${encodeURIComponent(outlet.restaurantCode || outlet.restaurantId)}`}
+            target="_blank"
+            rel="noreferrer"
+            className="admin-button"
+            style={{
+              flex: 1,
+              textDecoration: 'none',
+              background: 'rgba(16, 185, 129, 0.08)',
+              color: '#059669',
+              borderColor: 'rgba(16, 185, 129, 0.3)',
+              fontWeight: 650,
+              fontSize: 12,
+              gap: 6
+            }}
+            title="Open Customer Website in a new tab"
+          >
+            <Globe size={14} /> Website ↗
+          </a>
+          <button
+            type="button"
+            className="admin-button"
+            style={{
+              flex: 1,
+              fontWeight: 650,
+              fontSize: 12,
+              gap: 6,
+              color: copied ? '#059669' : undefined,
+              borderColor: copied ? 'rgba(16, 185, 129, 0.4)' : undefined
+            }}
+            onClick={handleCopyLink}
+            title="Copy Customer Website URL"
+          >
+            {copied ? <CheckCircle2 size={14} style={{ color: '#059669' }} /> : <Copy size={13} />}
+            <span>{copied ? 'Copied!' : 'Copy Link'}</span>
+          </button>
         </div>
       </div>
     </article>
@@ -308,7 +336,8 @@ export default function SuperAdminDashboard() {
       managers={managers && (managersByOutlet.get(outlet.restaurantId) || [])}
       onAssign={assignManager} onEdit={editOutlet} onDelete={deleteOutlet} onRemoveManager={removeManager} onOpen={openWorkspace} onToggle={toggleStatus} updating={updating}
       onInspect={!featured && detailOutlet ? () => setSelectedId(outlet.restaurantId) : undefined}
-      headingRef={featured ? detailHeading : undefined} />
+      headingRef={featured ? detailHeading : undefined}
+      onNotify={setNotification} />
   );
 
   const records = isOutlets ? restaurants : managers;
