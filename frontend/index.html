@@ -8,19 +8,17 @@
     <meta name="theme-color" content="#162821" />
     <title>BistroPOS</title>
     <script>
-      // Silence React DevTools prompt in console
+      // Silence React DevTools download prompt & browser extension header warnings without breaking Fast Refresh
       if (typeof window !== 'undefined') {
-        window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
-          isDisabled: true,
-          supportsFiber: true,
-          inject: function() {},
-          onCommitFiberRoot: function() {},
-          onCommitFiberUnmount: function() {}
-        };
         const _origInfo = console.info;
         console.info = function (...args) {
           if (args.some(a => typeof a === 'string' && a.includes('React DevTools'))) return;
           _origInfo.apply(console, args);
+        };
+        const _origWarn = console.warn;
+        console.warn = function (...args) {
+          if (args.some(a => typeof a === 'string' && (a.includes('Permissions-Policy') || a.includes('browsing-topics')))) return;
+          _origWarn.apply(console, args);
         };
       }
     </script>
