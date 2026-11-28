@@ -17,14 +17,10 @@ namespace RestaurantSystem.Api.Controllers;
 public class AuthController : ControllerBase
 {
     private readonly IAuthService _auth;
-    private readonly IHostEnvironment _env;
-    private readonly FeaturesOptions _features;
 
-    public AuthController(IAuthService auth, IHostEnvironment env, IOptions<FeaturesOptions> features)
+    public AuthController(IAuthService auth)
     {
         _auth = auth;
-        _env = env;
-        _features = features.Value;
     }
 
     [HttpPost("register")]
@@ -33,18 +29,6 @@ public class AuthController : ControllerBase
         var result = await _auth.RegisterAsync(request);
         if (!result.Success) return BadRequest(result);
         return Ok(result);
-    }
-
-    [HttpPost("demo-login")]
-    public async Task<IActionResult> DemoLogin([FromBody] DemoLoginRequest request)
-    {
-        if (!_env.IsDevelopment() || !_features.EnableDemoLogin)
-        {
-            return NotFound(new { message = "Demonstration login is disabled." });
-        }
-
-        var result = await _auth.DemoLoginAsync(request.Role, request.RestaurantId);
-        return result.Success ? Ok(result) : BadRequest(result);
     }
 
     [HttpPost("login")]
@@ -134,10 +118,12 @@ public class AuthController : ControllerBase
 public class RestaurantsController : ControllerBase
 {
     private readonly RestaurantDbContext _db;
+    private readonly ITextBeeSmsService _sms;
 
-    public RestaurantsController(RestaurantDbContext db)
+    public RestaurantsController(RestaurantDbContext db, ITextBeeSmsService sms)
     {
         _db = db;
+        _sms = sms;
     }
 
     [HttpGet]
@@ -147,6 +133,20 @@ public class RestaurantsController : ControllerBase
         var query = isSuperAdmin ? _db.Restaurants.AsQueryable() : _db.Restaurants.Where(r => r.Status == "ACTIVE");
         var restaurants = await query.OrderByDescending(r => r.CreatedAt).ToListAsync();
         return Ok(restaurants);
+    }
+
+    [Authorize(Roles = UserRoles.SuperAdmin)]
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> DeleteRestaurant(Guid id)
+    {
+        var restaurant = await _db.Restaurants.FindAsync(id);
+        if (restaurant == null) return NotFound(new { message = "Restaurant not found." });
+
+        await _db.Users.Where(u => u.RestaurantId == id)
+            .ExecuteUpdateAsync(s => s.SetProperty(u => u.RestaurantId, (Guid?)null));
+        _db.Restaurants.Remove(restaurant);
+        await _db.SaveChangesAsync();
+        return Ok(new { success = true, message = $"{restaurant.Name} deleted." });
     }
 
     [Authorize(Roles = UserRoles.SuperAdmin)]
@@ -320,11 +320,9 @@ public class RestaurantsController : ControllerBase
         if (string.IsNullOrWhiteSpace(dto.Email))
             return BadRequest(new { message = "Contact email is required." });
 
-        var restaurantCode = await UserProvisioning.GenerateRestaurantCodeAsync(_db);
         var restaurant = new Restaurant
         {
             RestaurantId = Guid.NewGuid(),
-            RestaurantCode = restaurantCode,
             Name = dto.Name.Trim(),
             Address = dto.Address.Trim(),
             Phone = dto.Phone.Trim(),
@@ -377,6 +375,22 @@ public class RestaurantsController : ControllerBase
         }
 
         await _db.SaveChangesAsync();
+
+        // Send welcome SMS after the restaurant has been saved.
+        if (!string.IsNullOrWhiteSpace(restaurant.Phone))
+        {
+            await _sms.EnqueueEventSmsAsync(
+                null,
+                "SOFTWARE_PURCHASE_WELCOME",
+                restaurant.Phone,
+                new Dictionary<string, string>
+                {
+                    ["restaurant"] = restaurant.Name
+                },
+                restaurant.RestaurantId.ToString()
+            );
+        }
+
         return CreatedAtAction(nameof(GetRestaurantById), new { id = restaurant.RestaurantId }, restaurant);
     }
 }
@@ -573,11 +587,9 @@ public class MenuController : ControllerBase
     {
         var targetId = await UserProvisioning.ResolveRestaurantIdAsync(_db, restaurantId);
 
-        // If requested outlet has no categories, safely fall back to default/active outlet
         if (!await _db.MenuCategories.AnyAsync(c => c.RestaurantId == targetId))
         {
-            var fallback = await _db.Restaurants.Where(r => r.Status == "ACTIVE").Select(r => (Guid?)r.RestaurantId).FirstOrDefaultAsync();
-            if (fallback.HasValue) targetId = fallback.Value;
+            targetId = UserProvisioning.DefaultRestaurantId;
         }
 
         var categories = await _db.MenuCategories
@@ -683,11 +695,9 @@ public class MenuController : ControllerBase
     {
         var targetId = await UserProvisioning.ResolveRestaurantIdAsync(_db, restaurantId);
 
-        // If requested outlet has no items, safely fall back to default/active outlet
         if (!await _db.MenuItems.AnyAsync(m => m.RestaurantId == targetId))
         {
-            var fallback = await _db.Restaurants.Where(r => r.Status == "ACTIVE").Select(r => (Guid?)r.RestaurantId).FirstOrDefaultAsync();
-            if (fallback.HasValue) targetId = fallback.Value;
+            targetId = UserProvisioning.DefaultRestaurantId;
         }
 
         var query = _db.MenuItems.Include(m => m.Category).Where(m => m.RestaurantId == targetId);
@@ -751,148 +761,6 @@ public class MenuController : ControllerBase
 
         return Ok(new { success = true, availability = request.Availability });
     }
-
-    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
-    [HttpPost("items")]
-    public async Task<IActionResult> CreateMenuItem([FromBody] CreateMenuItemRequest request)
-    {
-        if (string.IsNullOrWhiteSpace(request.Name))
-            return BadRequest(new { message = "Item name is required." });
-
-        Guid targetRestaurantId;
-        if (_tenant.IsManager)
-        {
-            targetRestaurantId = _tenant.GetRequiredRestaurantId();
-        }
-        else if (_tenant.IsSuperAdmin)
-        {
-            targetRestaurantId = request.RestaurantId ?? _tenant.RestaurantId ?? UserProvisioning.DefaultRestaurantId;
-        }
-        else
-        {
-            return Forbid();
-        }
-
-        var category = await _db.MenuCategories.FindAsync(request.CategoryId);
-        if (category == null || category.RestaurantId != targetRestaurantId)
-        {
-            return BadRequest(new { message = "Selected category does not exist for this restaurant." });
-        }
-
-        var item = new MenuItem
-        {
-            MenuItemId = Guid.NewGuid(),
-            RestaurantId = targetRestaurantId,
-            CategoryId = request.CategoryId,
-            Name = request.Name.Trim(),
-            Description = request.Description?.Trim(),
-            Price = request.Price,
-            Image = string.IsNullOrWhiteSpace(request.Image) ? "/images/bistro-hero-plate.png" : request.Image.Trim(),
-            VegNonVeg = string.Equals(request.VegNonVeg, "NON_VEG", StringComparison.OrdinalIgnoreCase) ? "NON_VEG" : "VEG",
-            Availability = request.Availability ?? true,
-            SpiceLevel = request.SpiceLevel ?? "NONE",
-            IsSweet = request.IsSweet ?? false,
-            CustomizationOptions = request.CustomizationOptions ?? "[]",
-            AddOns = request.AddOns ?? "[]",
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
-
-        _db.MenuItems.Add(item);
-        await _db.SaveChangesAsync();
-
-        var dto = new MenuItemDto(
-            item.MenuItemId,
-            item.CategoryId,
-            category.Name,
-            item.Name,
-            item.Description,
-            item.Price,
-            item.Image,
-            item.VegNonVeg,
-            item.Availability,
-            item.SpiceLevel,
-            item.IsSweet,
-            item.AddOns,
-            item.CustomizationOptions
-        );
-
-        return Created($"/api/menu/items/{item.MenuItemId}", dto);
-    }
-
-    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
-    [HttpPut("items/{id:guid}")]
-    public async Task<IActionResult> UpdateMenuItem(Guid id, [FromBody] UpdateMenuItemRequest updated)
-    {
-        var existing = await _db.MenuItems.FindAsync(id);
-        if (existing == null) return NotFound(new { message = "Item not found." });
-
-        if (_tenant.IsManager && existing.RestaurantId != _tenant.GetRequiredRestaurantId())
-            return Forbid();
-
-        string categoryName = "";
-        if (updated.CategoryId.HasValue)
-        {
-            var cat = await _db.MenuCategories.FindAsync(updated.CategoryId.Value);
-            if (cat != null && cat.RestaurantId == existing.RestaurantId)
-            {
-                existing.CategoryId = updated.CategoryId.Value;
-                categoryName = cat.Name;
-            }
-        }
-        else
-        {
-            var cat = await _db.MenuCategories.FindAsync(existing.CategoryId);
-            categoryName = cat?.Name ?? "";
-        }
-
-        existing.Name = updated.Name.Trim();
-        existing.Description = updated.Description?.Trim();
-        existing.Price = updated.Price;
-        if (!string.IsNullOrWhiteSpace(updated.Image)) existing.Image = updated.Image.Trim();
-        if (!string.IsNullOrWhiteSpace(updated.VegNonVeg)) existing.VegNonVeg = updated.VegNonVeg.ToUpper();
-        if (updated.Availability.HasValue) existing.Availability = updated.Availability.Value;
-        if (!string.IsNullOrWhiteSpace(updated.SpiceLevel)) existing.SpiceLevel = updated.SpiceLevel;
-        if (updated.IsSweet.HasValue) existing.IsSweet = updated.IsSweet.Value;
-        if (!string.IsNullOrWhiteSpace(updated.CustomizationOptions)) existing.CustomizationOptions = updated.CustomizationOptions;
-        if (!string.IsNullOrWhiteSpace(updated.AddOns)) existing.AddOns = updated.AddOns;
-        existing.UpdatedAt = DateTime.UtcNow;
-
-        await _db.SaveChangesAsync();
-
-        var dto = new MenuItemDto(
-            existing.MenuItemId,
-            existing.CategoryId,
-            categoryName,
-            existing.Name,
-            existing.Description,
-            existing.Price,
-            existing.Image,
-            existing.VegNonVeg,
-            existing.Availability,
-            existing.SpiceLevel,
-            existing.IsSweet,
-            existing.AddOns,
-            existing.CustomizationOptions
-        );
-
-        return Ok(dto);
-    }
-
-    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
-    [HttpDelete("items/{id:guid}")]
-    public async Task<IActionResult> DeleteMenuItem(Guid id)
-    {
-        var existing = await _db.MenuItems.FindAsync(id);
-        if (existing == null) return NotFound(new { message = "Item not found." });
-
-        if (_tenant.IsManager && existing.RestaurantId != _tenant.GetRequiredRestaurantId())
-            return Forbid();
-
-        _db.MenuItems.Remove(existing);
-        await _db.SaveChangesAsync();
-        return Ok(new { success = true, message = "Menu item deleted successfully." });
-    }
 }
 
 [ApiController]
@@ -902,17 +770,23 @@ public class OrdersController : ControllerBase
     private readonly IOrderService _orders;
     private readonly IAuthService _auth;
     private readonly IEmailReceiptService _emailReceipts;
+    private readonly ITextBeeSmsService _sms;
 
-    public OrdersController(IOrderService orders, IAuthService auth, IEmailReceiptService emailReceipts)
+    public OrdersController(IOrderService orders, IAuthService auth, IEmailReceiptService emailReceipts, ITextBeeSmsService sms)
     {
         _orders = orders;
         _auth = auth;
         _emailReceipts = emailReceipts;
+        _sms = sms;
     }
 
     [HttpPost]
     public async Task<IActionResult> CreateOrder([FromBody] CreateOrderRequest request)
     {
+        if (request.Source != OrderSources.DineInQr && User.Identity?.IsAuthenticated != true)
+        {
+            return Unauthorized(new { message = "Please sign in or sign up before placing a website order." });
+        }
         Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var customerId);
         request = request with { CustomerId = customerId == Guid.Empty ? null : customerId };
         var order = await _orders.CreateOrderAsync(request);
@@ -1011,6 +885,14 @@ public class OrdersController : ControllerBase
         if (!success) return BadRequest(new { success = false, message });
         return Ok(new { success = true, message });
     }
+
+    [HttpPost("{orderId:guid}/sms-receipt")]
+    public async Task<IActionResult> SmsReceipt(Guid orderId, [FromBody] SmsReceiptRequest request)
+    {
+        var (success, message) = await _sms.SendOrderReceiptSmsAsync(orderId, request.Phone);
+        if (!success) return BadRequest(new { success = false, message });
+        return Ok(new { success = true, message });
+    }
 }
 
 [ApiController]
@@ -1076,6 +958,10 @@ public class ReservationsController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> CreateReservation([FromBody] CreateReservationRequest request)
     {
+        if (User.Identity?.IsAuthenticated != true)
+        {
+            return Unauthorized(new { message = "Please sign in or sign up before reserving a table." });
+        }
         Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var customerId);
         request = request with { CustomerId = customerId == Guid.Empty ? null : customerId };
         var (success, reservation, message) = await _reservations.CreateReservationAsync(request);
@@ -1449,14 +1335,16 @@ public class UsersController : ControllerBase
         if (string.IsNullOrWhiteSpace(dto.Password) || dto.Password.Length < 8 ||
             !dto.Password.Any(char.IsLetter) || !dto.Password.Any(char.IsDigit))
         {
-            return BadRequest(new { message = "Password restriction failed: Password must be at least 8 characters long and contain both letters and numbers." });
+            return BadRequest(new { message = "Password must be at least 8 characters and include letters and numbers." });
         }
 
         var isSuperAdmin = User.IsInRole(UserRoles.SuperAdmin);
         Guid targetRestaurantId;
         if (isSuperAdmin)
         {
-            targetRestaurantId = dto.RestaurantId ?? restaurantId ?? _tenant.RestaurantId ?? Guid.Empty;
+            targetRestaurantId = (dto.RestaurantId.HasValue && dto.RestaurantId.Value != Guid.Empty
+                ? dto.RestaurantId.Value
+                : restaurantId) ?? _tenant.RestaurantId ?? Guid.Empty;
             if (targetRestaurantId == Guid.Empty) return BadRequest(new { message = "Target restaurant ID is required." });
         }
         else
@@ -1503,6 +1391,57 @@ public class UsersController : ControllerBase
         await _audit.LogAsync(targetRestaurantId, _tenant.CurrentUserId, _tenant.CurrentRole, "STAFF_CREATED", "users", new { user.UserId, user.Role, user.EmployeeCode });
 
         return Ok(new UserDto(user.UserId, user.RestaurantId, user.Name, user.Email, user.Phone, user.Role, user.Status, user.EmployeeCode));
+    }
+
+    [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
+    [HttpPut("{id:guid}")]
+    public async Task<IActionResult> UpdateStaff(Guid id, [FromBody] UpdateStaffDto dto)
+    {
+        var user = await _db.Users.FindAsync(id);
+        if (user == null || user.Role == UserRoles.Customer)
+            return NotFound(new { message = "Staff member not found." });
+
+        _tenant.EnforceTenantAccess(user.RestaurantId);
+
+        if (!User.IsInRole(UserRoles.SuperAdmin) && user.Role is UserRoles.SuperAdmin or UserRoles.Manager)
+            return Forbid();
+
+        if (string.IsNullOrWhiteSpace(dto.Name) || string.IsNullOrWhiteSpace(dto.Email))
+            return BadRequest(new { message = "Name and email are required." });
+
+        var normalizedEmail = dto.Email.Trim().ToLowerInvariant();
+        if (!string.Equals(user.Email, normalizedEmail, StringComparison.OrdinalIgnoreCase))
+        {
+            var emailTaken = await _db.Users.AnyAsync(u => u.UserId != id && u.Email.ToLower() == normalizedEmail);
+            if (emailTaken)
+                return BadRequest(new { message = "A user with this email address already exists." });
+        }
+
+        if (!string.IsNullOrWhiteSpace(dto.Password))
+        {
+            if (dto.Password.Length < 8 || !dto.Password.Any(char.IsLetter) || !dto.Password.Any(char.IsDigit))
+                return BadRequest(new { message = "Password must be at least 8 characters and include letters and numbers." });
+            user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password);
+        }
+
+        user.Name = dto.Name.Trim();
+        user.Email = normalizedEmail;
+        user.Phone = string.IsNullOrWhiteSpace(dto.Phone) ? null : dto.Phone.Trim();
+        if (!string.IsNullOrWhiteSpace(dto.Status))
+        {
+            var nextStatus = dto.Status.Trim().ToUpperInvariant();
+            if (nextStatus is "ACTIVE" or "INACTIVE") user.Status = nextStatus;
+        }
+        if (User.IsInRole(UserRoles.SuperAdmin) && dto.RestaurantId.HasValue && dto.RestaurantId.Value != Guid.Empty)
+        {
+            user.RestaurantId = dto.RestaurantId.Value;
+        }
+        user.UpdatedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync(user.RestaurantId, _tenant.CurrentUserId, _tenant.CurrentRole, "STAFF_UPDATED", "users", new { user.UserId, user.Role });
+
+        return Ok(new UserDto(user.UserId, user.RestaurantId, user.Name, user.Email, user.Phone, user.Role, user.Status));
     }
 
     [Authorize(Roles = $"{UserRoles.SuperAdmin},{UserRoles.Manager}")]
