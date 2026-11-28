@@ -626,4 +626,58 @@
   border: 1px solid var(--p-border);
 }
 
+.pos-payment-amount-box {
+  background: var(--p-card);
+  border: 1px solid var(--p-border);
+  border-radius: 10px;
+  padding: 14px 18px;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.pos-payment-amount-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.pos-payment-amount-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--p-muted);
+}
+
+.pos-payment-amount-val {
+  font-size: 24px;
+  font-weight: 750;
+  color: var(--p-text);
+  line-height: 1.15;
+}
+
+.pos-payment-amount-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--p-muted);
+  background: var(--p-elevated);
+  padding: 6px 12px;
+  border-radius: 7px;
+  border: 1px solid var(--p-border);
+  white-space: nowrap;
+}
+
+.pos-payment-amount-table {
+  color: var(--p-text);
+  font-weight: 700;
+}
+
+
 

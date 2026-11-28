@@ -4446,17 +4446,23 @@ function PaymentDialog({ order, restaurant, onClose, onPaid }) {
             {error && <div className="pos-error" role="alert"><AlertCircle size={15} />{error}</div>}
 
             <div className="pos-payment-amount-box">
-              <span className="label">Amount due</span>
-              <strong className="amount">{money(due)}</strong>
-              <span className="subtitle">
-                {order?.orderNumber} {order?.tableNumber ? `· ${tableTitle(order)}` : ''}
-              </span>
+              <div className="pos-payment-amount-info">
+                <span className="pos-payment-amount-label">Amount due</span>
+                <strong className="pos-payment-amount-val">{money(due)}</strong>
+              </div>
+              <div className="pos-payment-amount-tag">
+                <span>{order?.sessionId || order?.orderNumber}</span>
+                {(order?.tableName || order?.tableNumber) && (
+                  <span className="pos-payment-amount-table">· {order.tableName || tableTitle(order)}</span>
+                )}
+              </div>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
               <label className="pos-field" style={{ margin: 0 }}>
                 <span>Customer name</span>
                 <input
+                  className="pos-input"
                   type="text"
                   placeholder="Guest name"
                   value={customerName}
@@ -4466,6 +4472,7 @@ function PaymentDialog({ order, restaurant, onClose, onPaid }) {
               <label className="pos-field" style={{ margin: 0 }}>
                 <span>Mobile number (SMS bill)</span>
                 <input
+                  className="pos-input"
                   type="tel"
                   placeholder="+91 98765 43210"
                   value={customerPhone}
