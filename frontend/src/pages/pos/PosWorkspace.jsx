@@ -573,17 +573,19 @@ function TableSessionCard({ session, onDetails, onPay, onAddItems, onMarkDeliver
                     </div>
                     <div className="pos-ticket-entry-actions">
                       <Badge status={ord.status} />
-                      <button
-                        type="button"
-                        className="pos-mark-delivered-btn"
-                        title="Mark this order as delivered"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onMarkDelivered && onMarkDelivered(ord.orderId);
-                        }}
-                      >
-                        <Check size={11} /> Mark delivered
-                      </button>
+                      {!isDineIn && (session.source === 'DELIVERY' || ord.source === 'DELIVERY') && (
+                        <button
+                          type="button"
+                          className="pos-mark-delivered-btn"
+                          title="Mark this order as delivered"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onMarkDelivered && onMarkDelivered(ord.orderId);
+                          }}
+                        >
+                          <Check size={11} /> Mark delivered
+                        </button>
+                      )}
                     </div>
                   </div>
                   <div className="pos-ticket-entry-items">
@@ -4049,7 +4051,7 @@ function OrderDetails({ order, paid, payments, restaurant, onClose, onPay, onUpd
                   <b style={{ fontSize: 10 }}>{ord.orderNumber} <span style={{ color: 'var(--p-muted)', fontWeight: 400 }}>· {time(ord.createdAt)}</span></b>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <Badge status={ord.status} />
-                    {!['DELIVERED', 'PICKED_UP', 'CANCELLED', 'CONFIRMATION_TIMEOUT'].includes(ord.status) && (
+                    {(order?.source === 'DELIVERY' || ord?.source === 'DELIVERY') && !['DELIVERED', 'PICKED_UP', 'CANCELLED', 'CONFIRMATION_TIMEOUT'].includes(ord.status) && (
                       <button
                         type="button"
                         className="pos-mark-delivered-btn"
@@ -4144,20 +4146,7 @@ function OrderDetails({ order, paid, payments, restaurant, onClose, onPay, onUpd
             Mark collected
           </button>
         )}
-        {order?.source === 'DINE_IN_QR' && !['DELIVERED', 'PICKED_UP', 'CANCELLED', 'CONFIRMATION_TIMEOUT'].includes(order?.status) && (!isSession || order.orders.length <= 1) && (
-          <button
-            className="pos-button primary full"
-            style={{ marginTop: 10 }}
-            disabled={busy}
-            onClick={async () => {
-              const targetId = order.orderId || order.orders?.[0]?.orderId;
-              await run(() => api.updateOrderStatus(targetId, 'DELIVERED'), 'Order marked as delivered');
-              onUpdated && onUpdated();
-            }}
-          >
-            <Check size={13} style={{ display: 'inline', marginRight: 4 }} /> Mark delivered
-          </button>
-        )}
+
         <SendBillPanel order={order} restaurant={restaurant} paid={paid} />
       </div>
       <div className="pos-modal-footer">
