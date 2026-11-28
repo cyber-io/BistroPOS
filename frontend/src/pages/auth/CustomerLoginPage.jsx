@@ -68,7 +68,7 @@ export default function CustomerLoginPage() {
               <circle cx="22" cy="22" r="2.2" fill="#AF905C" />
             </svg>
             <h1 className="font-serif text-2xl sm:text-3xl text-[#11164b] font-semibold tracking-tight">
-              {mode === 'register' ? 'Join Bistro & Bloom' : mode === 'reset' ? 'Reset password' : 'Sign in to order'}
+              {mode === 'register' ? 'Join BistroPOS' : mode === 'reset' ? 'Reset password' : 'Sign in to order'}
             </h1>
             <p className="mt-2 text-xs text-[#75666b] leading-relaxed">
               {mode === 'register'

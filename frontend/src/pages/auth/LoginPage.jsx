@@ -54,8 +54,7 @@ export default function LoginPage() {
         <header className="px-7 sm:px-12 py-8 flex items-center justify-between">
           <div className="flex items-center gap-2.5 font-bold text-lg tracking-tight">
             <Cloud className="w-8 h-8 text-[#4778f5]" strokeWidth={1.8} />
-            Bistro &amp; Bloom
-            <span className="ml-1 text-[10px] font-medium text-slate-400 border border-slate-200 rounded px-1.5 py-0.5 uppercase tracking-wider">POS</span>
+            <span>Bistro<span className="text-[#4778f5]">POS</span></span>
           </div>
           <Link
             to="/login"
@@ -151,7 +150,7 @@ export default function LoginPage() {
         </div>
 
         <footer className="px-7 sm:px-12 py-6 flex items-center justify-between text-[10px] text-[#9ca5b5]">
-          <span>Bistro &amp; Bloom System</span>
+          <span>BistroPOS System</span>
           <span className="flex items-center gap-1.5"><ShieldCheck size={12} /> Secure access</span>
         </footer>
       </section>
@@ -170,7 +169,7 @@ export default function LoginPage() {
           <div className="bg-white rounded-xl shadow-[0_20px_70px_-25px_#9fafd3] border border-[#e7ecf6] p-5 rotate-[-2deg]">
             <div className="flex justify-between items-center border-b border-[#edf1f7] pb-4">
               <span className="font-semibold text-sm flex items-center gap-2">
-                <Cloud className="w-5 h-5 text-[#4778f5]" />Bistro &amp; Bloom
+                <Cloud className="w-5 h-5 text-[#4778f5]" />BistroPOS
               </span>
               <span className="text-[9px] rounded-full bg-[#edf9f2] text-[#43a878] px-2 py-1">All systems connected</span>
             </div>

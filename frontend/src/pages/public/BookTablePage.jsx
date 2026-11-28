@@ -23,11 +23,6 @@ export default function BookTablePage() {
   const [submitError, setSubmitError] = useState('');
   const [confirmation, setConfirmation] = useState(null);
   const [form, setForm] = useState({ name:currentUser?.name || '', phone:currentUser?.phone || '', email:currentUser?.email || '', request:'' });
-  useEffect(() => {
-    if (currentUser) {
-      setForm(prev => ({ ...prev, name: prev.name || currentUser.name || '', phone: prev.phone || currentUser.phone || '', email: prev.email || currentUser.email || '' }));
-    }
-  }, [currentUser]);
   
   // Status tracking tab state
   const [tabMode, setTabMode] = useState('book'); // 'book' | 'lookup'
@@ -237,20 +232,7 @@ export default function BookTablePage() {
           </div>
         )}
       </div>
-    ) : !currentUser ? <section className="mx-auto max-w-xl space-y-5 rounded-2xl border border-[#E8D1CE] bg-white p-6 sm:p-10 text-center">
-      <h2 className="font-serif text-2xl text-[#11164B]">Sign in or Sign up to reserve a table</h2>
-      <p className="mx-auto max-w-md text-sm text-[#75666B]">
-        Please sign in if you already have an account, or create a new account to book your table.
-      </p>
-      <div className="flex flex-wrap justify-center gap-3 pt-2">
-        <Link to="/login?redirect=%2Fbook-table" className="btn-3d-crimson rounded-xl px-6 py-3 text-sm font-semibold text-white">
-          Sign in (Existing user)
-        </Link>
-        <Link to="/login?mode=register&redirect=%2Fbook-table" className="rounded-xl border border-[#11164B] px-6 py-3 text-sm font-semibold text-[#11164B] hover:bg-[#FAF1F0]">
-          Sign up (New user)
-        </Link>
-      </div>
-    </section> : confirmation ? <section className="mx-auto max-w-2xl space-y-6 rounded-2xl border border-[#E8D1CE] bg-white p-6 sm:p-10" aria-live="polite">
+    ) : confirmation ? <section className="mx-auto max-w-2xl space-y-6 rounded-2xl border border-[#E8D1CE] bg-white p-6 sm:p-10" aria-live="polite">
       <CheckCircle2 size={43} className="text-[#11164B]" /><div><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#75666B]">Booking confirmed</p><h2 className="mt-2 font-serif text-3xl">We’ll see you soon, {confirmation.customerName.split(' ')[0]}.</h2><p className="mt-3 text-sm text-[#75666B]">Your reservation reference is <strong className="text-[#11164B]">{confirmation.bookingId}</strong>.</p></div>
       <div className="grid grid-cols-3 gap-3 rounded-xl bg-[#FAF1F0] p-5 text-xs"><div><span className="block text-[#75666B]">Date</span><strong className="mt-1 block">{new Date(`${confirmation.reservationDate}T12:00:00`).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}</strong></div><div><span className="block text-[#75666B]">Time</span><strong className="mt-1 block">{prettyTime(confirmation.reservationTimeFormatted || confirmation.reservationTime)}</strong></div><div><span className="block text-[#75666B]">Guests</span><strong className="mt-1 block">{confirmation.guestCount} people</strong></div></div>
       <div className="flex gap-3 rounded-xl border border-[#E8D1CE] p-4 text-sm leading-relaxed text-[#75666B]"><Clock size={19} className="mt-0.5 shrink-0 text-[#A61920]" /><p>Please arrive 5 minutes before your scheduled time. If you’re running late, let us know. We may need to move your reservation to the next available time, depending on table availability.</p></div>
