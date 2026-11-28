@@ -8,9 +8,7 @@ import CustomerHelpModal from '../../components/common/CustomerHelpModal';
 import OrderReceiptModal from '../../components/common/OrderReceiptModal';
 import ItemCustomizationModal from '../../components/common/ItemCustomizationModal';
 import CartDrawer from '../../components/common/CartDrawer';
-import BillSplitAndTipModal from '../../components/billing/BillSplitAndTipModal';
 import DigitalReceiptAndFeedbackModal from '../../components/billing/DigitalReceiptAndFeedbackModal';
-import QrTablePaymentModal from '../../components/billing/QrTablePaymentModal';
 import WifiAndEntertainmentCard from '../../components/entertainment/WifiAndEntertainmentCard';
 import AiRecommendationsRail from '../../components/common/AiRecommendationsRail';
 import { translations, getCategoryTranslation } from '../../services/menuTranslations';
@@ -93,8 +91,8 @@ export default function QrDineInPage() {
   const [paidOrderIds, setPaidOrderIds] = useState(new Set());
   const [activeTab, setActiveTab] = useState('MENU'); // 'MENU' | 'TABLE_ORDERS' | 'ENTERTAINMENT'
   const [lang, setLang] = useState('en'); // 'en' or 'hi'
-  const [isSplitModalOpen, setIsSplitModalOpen] = useState(false);
-  const [isPayModalOpen, setIsPayModalOpen] = useState(false);
+  const [billRequested, setBillRequested] = useState(false);
+  const [isCallingBill, setIsCallingBill] = useState(false);
   const [isFeedbackReceiptOpen, setIsFeedbackReceiptOpen] = useState(false);
   const [isEntertainmentOpen, setIsEntertainmentOpen] = useState(false);
   const [selectedOrderForFeedback, setSelectedOrderForFeedback] = useState(null);
@@ -223,17 +221,24 @@ export default function QrDineInPage() {
       if (switchOrderContext) switchOrderContext('DINE_IN_QR', context);
       else { setOrderSource('DINE_IN_QR'); setTableInfo(context); }
       // Match active UNPAID order for this table
-      const activeTableOrder = (orders || []).find(order =>
-        order.source === 'DINE_IN_QR' &&
+      const activeTableOrder = curTableOrders.find(order =>
         order.tableId === currentTable.tableId &&
-        order.restaurantId === rest.restaurantId &&
         order.status !== 'CANCELLED' &&
         order.paymentStatus !== 'PAID' &&
         (Number(order.paidAmount) || 0) < (Number(order.total) || 0) - 0.05
-      );
-      updateActiveOrder(activeTableOrder || curTableOrders.find(order => !['DELIVERED', 'CANCELLED'].includes(order.status)) || null);
+      ) || curTableOrders.find(order => !['CANCELLED'].includes(order.status)) || null;
+      updateActiveOrder(activeTableOrder);
       if (!activeTableOrder) {
         try { localStorage.removeItem(`bistro_table_guest_${currentTable.tableId}`); } catch {}
+      } else {
+        try {
+          if (activeTableOrder.customerName) {
+            localStorage.setItem(`bistro_table_guest_${currentTable.tableId}`, JSON.stringify({
+              name: activeTableOrder.customerName,
+              phone: activeTableOrder.customerPhone || ''
+            }));
+          }
+        } catch {}
       }
     } catch (err) { if (sequence === loadSequence.current) setLoadError(err.message || 'Unable to open the table menu. Please try again.'); }
     finally { if (sequence === loadSequence.current) setIsLoading(false); }
@@ -265,7 +270,11 @@ export default function QrDineInPage() {
             const updated = list.find(o => o.orderId === current.orderId);
             if (updated) updateActiveOrder(updated);
           } else {
-            const pending = list.find(o => !['DELIVERED'].includes(o.status));
+            const pending = list.find(o =>
+              o.status !== 'CANCELLED' &&
+              o.paymentStatus !== 'PAID' &&
+              (Number(o.paidAmount) || 0) < (Number(o.total) || 0) - 0.05
+            ) || list.find(o => !['CANCELLED'].includes(o.status)) || null;
             if (pending) updateActiveOrder(pending);
           }
         }
@@ -282,7 +291,7 @@ export default function QrDineInPage() {
       if (type === 'HELP_REQUEST_RESOLVED' && payload.tableId === table.tableId) setWaiterArrivingMsg(null);
       if (type === 'FOOD_AVAILABILITY_CHANGED') setMenuItems(previous => previous.map(item => item.menuItemId === payload.menuItemId ? { ...item, availability: payload.availability } : item));
     });
-    const timer = setInterval(syncTableSession, 30000);
+    const timer = setInterval(syncTableSession, 5000);
     return () => { active = false; unsub(); clearInterval(timer); };
   }, [table, updateActiveOrder]);
 
@@ -474,6 +483,31 @@ export default function QrDineInPage() {
     return tableOrders.reduce((sum, o) => sum + Number(o.total || 0), 0);
   }, [tableOrders]);
 
+  useEffect(() => {
+    if (isBillPaidAndConfirmed) {
+      setBillRequested(false);
+    }
+  }, [isBillPaidAndConfirmed]);
+
+  const handleCallForBill = async () => {
+    if (billRequested || isCallingBill) return;
+    if (!table) return;
+    setIsCallingBill(true);
+    try {
+      await api.createHelpRequest(
+        table.tableNumber || table.tableId,
+        `Customer at ${tableTitle(table)} requested bill (Total: ₹${totalUnpaidAmount.toFixed(2)})`,
+        'BILL'
+      );
+      setBillRequested(true);
+      addToast(`Bill requested! Staff will bring the bill to ${tableTitle(table)} shortly.`, 'success');
+    } catch (err) {
+      addToast(err.message || 'Unable to call for bill. Please alert floor staff.', 'error');
+    } finally {
+      setIsCallingBill(false);
+    }
+  };
+
   if (isLoading || loadError) return <main className="min-h-screen bg-[#f7f8fb] flex items-center justify-center px-6 py-12 text-center"><div className="max-w-sm w-full bg-white border border-slate-200 rounded-2xl p-8"><div className="w-14 h-14 mx-auto mb-5 rounded-xl bg-blue-50 text-blue-500 flex items-center justify-center">{isLoading ? <RefreshCw className="animate-spin" size={24} /> : <AlertCircle size={26} />}</div><h1 className="text-xl font-semibold text-slate-900">{isLoading ? 'Opening your table menu…' : 'We couldn’t verify this table'}</h1><p className="text-sm text-slate-500 leading-6 mt-3">{isLoading ? 'Checking your table and today’s menu.' : loadError}</p>{!isLoading && <><button onClick={loadData} className="btn-3d-crimson mt-6 w-full py-3 rounded-xl text-white text-sm font-semibold">Try again</button><a href="/" className="block text-xs text-slate-500 mt-5">Visit the restaurant website</a></>}</div></main>;
 
   return (
@@ -481,18 +515,25 @@ export default function QrDineInPage() {
       {/* 1. Mobile-First Dedicated QR Menu Header matching screenshot */}
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-xs">
         <div className="max-w-2xl mx-auto px-3 sm:px-4 py-3 flex items-center justify-between gap-2">
-          {/* Left: Restaurant Name & Table Title */}
-          <div className="min-w-0 flex-1">
-            <h1 className="text-sm font-black text-slate-900 leading-tight truncate">
-              {restaurant.name}
-            </h1>
-            <div className="flex items-center gap-1.5 sm:gap-2 mt-0.5 min-w-0">
-              <span className="inline-flex items-center px-2 sm:px-2.5 py-0.5 rounded-full text-[11px] font-black bg-[#1a382b] text-white shadow-xs shrink-0 whitespace-nowrap">
-                {tableTitle(table)}
-              </span>
-              <span className="text-[11px] sm:text-xs text-slate-500 font-medium truncate">
-                Dine-In Menu
-              </span>
+          {/* Left: Restaurant Logo & Table Title */}
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
+            <img
+              src={restaurant.logo || '/favicon.svg'}
+              alt={restaurant?.name}
+              className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl object-cover shadow-sm ring-1 ring-slate-200 shrink-0"
+            />
+            <div className="min-w-0 flex-1">
+              <h1 className="text-sm font-black text-slate-900 leading-tight truncate">
+                {restaurant.name}
+              </h1>
+              <div className="flex items-center gap-1.5 sm:gap-2 mt-0.5 min-w-0">
+                <span className="inline-flex items-center px-2 sm:px-2.5 py-0.5 rounded-full text-[11px] font-black bg-[#1a382b] text-white shadow-xs shrink-0 whitespace-nowrap">
+                  {tableTitle(table)}
+                </span>
+                <span className="text-[11px] sm:text-xs text-slate-500 font-medium truncate">
+                  Dine-In Menu
+                </span>
+              </div>
             </div>
           </div>
 
@@ -750,6 +791,20 @@ export default function QrDineInPage() {
               >
                 <span>➕ Add More Dishes to Table</span>
               </button>
+
+              {unpaidTableOrders.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleCallForBill}
+                  disabled={isCallingBill}
+                  className={`w-full py-2.5 px-4 rounded-xl ${billRequested ? 'bg-emerald-50 text-emerald-800 border border-emerald-300' : 'bg-slate-900 hover:bg-slate-800 text-white shadow-sm'} text-xs font-bold transition-all flex items-center justify-center space-x-2`}
+                >
+                  <Receipt size={15} className={billRequested ? 'text-emerald-600' : 'text-amber-300'} />
+                  <span>
+                    {billRequested ? '✓ Bill Requested (Staff on the way)' : `Call for Bill (₹${totalUnpaidAmount.toFixed(2)})`}
+                  </span>
+                </button>
+              )}
 
               {tableOrders.length > 0 && isBillPaidAndConfirmed && (
                 <div className="space-y-2 pt-2 border-t border-slate-100">
@@ -1232,20 +1287,25 @@ export default function QrDineInPage() {
         </div>
       )}
 
-      {/* Floating Bottom Bar: Table Pay Bar when cart is empty & unpaid orders exist */}
+      {/* Floating Bottom Bar: Call for Bill when cart is empty & unpaid orders exist */}
       {itemCount === 0 && unpaidTableOrders.length > 0 && (
         <div className="fixed bottom-3 left-4 right-4 max-w-md mx-auto z-40 animate-slide-up">
           <button
-            onClick={() => setIsPayModalOpen(true)}
-            className="w-full bg-gradient-to-r from-purple-700 via-indigo-700 to-slate-900 hover:opacity-95 text-white p-3.5 rounded-2xl shadow-2xl flex items-center justify-between transition-all"
+            onClick={handleCallForBill}
+            disabled={isCallingBill}
+            className={`w-full ${billRequested ? 'bg-gradient-to-r from-emerald-600 to-teal-700' : 'bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-800'} text-white p-3.5 rounded-2xl shadow-2xl flex items-center justify-between transition-all active:scale-[0.99]`}
           >
             <div className="flex items-center space-x-3 text-left">
               <span className="w-8 h-8 rounded-xl bg-white/20 text-white font-black text-sm flex items-center justify-center shadow-inner">
-                <CreditCard size={17} />
+                {billRequested ? <CheckCircle2 size={17} className="text-emerald-200" /> : <Receipt size={17} className="text-amber-300" />}
               </span>
               <div>
-                <p className="text-xs font-bold leading-tight">{tableTitle(table)} Bill</p>
-                <p className="text-[11px] text-purple-200">Tap to pay with UPI, Cards or Cash</p>
+                <p className="text-xs font-bold leading-tight">
+                  {billRequested ? 'Bill Requested' : 'Call for Bill'}
+                </p>
+                <p className="text-[11px] text-slate-300">
+                  {billRequested ? 'Staff alerted · bringing bill to table' : `${tableTitle(table)} · Pay at table / reception`}
+                </p>
               </div>
             </div>
 
@@ -1253,7 +1313,7 @@ export default function QrDineInPage() {
               <span className="text-sm font-black text-amber-300">
                 ₹{totalUnpaidAmount.toFixed(2)}
               </span>
-              <ChevronRight className="w-4 h-4 text-purple-200" />
+              {!billRequested && <ChevronRight className="w-4 h-4 text-slate-300" />}
             </div>
           </button>
         </div>
@@ -1402,61 +1462,12 @@ export default function QrDineInPage() {
         }}
       />
 
-      {/* User Request: QR Menu Pay Table Bill & Split Bill Modal with All Gateways */}
-      <QrTablePaymentModal
-        isOpen={isPayModalOpen}
-        onClose={() => setIsPayModalOpen(false)}
-        table={table}
-        tableOrders={tableOrders}
-        tableSession={tableSession}
-        restaurant={restaurant}
-        onPaymentSuccess={async (payResult) => {
-          try {
-            const sess = table?.tableId ? await api.getTableSession(table.tableId) : null;
-            if (sess && Array.isArray(sess.orders)) {
-              setTableSession(sess);
-              const freshOrders = sess.orders.filter(o => o && o.orderId && o.status !== 'CANCELLED');
-              setTableOrders(freshOrders);
-              setPaidOrderIds(new Set(freshOrders.filter(o => o.paymentStatus === 'PAID').map(o => o.orderId)));
-              const latestActive = activeOrder ? freshOrders.find(o => o.orderId === activeOrder.orderId) : freshOrders[0];
-              if (latestActive) setActiveOrder(latestActive);
-              if (payResult?.paymentCompleted && !payResult?.payShareOnly) {
-                setSelectedOrderForFeedback(latestActive || freshOrders[0] || activeOrder);
-                setIsFeedbackReceiptOpen(true);
-              }
-              return;
-            }
-          } catch (syncErr) {
-            console.warn('Unable to refresh table orders after payment:', syncErr);
-          }
-          if (payResult?.paymentCompleted && !payResult?.payShareOnly) {
-            setSelectedOrderForFeedback(tableOrders[0] || activeOrder);
-            setIsFeedbackReceiptOpen(true);
-          }
-        }}
-      />
-
       {/* Feature 5: Entertainment & Table Lounge Modal (Matches User Screenshots) */}
       <WifiAndEntertainmentCard
         isOpen={isEntertainmentOpen}
         onClose={() => setIsEntertainmentOpen(false)}
         tableNumber={tableTitle(table)}
         lang={lang}
-      />
-
-      {/* Feature 7: Bill Split & Tip Modal */}
-      <BillSplitAndTipModal
-        isOpen={isSplitModalOpen}
-        onClose={() => setIsSplitModalOpen(false)}
-        items={tableOrders.flatMap(o => o.items || [])}
-        subtotal={tableOrders.reduce((acc, o) => acc + Number(o.subtotal ?? (Number(o.total || 0) - Number(o.tax || 0))), 0)}
-        tax={tableOrders.reduce((acc, o) => acc + Number(o.tax || 0), 0)}
-        tableNumber={tableTitle(table)}
-        orderNumber={tableOrders[0]?.orderNumber || activeOrder?.orderNumber}
-        onPaymentSuccess={() => {
-          setIsSplitModalOpen(false);
-          setIsPayModalOpen(true);
-        }}
       />
 
       {/* Feature 8: Digital Receipt & Customer Feedback Modal */}

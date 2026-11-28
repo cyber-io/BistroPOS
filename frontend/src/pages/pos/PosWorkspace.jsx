@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Plus, Search, RefreshCw, ArrowUpRight, CreditCard, Banknote, Timer, Check, ClipboardCheck, ClipboardList, Package, Armchair, CalendarDays, History, LayoutGrid, Info, AlertCircle, Bell, SlidersHorizontal, UtensilsCrossed, ShoppingBag, Truck, Minus, Trash2, Printer, QrCode, ArrowLeft, CheckCircle2, X, Users, HandPlatter, Coffee, MapPin, Download, Upload, Sparkles, ChevronLeft, ChevronRight, Calendar, ChevronDown, ChevronUp, Clock, Phone, User, UserPlus, ShieldCheck, FolderPlus, Pencil, Building2, Lock, KeyRound, Mail, Eye, EyeOff, ChefHat, UserCheck, Flame } from 'lucide-react';
+import { Plus, Search, RefreshCw, ArrowUpRight, CreditCard, Banknote, Timer, Check, ClipboardCheck, ClipboardList, Package, Armchair, CalendarDays, History, LayoutGrid, Info, AlertCircle, Bell, SlidersHorizontal, UtensilsCrossed, ShoppingBag, Truck, Minus, Trash2, Printer, QrCode, ArrowLeft, CheckCircle2, X, Users, HandPlatter, Coffee, MapPin, Download, Upload, Sparkles, ChevronLeft, ChevronRight, Calendar, ChevronDown, ChevronUp, Clock, Phone, User, UserPlus, ShieldCheck, FolderPlus, Pencil, Building2, Lock, KeyRound, Mail, Eye, EyeOff, ChefHat, UserCheck, Flame, Send, Copy, MessageSquare } from 'lucide-react';
 import QRCode from 'qrcode';
 import { api, subscribeRealtimeEvents, uniqueKey, getActiveRestaurantId, setActiveRestaurantId } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
@@ -470,7 +470,7 @@ function TableSessionCard({ session, onDetails, onPay, onAddItems, onMarkDeliver
     }
   }, [session.hasNewItems, session.hasDeliveredItems, itemTab]);
 
-  const isDineIn = session.type === 'TABLE_SESSION' || session.source === 'DINE_IN_QR';
+  const isDineIn = session.type === 'TABLE_SESSION' || session.source === 'DINE_IN_QR' || Boolean(session.tableId) || Boolean(session.tableNumber);
   const tableChipText = isDineIn ? (session.tableNumber ? `A${session.tableNumber}` : 'T') : (session.source === 'DELIVERY' ? <Truck size={14} /> : <ShoppingBag size={14} />);
   const elapsedMinutes = Math.max(0, Math.floor((Date.now() - new Date(session.startedAt).getTime()) / 60000));
   const timeElapsedStr = elapsedMinutes < 1 ? 'Just now' : `${elapsedMinutes}m ago`;
@@ -573,17 +573,19 @@ function TableSessionCard({ session, onDetails, onPay, onAddItems, onMarkDeliver
                     </div>
                     <div className="pos-ticket-entry-actions">
                       <Badge status={ord.status} />
-                      <button
-                        type="button"
-                        className="pos-mark-delivered-btn"
-                        title="Mark this order as delivered"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onMarkDelivered && onMarkDelivered(ord.orderId);
-                        }}
-                      >
-                        <Check size={11} /> Mark delivered
-                      </button>
+                      {!isDineIn && !ord.tableId && !ord.tableNumber && (session.source === 'DELIVERY' || ord.source === 'DELIVERY') && (
+                        <button
+                          type="button"
+                          className="pos-mark-delivered-btn"
+                          title="Mark this order as delivered"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onMarkDelivered && onMarkDelivered(ord.orderId);
+                          }}
+                        >
+                          <Check size={11} /> Mark delivered
+                        </button>
+                      )}
                     </div>
                   </div>
                   <div className="pos-ticket-entry-items">
@@ -708,27 +710,7 @@ function TableSessionCard({ session, onDetails, onPay, onAddItems, onMarkDeliver
           title="Toggle kitchen and item details"
         >
           {expanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
-          {expanded ? 'Collapse' : 'View details'}
-        </button>
-
-        {isDineIn && !session.isPaid && !session.isCancelled && (
-          <button
-            type="button"
-            className="pos-button small"
-            onClick={() => onAddItems && onAddItems(session)}
-            title="Add more items to this running table session"
-          >
-            <Plus size={11} /> Add items
-          </button>
-        )}
-
-        <button
-          type="button"
-          className="pos-button small"
-          onClick={() => onDetails && onDetails(session)}
-          title="Full order details modal"
-        >
-          <ArrowUpRight size={11} /> Details
+          {expanded ? 'Collapse' : 'View items'}
         </button>
 
         {!['CANCELLED', 'CONFIRMATION_TIMEOUT'].includes(session.status) && (
@@ -4503,17 +4485,23 @@ function PaymentDialog({ order, restaurant, onClose, onPaid }) {
             {error && <div className="pos-error" role="alert"><AlertCircle size={15} />{error}</div>}
 
             <div className="pos-payment-amount-box">
-              <span className="label">Amount due</span>
-              <strong className="amount">{money(due)}</strong>
-              <span className="subtitle">
-                {order?.orderNumber} {order?.tableNumber ? `· ${tableTitle(order)}` : ''}
-              </span>
+              <div className="pos-payment-amount-info">
+                <span className="pos-payment-amount-label">Amount due</span>
+                <strong className="pos-payment-amount-val">{money(due)}</strong>
+              </div>
+              <div className="pos-payment-amount-tag">
+                <span>{order?.sessionId || order?.orderNumber}</span>
+                {(order?.tableName || order?.tableNumber) && (
+                  <span className="pos-payment-amount-table">· {order.tableName || tableTitle(order)}</span>
+                )}
+              </div>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
               <label className="pos-field" style={{ margin: 0 }}>
                 <span>Customer name</span>
                 <input
+                  className="pos-input"
                   type="text"
                   placeholder="Guest name"
                   value={customerName}
@@ -4523,6 +4511,7 @@ function PaymentDialog({ order, restaurant, onClose, onPaid }) {
               <label className="pos-field" style={{ margin: 0 }}>
                 <span>Mobile number (SMS bill)</span>
                 <input
+                  className="pos-input"
                   type="tel"
                   placeholder="+91 98765 43210"
                   value={customerPhone}

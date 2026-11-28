@@ -1145,7 +1145,11 @@ export default function ReceptionistDashboard() {
                                     <span className="font-bold text-xs">{req.requestType || 'HELP'}: </span>
                                     <span className="text-[11px]">{req.message || 'Assistance requested'}</span>
                                   </div>
-                                  {req.status === 'PENDING' ? (
+                                  {req.message?.toLowerCase().includes('cleaning') || req.message?.toLowerCase().includes('auto-release') ? (
+                                    <span className="px-2 py-0.5 bg-sky-100 text-sky-800 text-[10px] font-bold rounded">
+                                      Auto-cleaning
+                                    </span>
+                                  ) : req.status === 'PENDING' ? (
                                     <button
                                       onClick={() => handleAcceptHelp(req.requestId)}
                                       className="px-2.5 py-1 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded text-[10px]"
