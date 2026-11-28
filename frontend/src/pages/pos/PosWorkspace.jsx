@@ -478,7 +478,7 @@ function TableSessionCard({ session, onDetails, onPay, onAddItems, onMarkDeliver
   return (
     <article className={`pos-session-card ${session.isPaid ? 'is-paid' : ''} ${session.hasNewItems ? 'has-new' : ''}`}>
       <div className="pos-session-header">
-        <div className="pos-session-title-group">
+        <div className="pos-session-title-group" onClick={() => onDetails && onDetails(session)} style={{ cursor: 'pointer' }} title="Click to view full session details">
           <span className={`pos-table-chip ${isDineIn ? '' : 'pos-chip-non-dine'}`}>
             {tableChipText}
           </span>
@@ -711,26 +711,6 @@ function TableSessionCard({ session, onDetails, onPay, onAddItems, onMarkDeliver
         >
           {expanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
           {expanded ? 'Collapse' : 'View items'}
-        </button>
-
-        {isDineIn && !session.isPaid && !session.isCancelled && (
-          <button
-            type="button"
-            className="pos-button small"
-            onClick={() => onAddItems && onAddItems(session)}
-            title="Add more items to this running table session"
-          >
-            <Plus size={11} /> Add items
-          </button>
-        )}
-
-        <button
-          type="button"
-          className="pos-button small"
-          onClick={() => onDetails && onDetails(session)}
-          title="Full order details modal"
-        >
-          <ArrowUpRight size={11} /> Details
         </button>
 
         {!['CANCELLED', 'CONFIRMATION_TIMEOUT'].includes(session.status) && (
