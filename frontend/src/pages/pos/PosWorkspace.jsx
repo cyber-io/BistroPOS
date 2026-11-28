@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Plus, Search, RefreshCw, ArrowUpRight, CreditCard, Banknote, Timer, Check, ClipboardCheck, ClipboardList, Package, Armchair, CalendarDays, History, LayoutGrid, Info, AlertCircle, Bell, SlidersHorizontal, UtensilsCrossed, ShoppingBag, Truck, Minus, Trash2, Printer, QrCode, ArrowLeft, CheckCircle2, X, Users, HandPlatter, Coffee, MapPin, Download, Upload, Sparkles, ChevronLeft, ChevronRight, Calendar, ChevronDown, ChevronUp, Clock, Phone, User, UserPlus, ShieldCheck, FolderPlus, Pencil, Building2, Lock, Mail, Eye, EyeOff, ChefHat, UserCheck, Flame, KeyRound } from 'lucide-react';
+import { Plus, Search, RefreshCw, ArrowUpRight, CreditCard, Banknote, Timer, Check, ClipboardCheck, ClipboardList, Package, Armchair, CalendarDays, History, LayoutGrid, Info, AlertCircle, Bell, SlidersHorizontal, UtensilsCrossed, ShoppingBag, Truck, Minus, Trash2, Printer, QrCode, ArrowLeft, CheckCircle2, X, Users, HandPlatter, Coffee, MapPin, Download, Upload, Sparkles, ChevronLeft, ChevronRight, Calendar, ChevronDown, ChevronUp, Clock, Phone, User, UserPlus, ShieldCheck, FolderPlus, Pencil, Building2, Lock, KeyRound, Mail, Eye, EyeOff, ChefHat, UserCheck, Flame } from 'lucide-react';
 import QRCode from 'qrcode';
 import { api, subscribeRealtimeEvents, uniqueKey, getActiveRestaurantId, setActiveRestaurantId } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
@@ -10,7 +10,7 @@ import TableFloorPlan, { FloorPlanTable, getDiningAreaTables } from '../../compo
 import { Badge, Empty, Spinner, Modal, money, time, label } from '../../components/pos/PosUI';
 import ErrorBoundary from '../../components/common/ErrorBoundary';
 import { getPublicOrigin, getTableQrUrl, tableLabel, tableTitle } from '../../services/tablePresentation';
-import { cleanPhone, getRescheduleNotificationText, getWhatsAppUrl, getSmsUrl, getCancelWhatsAppUrl, getCancelSmsUrl } from '../../services/notificationHelpers';
+import { cleanPhone, getRescheduleNotificationText, getWhatsAppUrl, getSmsUrl, getCancelWhatsAppUrl, getCancelSmsUrl, getBillMessageText, getBillWhatsAppUrl, getBillSmsUrl } from '../../services/notificationHelpers';
 
 const DONE = ['DELIVERED', 'PICKED_UP', 'CANCELLED', 'CONFIRMATION_TIMEOUT'];
 const SOURCES = { DINE_IN_QR: 'Dine in', TAKEAWAY: 'Takeaway', DELIVERY: 'Delivery' };
@@ -823,7 +823,7 @@ export default function PosWorkspace() {
       }
       load(true);
     });
-    const id = setInterval(() => load(true), 10000);
+    const id = setInterval(() => load(true), 30000);
     const handleOutletChanged = () => {
       load();
     };
@@ -1575,7 +1575,6 @@ export default function PosWorkspace() {
                           );
                       }}
                     />
-                    <div className="pos-floor-footer"><Info size={13} /> Select a table or hall to view its orders, take payment or update its status.</div>
                   </>
                 )}
 
@@ -2224,20 +2223,6 @@ function AddManagerModal({ restaurants = [], defaultRestaurantId, onClose, onSuc
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
-  const hasMinLength = form.password.length >= 8;
-  const hasLetter = /[a-zA-Z]/.test(form.password);
-  const hasNumber = /[0-9]/.test(form.password);
-  const isPasswordCompliant = hasMinLength && hasLetter && hasNumber;
-
-  const generateSecurePassword = () => {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%';
-    let res = 'Bistro@';
-    for (let i = 0; i < 4; i++) {
-      res += Math.floor(Math.random() * 10);
-    }
-    setForm(f => ({ ...f, password: res }));
-  };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.restaurantId) {
@@ -2248,8 +2233,8 @@ function AddManagerModal({ restaurants = [], defaultRestaurantId, onClose, onSuc
       setError('Name, email, and password are required.');
       return;
     }
-    if (!isPasswordCompliant) {
-      setError('Password restriction failed: Password must be at least 8 characters long and contain both letters and numbers.');
+    if (form.password.length < 6) {
+      setError('Password must be at least 6 characters.');
       return;
     }
 
@@ -2308,7 +2293,7 @@ function AddManagerModal({ restaurants = [], defaultRestaurantId, onClose, onSuc
               <option value="">Select Hotel Outlet...</option>
               {restaurants.map(r => (
                 <option key={r.restaurantId} value={r.restaurantId}>
-                  🏨 {r.name} {r.restaurantCode ? `[${r.restaurantCode}]` : ''} {r.address ? `— ${r.address.split(',')[0]}` : ''}
+                  🏨 {r.name} [{r.restaurantCode || 'RST-100'}] {r.address ? `— ${r.address.split(',')[0]}` : ''}
                 </option>
               ))}
             </select>
@@ -2368,24 +2353,7 @@ function AddManagerModal({ restaurants = [], defaultRestaurantId, onClose, onSuc
           </label>
 
           <label className="pos-field">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-              <span>Manager Password (Full & Final) *</span>
-              <button
-                type="button"
-                onClick={generateSecurePassword}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: 'var(--p-blue, #2563eb)',
-                  fontSize: 11,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  padding: 0
-                }}
-              >
-                ⚡ Generate Secure
-              </button>
-            </div>
+            <span>Initial Password (Min 6 chars) *</span>
             <div style={{ position: 'relative' }}>
               <Lock size={15} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--p-muted)', pointerEvents: 'none' }} />
               <input
@@ -2394,9 +2362,9 @@ function AddManagerModal({ restaurants = [], defaultRestaurantId, onClose, onSuc
                 style={{ paddingLeft: 34, paddingRight: 36 }}
                 value={form.password}
                 onChange={e => setForm({ ...form, password: e.target.value })}
-                placeholder="Min 8 chars (letters + numbers)"
+                placeholder="Create secure password"
                 required
-                minLength={8}
+                minLength={6}
               />
               <button
                 type="button"
@@ -2406,17 +2374,6 @@ function AddManagerModal({ restaurants = [], defaultRestaurantId, onClose, onSuc
                 {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
               </button>
             </div>
-            <div style={{ display: 'flex', gap: 12, marginTop: 6, fontSize: 11 }}>
-              <span style={{ color: hasMinLength ? '#16a34a' : 'var(--p-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                {hasMinLength ? '✓' : '○'} 8+ characters
-              </span>
-              <span style={{ color: (hasLetter && hasNumber) ? '#16a34a' : 'var(--p-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                {(hasLetter && hasNumber) ? '✓' : '○'} Letters & Numbers
-              </span>
-            </div>
-            <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--p-muted)' }}>
-              🔒 <strong>Full & Final:</strong> Saved permanently to database for hotel manager login.
-            </p>
           </label>
         </div>
 
@@ -2432,7 +2389,7 @@ function AddManagerModal({ restaurants = [], defaultRestaurantId, onClose, onSuc
           <button
             type="submit"
             className="pos-button primary"
-            disabled={busy || !form.name.trim() || !form.email.trim() || !isPasswordCompliant}
+            disabled={busy || !form.name.trim() || !form.email.trim() || !form.password}
             style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%)', color: '#fff', border: 0, minWidth: 170, display: 'inline-flex', alignItems: 'center', gap: 6 }}
           >
             {busy ? <RefreshCw className="pos-spin" size={14} /> : <UserPlus size={15} />}
@@ -2608,20 +2565,6 @@ function AddStaffModal({ currentRestaurant, currentUserRole, restaurants = [], o
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
-  const hasMinLength = form.password.length >= 8;
-  const hasLetter = /[a-zA-Z]/.test(form.password);
-  const hasNumber = /[0-9]/.test(form.password);
-  const isPasswordCompliant = hasMinLength && hasLetter && hasNumber;
-
-  const generateSecurePassword = () => {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%';
-    let res = 'Bistro@';
-    for (let i = 0; i < 4; i++) {
-      res += Math.floor(Math.random() * 10);
-    }
-    setForm(f => ({ ...f, password: res }));
-  };
-
   const roleDefinitions = [
     {
       id: 'RECEPTIONIST',
@@ -2661,8 +2604,8 @@ function AddStaffModal({ currentRestaurant, currentUserRole, restaurants = [], o
       setError('Name, email, and password are required.');
       return;
     }
-    if (!isPasswordCompliant) {
-      setError('Password restriction failed: Password must be at least 8 characters long and contain both letters and numbers.');
+    if (form.password.length < 6) {
+      setError('Password must be at least 6 characters.');
       return;
     }
 
@@ -2732,7 +2675,7 @@ function AddStaffModal({ currentRestaurant, currentUserRole, restaurants = [], o
               >
                 {restaurants.map(r => (
                   <option key={r.restaurantId} value={r.restaurantId}>
-                    🏨 {r.name} {r.restaurantCode ? `[${r.restaurantCode}]` : ''} {r.address ? `— ${r.address.split(',')[0]}` : ''}
+                    🏨 {r.name} [{r.restaurantCode || 'RST-100'}] {r.address ? `— ${r.address.split(',')[0]}` : ''}
                   </option>
                 ))}
               </select>
@@ -2864,24 +2807,7 @@ function AddStaffModal({ currentRestaurant, currentUserRole, restaurants = [], o
           </label>
 
           <label className="pos-field">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-              <span>Staff Password (Full & Final) *</span>
-              <button
-                type="button"
-                onClick={generateSecurePassword}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: 'var(--p-blue, #2563eb)',
-                  fontSize: 11,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  padding: 0
-                }}
-              >
-                ⚡ Generate Secure
-              </button>
-            </div>
+            <span>Station Password (Min 6 chars) *</span>
             <div style={{ position: 'relative' }}>
               <Lock size={15} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--p-muted)', pointerEvents: 'none' }} />
               <input
@@ -2890,9 +2816,9 @@ function AddStaffModal({ currentRestaurant, currentUserRole, restaurants = [], o
                 style={{ paddingLeft: 34, paddingRight: 36 }}
                 value={form.password}
                 onChange={e => setForm({ ...form, password: e.target.value })}
-                placeholder="Min 8 chars (letters + numbers)"
+                placeholder="Create station password"
                 required
-                minLength={8}
+                minLength={6}
               />
               <button
                 type="button"
@@ -2902,17 +2828,6 @@ function AddStaffModal({ currentRestaurant, currentUserRole, restaurants = [], o
                 {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
               </button>
             </div>
-            <div style={{ display: 'flex', gap: 12, marginTop: 6, fontSize: 11 }}>
-              <span style={{ color: hasMinLength ? '#16a34a' : 'var(--p-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                {hasMinLength ? '✓' : '○'} 8+ characters
-              </span>
-              <span style={{ color: (hasLetter && hasNumber) ? '#16a34a' : 'var(--p-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                {(hasLetter && hasNumber) ? '✓' : '○'} Letters & Numbers
-              </span>
-            </div>
-            <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--p-muted)' }}>
-              🔒 <strong>Full & Final:</strong> Saved permanently to database for staff login.
-            </p>
           </label>
         </div>
 
@@ -2928,7 +2843,7 @@ function AddStaffModal({ currentRestaurant, currentUserRole, restaurants = [], o
           <button
             type="submit"
             className="pos-button primary"
-            disabled={busy || !form.name.trim() || !form.email.trim() || !isPasswordCompliant}
+            disabled={busy || !form.name.trim() || !form.email.trim() || !form.password}
             style={{ minWidth: 160, display: 'inline-flex', alignItems: 'center', gap: 6 }}
           >
             {busy ? <RefreshCw className="pos-spin" size={14} /> : <Plus size={15} />}
@@ -3709,39 +3624,6 @@ function EditMenuItemModal({ item, categories = [], onClose, onSuccess }) {
   return (
     <Modal title={`Edit Dish: ${item.name}`} wide={true} onClose={onClose}>
       <form onSubmit={handleUpdate} style={{ padding: '24px' }}>
-        {/* Executive Header Banner */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          padding: '12px 16px',
-          background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(147, 51, 234, 0.06))',
-          borderRadius: 12,
-          border: '1px solid rgba(59, 130, 246, 0.25)',
-          marginBottom: 16
-        }}>
-          <div style={{
-            width: 42,
-            height: 42,
-            borderRadius: 10,
-            background: 'linear-gradient(135deg, #2563eb, #7c3aed)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#fff',
-            boxShadow: '0 4px 12px rgba(37, 99, 235, 0.3)',
-            flexShrink: 0
-          }}>
-            <Pencil size={20} />
-          </div>
-          <div>
-            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--p-text)' }}>Update Dish Details</h3>
-            <p style={{ margin: '2px 0 0 0', fontSize: 12, color: 'var(--p-muted)' }}>
-              Edit menu information, category placement, pricing, and guest visibility.
-            </p>
-          </div>
-        </div>
-
         {error && (
           <div className="pos-error" style={{ marginBottom: 16 }}>
             <AlertCircle size={15} /> {error}
@@ -4276,6 +4158,7 @@ function OrderDetails({ order, paid, payments, restaurant, onClose, onPay, onUpd
             <Check size={13} style={{ display: 'inline', marginRight: 4 }} /> Mark delivered
           </button>
         )}
+        <SendBillPanel order={order} restaurant={restaurant} paid={paid} />
       </div>
       <div className="pos-modal-footer">
         {!isSession && (
@@ -4294,6 +4177,101 @@ function OrderDetails({ order, paid, payments, restaurant, onClose, onPay, onUpd
       </div>
       <Receipt order={order} restaurant={restaurant} paid={paid} />
     </Modal>
+  );
+}
+
+function SendBillPanel({ order, restaurant, paid }) {
+  const [phone, setPhone] = useState(order?.customerPhone || '');
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    setPhone(order?.customerPhone || '');
+  }, [order?.orderId, order?.sessionId, order?.customerPhone]);
+
+  const restaurantName = restaurant?.name || 'Bistro & Bloom';
+  const digits = cleanPhone(phone);
+  const hasValidPhone = digits.length >= 10;
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard?.writeText(getBillMessageText(order, restaurantName, paid));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {}
+  };
+
+  return (
+    <div style={{
+      marginTop: 14,
+      padding: 12,
+      borderRadius: 10,
+      border: '1px solid var(--p-border)',
+      background: 'var(--p-elevated)',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 10
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--p-text)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <Send size={13} color="var(--p-blue)" /> Send Digital Bill
+        </span>
+        <button
+          type="button"
+          className="pos-button small"
+          onClick={handleCopy}
+          style={{ padding: '4px 8px', minHeight: 26, fontSize: 10 }}
+        >
+          {copied ? <><Check size={11} /> Copied</> : <><Copy size={11} /> Copy bill</>}
+        </button>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <input
+          type="tel"
+          className="pos-input"
+          value={phone}
+          onChange={e => setPhone(e.target.value)}
+          placeholder="Customer mobile (e.g. 9876543210)"
+          aria-label="Customer phone for bill"
+          style={{ flex: 1, minWidth: 165, height: 34, minHeight: 34, fontSize: 11 }}
+        />
+        <a
+          className="pos-button small"
+          href={hasValidPhone ? getBillSmsUrl(order, phone, restaurantName, paid) : undefined}
+          onClick={e => { if (!hasValidPhone) e.preventDefault(); }}
+          aria-disabled={!hasValidPhone}
+          style={{
+            height: 34,
+            minHeight: 34,
+            opacity: hasValidPhone ? 1 : 0.5,
+            pointerEvents: hasValidPhone ? 'auto' : 'none',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 5
+          }}
+        >
+          <MessageSquare size={13} /> SMS
+        </a>
+        <a
+          className="pos-button small primary"
+          href={getBillWhatsAppUrl(order, phone, restaurantName, paid)}
+          target="_blank"
+          rel="noreferrer"
+          style={{
+            height: 34,
+            minHeight: 34,
+            backgroundColor: '#25D366',
+            borderColor: '#25D366',
+            color: '#fff',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 5
+          }}
+        >
+          <Send size={13} /> WhatsApp
+        </a>
+      </div>
+    </div>
   );
 }
 
@@ -4391,6 +4369,8 @@ function PaymentDialog({ order, restaurant, onClose, onPaid }) {
   const [paid, setPaid] = useState(false);
   const [paidMethod, setPaidMethod] = useState('UPI');
   const [key, setKey] = useState(() => uniqueKey());
+  const [customerName, setCustomerName] = useState(order?.customerName || '');
+  const [customerPhone, setCustomerPhone] = useState(order?.customerPhone || '');
 
   const upiId = 'bistroandbloom@okaxis';
   const billRef = order?.sessionId || order?.orderNumber || (order?.tableNumber ? `Table ${order.tableNumber}` : 'Order');
@@ -4426,6 +4406,8 @@ function PaymentDialog({ order, restaurant, onClose, onPaid }) {
               orderId: ord.orderId,
               amount: ordDue,
               method,
+              customerName: customerName.trim() || undefined,
+              customerPhone: customerPhone.trim() || undefined,
               transactionId: `TXN-${Date.now().toString(36).toUpperCase()}-${ord.orderNumber?.slice(-4) || '1'}`,
               idempotencyKey: uniqueKey()
             });
@@ -4437,6 +4419,8 @@ function PaymentDialog({ order, restaurant, onClose, onPaid }) {
           orderId: order.orderId,
           amount: due,
           method,
+          customerName: customerName.trim() || undefined,
+          customerPhone: customerPhone.trim() || undefined,
           transactionId: `TXN-${Date.now().toString(36).toUpperCase()}`,
           idempotencyKey: txnKey
         });
@@ -4479,6 +4463,7 @@ function PaymentDialog({ order, restaurant, onClose, onPaid }) {
               <div><span>Amount received</span><b>{money(due)}</b></div>
               {order?.sessionId && <div><span>Session</span><b>{order.sessionId}</b></div>}
             </div>
+            <SendBillPanel order={order} restaurant={restaurant} paid={true} />
           </div>
           <div className="pos-modal-footer">
             <button className="pos-button" onClick={() => window.print()}><Printer /> Print customer bill</button>
@@ -4497,6 +4482,27 @@ function PaymentDialog({ order, restaurant, onClose, onPaid }) {
               <span className="subtitle">
                 {order?.orderNumber} {order?.tableNumber ? `· ${tableTitle(order)}` : ''}
               </span>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
+              <label className="pos-field" style={{ margin: 0 }}>
+                <span>Customer name</span>
+                <input
+                  type="text"
+                  placeholder="Guest name"
+                  value={customerName}
+                  onChange={e => setCustomerName(e.target.value)}
+                />
+              </label>
+              <label className="pos-field" style={{ margin: 0 }}>
+                <span>Mobile number (SMS bill)</span>
+                <input
+                  type="tel"
+                  placeholder="+91 98765 43210"
+                  value={customerPhone}
+                  onChange={e => setCustomerPhone(e.target.value)}
+                />
+              </label>
             </div>
 
             {/* Payment method selector */}
@@ -5241,31 +5247,6 @@ function MenuImageField({ value, onChange, presets }) {
         </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--p-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
-          <Sparkles size={12} color="var(--p-blue)" /> Quick Gallery:
-        </span>
-        {presets.map(p => (
-          <button
-            key={p.label}
-            type="button"
-            onClick={() => { setUploadError(''); onChange(p.url); }}
-            style={{
-              fontSize: 11,
-              padding: '3px 10px',
-              borderRadius: 6,
-              border: value === p.url ? '1px solid var(--p-blue)' : '1px solid var(--p-border)',
-              background: value === p.url ? 'rgba(59, 130, 246, 0.15)' : 'var(--p-card)',
-              color: value === p.url ? 'var(--p-blue)' : 'var(--p-text)',
-              fontWeight: value === p.url ? 700 : 500,
-              cursor: 'pointer',
-              transition: 'all 0.15s ease'
-            }}
-          >
-            {p.label}
-          </button>
-        ))}
-      </div>
     </div>
   );
 }
@@ -5280,13 +5261,15 @@ function ReportStockShortageModal({ menu, onClose, onSuccess }) {
   const [markSoldOut, setMarkSoldOut] = useState(true);
   const [error, setError] = useState('');
 
+  const quickIngredients = ['Cooking oil', 'Mozzarella cheese', 'Burger buns', 'Paneer', 'Tomatoes', 'Heavy cream', 'Basmati rice', 'Chicken'];
+  const selectedDish = itemType === 'DISH' ? menu.find(m => m.menuItemId === selectedMenuItemId) : null;
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (submitting) return;
     setSubmitting(true);
     setError('');
     try {
-      const selectedDish = itemType === 'DISH' ? menu.find(m => m.menuItemId === selectedMenuItemId) : null;
       const itemName = itemType === 'DISH'
         ? selectedDish?.name || 'Dish'
         : customItemName.trim();
@@ -5311,11 +5294,12 @@ function ReportStockShortageModal({ menu, onClose, onSuccess }) {
   return (
     <Modal title="Report Stock Shortage" onClose={() => { if (!submitting) onClose(); }}>
       <form onSubmit={handleSubmit} style={{ margin: 0, width: '100%', boxSizing: 'border-box' }}>
-        <div className="pos-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <p style={{ color: 'var(--p-muted)', fontSize: 11, margin: 0, lineHeight: 1.6 }}>
-            Report an unavailable dish or depleted ingredient to notify staff and update live menus.
-          </p>
-          {error && <div className="pos-error">{error}</div>}
+        <div className="pos-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 15 }}>
+          <div className="pos-info-box" style={{ margin: 0 }}>
+            <AlertCircle size={15} />
+            <span>Alert kitchen &amp; management about depleted supplies or unavailable dishes in real time.</span>
+          </div>
+          {error && <div className="pos-error" style={{ margin: 0 }}>{error}</div>}
 
           <div className="pos-field">
             <span>Item type</span>
@@ -5326,7 +5310,7 @@ function ReportStockShortageModal({ menu, onClose, onSuccess }) {
                 onClick={() => setItemType('DISH')}
                 style={{ flex: 1 }}
               >
-                Menu dish
+                <UtensilsCrossed size={13} /> Menu dish
               </button>
               <button
                 type="button"
@@ -5334,13 +5318,13 @@ function ReportStockShortageModal({ menu, onClose, onSuccess }) {
                 onClick={() => setItemType('INGREDIENT')}
                 style={{ flex: 1 }}
               >
-                Raw ingredient / Supply
+                <Package size={13} /> Raw ingredient / Supply
               </button>
             </div>
           </div>
 
           {itemType === 'DISH' ? (
-            <div className="pos-field">
+            <div className="pos-field" style={{ gap: 8 }}>
               <span>Select menu dish *</span>
               <select
                 className="pos-select"
@@ -5355,9 +5339,29 @@ function ReportStockShortageModal({ menu, onClose, onSuccess }) {
                   </option>
                 ))}
               </select>
+              {selectedDish && (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '8px 10px',
+                  borderRadius: 8,
+                  border: '1px solid var(--p-border)',
+                  background: 'var(--p-elevated)'
+                }}>
+                  <FoodImage item={selectedDish} style={{ width: 34, height: 34, borderRadius: 6, objectFit: 'cover' }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <b style={{ display: 'block', fontSize: 11, color: 'var(--p-text)' }}>{selectedDish.name}</b>
+                    <small style={{ fontSize: 9, color: 'var(--p-muted)' }}>{selectedDish.categoryName || 'General'}</small>
+                  </div>
+                  <Badge status={selectedDish.availability ? 'AVAILABLE' : 'UNAVAILABLE'}>
+                    {selectedDish.availability ? 'Available' : 'Sold out'}
+                  </Badge>
+                </div>
+              )}
             </div>
           ) : (
-            <div className="pos-field">
+            <div className="pos-field" style={{ gap: 8 }}>
               <span>Ingredient / Supply name *</span>
               <input
                 className="pos-input"
@@ -5366,42 +5370,96 @@ function ReportStockShortageModal({ menu, onClose, onSuccess }) {
                 placeholder="e.g. Cooking oil, Mozzarella cheese, Burger buns, Paneer"
                 required
               />
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 2 }}>
+                {quickIngredients.map(ing => {
+                  const active = customItemName.trim().toLowerCase() === ing.toLowerCase();
+                  return (
+                    <button
+                      key={ing}
+                      type="button"
+                      onClick={() => setCustomItemName(ing)}
+                      style={{
+                        fontSize: 10,
+                        fontWeight: active ? 700 : 500,
+                        padding: '4px 9px',
+                        borderRadius: 999,
+                        border: active ? '1px solid var(--p-blue)' : '1px solid var(--p-border)',
+                        background: active ? 'var(--p-blue-soft)' : 'var(--p-card)',
+                        color: active ? 'var(--p-blue)' : 'var(--p-muted)',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      + {ing}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
 
-          <div className="pos-form-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12, width: '100%', boxSizing: 'border-box' }}>
-            <div className="pos-field" style={{ minWidth: 0, width: '100%', boxSizing: 'border-box' }}>
-              <span>Shortage status</span>
-              <select
-                className="pos-select"
-                style={{ width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}
-                value={shortageReason}
-                onChange={e => setShortageReason(e.target.value)}
-              >
-                <option value="Out of stock">Out of stock (0 left)</option>
-                <option value="Running low">Running low (few left)</option>
-                <option value="Spoiled or damaged">Spoiled / Damaged</option>
-                <option value="Supplier delivery delayed">Delivery delayed</option>
-              </select>
-            </div>
+          <div className="pos-field">
+            <span>Shortage status</span>
+            <select
+              className="pos-select"
+              style={{ width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}
+              value={shortageReason}
+              onChange={e => setShortageReason(e.target.value)}
+            >
+              <option value="Out of stock">Out of stock (0 left)</option>
+              <option value="Running low">Running low (few left)</option>
+              <option value="Spoiled or damaged">Spoiled / Damaged</option>
+              <option value="Supplier delivery delayed">Delivery delayed</option>
+            </select>
+          </div>
 
-            <div className="pos-field" style={{ minWidth: 0, width: '100%', boxSizing: 'border-box' }}>
-              <span>Urgency level</span>
-              <select
-                className="pos-select"
-                style={{ width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}
-                value={urgency}
-                onChange={e => setUrgency(e.target.value)}
-              >
-                <option value="HIGH">High (Immediate)</option>
-                <option value="MEDIUM">Medium (Next shift)</option>
-                <option value="LOW">Low (Reorder)</option>
-              </select>
+          <div className="pos-field">
+            <span>Urgency level</span>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
+              {[
+                { id: 'HIGH', title: 'High', sub: 'Immediate', color: '#dc2626', bg: 'rgba(220, 38, 38, 0.1)', border: 'rgba(220, 38, 38, 0.4)' },
+                { id: 'MEDIUM', title: 'Medium', sub: 'Next shift', color: '#d97706', bg: 'rgba(217, 119, 6, 0.1)', border: 'rgba(217, 119, 6, 0.4)' },
+                { id: 'LOW', title: 'Low', sub: 'Reorder', color: '#2563eb', bg: 'rgba(37, 99, 235, 0.1)', border: 'rgba(37, 99, 235, 0.4)' },
+              ].map(opt => {
+                const active = urgency === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setUrgency(opt.id)}
+                    style={{
+                      padding: '8px 10px',
+                      borderRadius: 8,
+                      border: active ? `1.5px solid ${opt.border}` : '1px solid var(--p-border)',
+                      background: active ? opt.bg : 'var(--p-card)',
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <strong style={{ display: 'block', fontSize: 11, color: active ? opt.color : 'var(--p-text)' }}>
+                      {opt.title}
+                    </strong>
+                    <small style={{ fontSize: 9, color: 'var(--p-muted)' }}>{opt.sub}</small>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
           {itemType === 'DISH' && (
-            <label style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 11, cursor: 'pointer', lineHeight: 1.5, userSelect: 'none', marginTop: 2 }}>
+            <label style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 9,
+              fontSize: 11,
+              cursor: 'pointer',
+              lineHeight: 1.5,
+              userSelect: 'none',
+              padding: '10px 12px',
+              borderRadius: 8,
+              border: '1px solid var(--p-border)',
+              background: 'var(--p-elevated)'
+            }}>
               <input
                 type="checkbox"
                 style={{ width: 15, height: 15, accentColor: 'var(--p-blue)', cursor: 'pointer', margin: 0, flexShrink: 0 }}
@@ -5461,8 +5519,8 @@ function StaffPasswordModal({ user, isSelf, currentUser, onClose, onSuccess }) {
     e.preventDefault();
     setError('');
 
-    if (newPassword.length < 8 || !/[a-zA-Z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
-      setError('Password restriction failed: Password must be at least 8 characters long and contain both letters and numbers.');
+    if (newPassword.length < 8) {
+      setError('Password must be at least 8 characters long.');
       return;
     }
     if (newPassword !== confirmPassword) {

@@ -45,7 +45,10 @@ function RoleRoute({ allowedRoles, children }) {
     return <Navigate to={`/pos/login?redirect=${encodeURIComponent(location.pathname)}`} replace />;
   }
 
-  if (role === 'SUPER_ADMIN') return children;
+  if (role === 'SUPER_ADMIN') {
+    if (location.pathname.startsWith('/pos')) return <Navigate to="/admin" replace />;
+    return children;
+  }
 
   if (currentUser?.status === 'INACTIVE' || currentUser?.status === 'DISABLED') {
     return (
